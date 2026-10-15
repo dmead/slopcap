@@ -1,0 +1,272 @@
+# SlopCap — plan
+
+A planetary / lunar / solar capture program for Linux, written from scratch: fast lossless video capture from
+astronomy cameras, a live preview that keeps up at full frame rate, the analysis tools that matter at the telescope
+(focus, drift, target tracking), and a REST API so the whole thing can be scripted or driven by an assistant.
+
+Status: plan only (2026-10-15). Nothing built yet.
+
+---
+
+## 1. Goals
+
+1. **Never drop a frame.** Record at whatever rate the camera and USB deliver, sustained for long captures.
+2. **A preview that doesn't hold capture back.** Debayered, stretched preview at ≥ 30 fps even at full frame, without
+   stealing CPU from capture.
+3. **The workflow tools built in, not bolted on:** focus sweep, drift / polar-alignment measurement, a guide overlay
+   showing where the target should go, ROI tracking that follows the planet, capture sequences for WinJUPOS.
+4. **API-first.** Everything the GUI can do, the REST API can do, with an event stream. The GUI is one client.
+5. **Correct, interoperable files:** SER that AutoStakkert!, PSS, SER Player and WinJUPOS read, with per-capture
+   metadata.
+
+## 2. Non-goals (for now)
+
+- Deep-sky / long-exposure imaging, plate solving, guiding (PHD2, Ekos and NINA cover these).
+- Windows/macOS. Linux x86-64 first; Raspberry Pi (aarch64) second. Nothing is designed to block a port later.
+- ASCOM. Device control is INDI only.
+- Every camera brand on day one. Two SDKs first, ZWO and QHY (we have both to test with), behind one interface
+  that later brands plug into.
+
+## 3. First target rig
+
+| Item | Detail |
+|---|---|
+| Camera | ZWO ASI585MC: 3840×2160, 2.9 µm, colour (RGGB), USB3. Measured: 46.9 fps full frame RAW8, ~168 fps at 1040×560 |
+| Focuser | Gemini EAF via INDI (`indi_myfocuserpro2_focus`, localhost:7624) |
+| Mount | LX200 on a wedge, via INDI (`indi_lx200…`), for guide pulses / axis moves |
+| Scope | 3048 mm + 2.5× Barlow → 7620 mm, 0.0785″/px |
+| Host | Intel i5-1135G7 (4C/8T, AVX2 + AVX-512BW), Linux, X11/XWayland |
+
+These numbers are the performance bar: SlopCap must match the SDK's own ceiling (46.9 / 168 fps) with zero drops.
+
+## 4. Stack
+
+| Concern | Choice | Why |
+|---|---|---|
+| Language | **C++20** | INDI's client library and the camera SDKs are C/C++; Qt; mature tooling |
+| Build | CMake + Ninja, presets for debug / release / asan / tsan | |
+| GUI, threads, networking | **Qt 6** (Widgets for panels, `QOpenGLWidget` for the preview) | one framework; signals across threads |
+| REST API | `QHttpServer` (Qt ≥ 6.4) + WebSocket or SSE for events | no extra dependency |
+| Devices | `libindiclient` (INDI's C++ client library) | first-class INDI |
+| Camera | ZWO ASI SDK (`libASICamera2`) and QHY SDK (`libqhyccd`) behind an `ICamera` interface | two SDKs from the start keep the interface honest |
+| SIMD | **Google Highway**: runtime dispatch AVX-512 / AVX2 / NEON | one binary, fast everywhere |
+| Preview | OpenGL shaders: debayer + stretch + overlay on the GPU | takes preview load off the CPU |
+| Tests | Catch2; ASan/UBSan and TSan builds in CI | stands in for Rust's guarantees |
+| Logging | spdlog | |
+| Config | TOML (toml++) for settings and profiles | human-editable |
+
+**C++ only, no Python.** No Python at runtime, in the build, in tests or for prototyping: analysis is written
+directly as fast C++ (Highway SIMD + threads), and test fixtures and benchmarks are C++ tools too.
+
+Numeric / astronomy libraries (all permissive, so SlopCap's own licence stays open):
+
+| Need | Library |
+|---|---|
+| Linear algebra, least-squares fits (focus parabolas, drift lines) | Eigen (header-only) |
+| SIMD kernels | Google Highway |
+| FFT (registration, seeing metrics) | pocketfft (header-only) |
+| Nonlinear fits, if Eigen isn't enough | Ceres Solver |
+| FITS files | CFITSIO |
+| Time scales, precession, ephemerides | ERFA + Astronomy Engine |
+| Units in the type system (µm, steps, arcsec) | mp-units |
+
+Avoided for licensing: FFTW and GSL (GPL). OpenCV only if its registration/filtering is actually needed.
+
+Code style: modern C++ only (RAII, `std::span`, `std::unique_ptr`, no raw `new`/`delete`), `-Wall -Wextra -Werror`,
+clang-tidy.
+
+## 5. Architecture
+
+```
+            ┌──────────────┐  frames (zero-copy slots)  ┌──────────────┐
+ camera ──► │ CaptureThread│ ─────────────────────────► │  RingBuffer  │──┐
+ SDK        └──────────────┘                            │  (pooled,    │  │
+                                                       │  pre-alloc)  │  │
+                                                       └──────┬───────┘  │
+                     ┌────────────────────┬──────────────────┼──────────┘
+                     ▼                    ▼                  ▼
+              ┌─────────────┐     ┌──────────────┐    ┌──────────────┐
+              │ WriterThread│     │ AnalysisPool │    │ PreviewFeed  │
+              │ SER/FITS    │     │ histo, target│    │ latest frame │
+              │ O_DIRECT /  │     │ sharpness,   │    │ → GPU upload │
+              │ io_uring    │     │ drift (SIMD) │    │ (drops OK)   │
+              └─────────────┘     └──────┬───────┘    └──────┬───────┘
+                                         │ results            │
+                                         ▼                    ▼
+                     ┌───────────────────────────────────────────────┐
+                     │ Core (state, profiles, sequencer, devices)    │◄── INDI (focuser, mount, wheel)
+                     └───────────────┬───────────────────┬───────────┘
+                                     ▼                   ▼
+                               Qt GUI client       REST API + events
+```
+
+Rules:
+- **Capture is the priority.** The capture thread only moves frames into the ring; it never waits on preview, analysis
+  or disk. If the writer falls behind, the ring absorbs it and the status says so. Frames are only dropped at the
+  camera (counted from the SDK) or when the ring is full (counted and shown).
+- **Preview and analysis are allowed to skip frames.** They take the latest frame, not every frame.
+- **Writing every frame is mandatory** while recording. The writer works on big sequential writes and never touches
+  pixels.
+- **One state owner (Core).** The GUI and API send commands to Core and subscribe to its events; they never touch
+  devices directly.
+
+### Modules
+
+| Module | Responsibility |
+|---|---|
+| `camera/` | `ICamera` (open, controls with ranges, ROI, binning, bit depth, start/stop stream, get frame, dropped count). readout modes, gain landmarks (§5a). `AsiCamera`, `QhyCamera`, `SimCamera` (replays SER files, see §8) |
+| `pipeline/` | frame pool, lock-free SPSC ring, frame metadata (timestamp, sequence #, ROI offset) |
+| `io/` | SER writer (+ timestamp trailer), reader (for SimCamera and tools), metadata sidecar, WinJUPOS naming; FITS later |
+| `analysis/` | histogram/clipping, target detection (centroid, radius, bbox, edge contact), sharpness score, drift fit — SIMD via Highway |
+| `preview/` | GL upload, debayer shader (RGGB/BGGR/…), stretch (gamma / auto-levels / software gain), overlays |
+| `devices/` | INDI client: focuser (absolute/relative, backlash handling), mount (pulse, axis move, stop, park), filter wheel |
+| `core/` | state machine (idle / previewing / recording / paused), profiles & per-filter settings, sequencer, ROI tracking |
+| `api/` | REST + events (design carried over from our FireCapture Remote API, §7) |
+| `gui/` | Qt Widgets: camera panel, capture panel, histogram, focuser, devices, overlay drawing |
+| `tools/` | CLI: `slopcap-camprobe` (capabilities, exists: `tools/camprobe/`), `slopcap-bench` (fps/drops), `slopcap-serinfo`, `slopcap-focus` |
+
+## 5a. Readout modes and gain landmarks
+
+Drivers describe "modes" very differently, so `ICamera` normalises them into two things the UI and API can show the
+same way for every brand:
+
+- **Readout modes**: a list of named modes the camera supports, with the current one marked and the resolution if a
+  mode changes it. Switching may require stopping the stream (and, for QHY, re-initialising the camera).
+  - *QHY*: the camera's own named read modes (`GetQHYCCDNumberOfReadModes` / `GetQHYCCDReadModeName` /
+    `SetQHYCCDReadMode`), e.g. high-gain or extended-full-well modes, plus the "light performance mode" where present.
+  - *ZWO*: no named modes in the SDK; SlopCap presents the `ASI_HIGH_SPEED_MODE` switch as two modes (normal / high
+    speed). ZWO "camera modes" are trigger modes and are listed separately.
+  - *Later brands*: PlayerOne sensor modes, ToupTek conversion gain (LCG / HCG / HDR) map onto the same list.
+- **Gain landmarks**: named gain values with an optional matching offset and where the value came from.
+  - *ZWO*: `ASIGetGainOffset` (offset for highest dynamic range, offset at unity gain, gain + offset for lowest read
+    noise, which is where HCG is on) and `ASIGetLMHGainOffset` (preset low / medium / high gain). Unity gain itself
+    is estimated from `ElecPerADU` (gain unit = 0.1 dB). HCG switching is automatic inside the driver; there's no
+    control for it.
+  - *QHY*: `DefaultGain` / `DefaultOffset`, and, where the camera provides the curves (`QHYCCD_curveReadoutNoise`,
+    `QHYCCD_curveSystemGain`, `QHYCCD_curveFullWell`), landmarks computed from them: the HCG switch (the step in
+    read noise), unity gain (e-/ADU crosses 1), lowest read noise, and highest dynamic range (max full well / read
+    noise).
+  - UI: tick marks on the gain slider and one-click presets ("Unity", "HCG / lowest noise", "Max dynamic range"),
+    each setting the matching offset too.
+  - API: `GET /v1/camera/modes`, `PUT /v1/camera/mode {index}`, `GET /v1/camera/gain-landmarks`.
+
+`tools/camprobe/` (`slopcap-camprobe`, read-only, `--json` available) reports all of this per connected camera.
+Run it on every camera we have before writing `AsiCamera` / `QhyCamera`, and keep its output as test fixtures.
+
+## 6. Performance plan
+
+Budget at the Saturn ROI (1040×560 RAW8, 168 fps): 98 MB/s to disk, ~6 ms per frame across all CPU work.
+At full frame (3840×2160, 46.9 fps): ~390 MB/s, ~21 ms per frame.
+
+1. **Zero-copy capture:** the SDK writes straight into pooled ring slots; the writer writes those same slots out.
+   No `memcpy` on the hot path.
+2. **Disk:** large aligned sequential writes (`O_DIRECT` or `io_uring`), pre-allocated file (`fallocate`). Measure
+   sustained throughput on the target SSD at startup; refuse a recording whose rate can't be sustained, or warn.
+3. **Preview on the GPU:** upload the raw Bayer frame as a texture and debayer + stretch in a shader. CPU cost ≈ one
+   upload per displayed frame.
+4. **Analysis with SIMD + threads:** histogram, target detection and sharpness on every Nth frame (every frame for
+   focus/quality modes), vectorised with Highway, spread over the cores. Target: < 2 ms per 1040×560 frame.
+5. **Measure, don't guess:** `slopcap-bench` reports fps, camera drops, ring high-water mark and writer latency.
+   `perf` before any hand-optimisation; compile hot code with `-O3 -march=x86-64-v3` and let auto-vectorisation do
+   the easy part first.
+
+Acceptance: a 10-minute recording at 1040×560 and at full frame with **0 dropped frames**, preview ≥ 30 fps, on the
+host above.
+
+## 7. REST API (v1)
+
+Same shape as the FireCapture Remote API we built (that design is ours), served by SlopCap itself:
+
+- `GET /v1`, `GET /v1/status`, events at `/v1/events` (capture started/stopped, frame stats, device changes)
+- Camera: `GET/PUT /v1/camera`, `GET/PUT /v1/camera/controls`, `POST /v1/camera/roi/center`, `GET /v1/camera/frame`
+  (PNG) and `GET /v1/camera/frame/raw` (8/16-bit, for analysis clients)
+- Capture: `GET/PUT /v1/capture`, `POST /v1/capture/start|stop|pause|resume`, profiles, filters
+- Devices: `/v1/focuser`, `/v1/mount` (pulse, move, stop, park), `/v1/filterwheel`
+- Analysis: `GET /v1/target`, `POST /v1/focus/sweep`, `POST /v1/drift/measure` (returns RA/Dec drift in ″/min)
+- Overlay: `GET/POST/DELETE /v1/overlay` (planet / saturn / sun / moon / cross; edge arrows when off view)
+
+Loopback-only by default; optional token for LAN use.
+
+## 7a. Feature: per-channel (RGB) focus
+
+Other capture tools give one focus number for a colour camera. That hides **longitudinal chromatic aberration**:
+through a Barlow, ADC or imperfect optics, red, green and blue come to focus at different focuser positions, and a
+single blended score either picks one channel's best focus by accident or splits the difference without saying so.
+SlopCap scores each colour channel separately and shows all three.
+
+**How it's measured**
+- Split the raw Bayer frame into its colour planes before any debayering: R, B, and G (the two green sites
+  averaged). Each plane is a quarter-resolution image with no interpolation, so no channel's sharpness leaks into
+  another's.
+- Run the same focus metric on each plane: peak brightness / edge contrast for planets, the Moon and the Sun;
+  half-flux diameter for stars. Each channel is normalised to its own best value, since blue is usually dimmer and
+  noisier than green.
+- Score many frames per focuser position (median plus best quarter) so seeing doesn't pick the winner.
+- Fit a parabola (or a V for half-flux diameter) per channel; each vertex is that channel's best focus, with an
+  uncertainty from the fit.
+
+**What the user sees**
+- **Live, while focusing by hand:** three sharpness bars (R, G, B) with peak-hold markers, so you can watch one
+  channel peak while another is still improving.
+- **After a sweep:** three curves on one chart, each channel's best position, and the **spread** (largest minus
+  smallest) in steps and in µm when the step size is known.
+- **The spread against the depth of focus.** Critical focus zone ≈ ±2.44 λ N²; about ±0.84 mm at f/25 for green,
+  converted to steps once the focuser's µm per step is calibrated. If all three bests fall inside it, one focus
+  position is fine for all channels; if not, the user has to choose, and SlopCap says which channel it is giving up.
+- **Choose where to focus:**
+  - *Green*, which carries most of the luminance detail in an RGB image
+  - *Luminance-weighted*: about 0.30 R + 0.59 G + 0.11 B
+  - *Balanced*: the position that minimises the worst channel's defocus
+  - *Red* or *Blue*, when processing that channel (e.g. IR/R-pass on Mars, or a methane band)
+
+  The move to the chosen position goes through the normal backlash-aware approach.
+- Remembered per profile and filter as **focus offsets** (e.g. R +70, B −80 relative to G), so a later sweep or a
+  filter change can apply them. With a mono camera and a filter wheel, the same chart shows one curve per filter.
+
+**Related, but a different problem:** atmospheric dispersion shifts the colour channels sideways, not in focus. SlopCap
+reports per-channel centroid offsets as a separate readout (useful with an ADC); it isn't part of the focus curves.
+
+**API:** `POST /v1/focus/sweep` returns `{channels: {R: {best, err, curve[]}, G: …, B: …}, spread, recommended: {mode,
+position}}`. `GET /v1/focus/live` returns per-channel live scores. `PUT /v1/focus/target {mode}` picks the strategy.
+
+## 8. Testing without the sky
+
+- **SimCamera replays real SER recordings**, e.g. the Saturn captures in `~/firecapture/Sat/`, at the recorded rate
+  or as fast as possible, with optional synthetic drift, seeing jitter and defocus (including a different defocus per
+  colour channel, to test RGB focus against a known answer). Every pipeline, analysis and
+  overlay feature can be developed and regression-tested indoors.
+- Golden tests for the SER writer: byte-exact header, frame count, timestamps; files open in SER Player and PSS.
+- Analysis tests on stored frames: known centroid / radius / sharpness ordering.
+- CI: release + ASan/UBSan + TSan builds, unit tests, a SimCamera soak test (10 min at max rate, 0 drops).
+
+## 9. Milestones
+
+| # | Milestone | Done when |
+|---|---|---|
+| M0 | Skeleton | CMake project, CI with sanitizers, `ICamera` + `SimCamera` replaying a SER, `slopcap-serinfo` |
+| M1 | Capture core | `AsiCamera` + `QhyCamera`, ring buffer, SER writer; `slopcap-bench` hits the SDK's own ceiling (ASI585MC: 46.9 / 168 fps) with 0 drops for 10 min on both brands |
+| M2 | Preview | Qt window, GL debayer + stretch, histogram; ≥ 30 fps full frame while recording |
+| M3 | Controls & profiles | gain/exposure/ROI/all controls, profiles + per-filter settings, limits, WinJUPOS naming, metadata sidecar |
+| M4 | API | REST + events covering M1–M3; parity with the FireCapture Remote API's camera/capture endpoints |
+| M5 | Devices | INDI focuser (with backlash-aware moves), mount pulses/moves, filter wheel |
+| M6 | Workflow tools | target detection, guide overlay, focus sweep with per-channel RGB curves (§7a), drift measurement, ROI tracking during capture, sequences |
+| M7 | Polish & port | settings UI, crash-safe recording (recoverable SER), aarch64/NEON build for Raspberry Pi |
+
+M1 is the go/no-go: if the zero-drop capture core doesn't hold up, nothing else matters.
+
+## 10. Ground rules
+
+- **Clean room.** SlopCap is written from public sources only: camera SDK headers and docs, the SER format
+  specification, INDI documentation, and our own measurements. Nothing derived from FireCapture's code or from
+  disassembling it. (FireCapture's license forbids reverse engineering; keep this project clear of it.)
+- No vendor SDK binaries committed to the repo; fetch or point to the installed SDK at build time.
+- Every performance claim comes with a `slopcap-bench` number.
+
+## 11. Open questions
+
+1. GUI: Qt Widgets (planned) or QML?
+2. SlopCap's own license (GPL-3.0 like INDI/KStars, or MIT/Apache)? Check that the ZWO SDK's license allows
+   distributing builds that link it.
+3. ~~Which camera SDK comes after ZWO?~~ QHY, alongside ZWO from M1. After those: PlayerOne, ToupTek, SVBony?
+4. File formats beyond SER: FITS cubes? AVI is probably not worth it.
+5. Should the FireCapture skill and plugin be retired once SlopCap reaches M6, or kept as a fallback?
