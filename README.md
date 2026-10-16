@@ -3,7 +3,7 @@
 A planetary / lunar / solar capture program for Linux and Windows: zero-drop video capture from astronomy cameras,
 a live preview that keeps up, built-in focus / drift / guide-overlay tools, and a REST API. C++20, no Python.
 
-Status: **M0 (skeleton)**. See [PLAN.md](PLAN.md) for the design and milestones.
+Status: **M1 in progress**: capture pipeline done and benchmarked on the simulated camera; real ZWO / QHY backends next. See [PLAN.md](PLAN.md) for the design and milestones.
 
 ## What's here
 
@@ -12,6 +12,9 @@ Status: **M0 (skeleton)**. See [PLAN.md](PLAN.md) for the design and milestones.
 | `src/io/ser.*` | SER video reader / writer (timestamp trailer, truncated-file recovery, real-world quirks) |
 | `src/camera/camera.hpp` | `ICamera`: the interface every camera backend implements |
 | `src/camera/sim_camera.*` | `SimCamera`: replays a SER recording as a camera (real-time pacing, ROI, drop counting) |
+| `src/pipeline/frame_ring.*` | `FrameRing`: pre-allocated, page-aligned frame slots passed capture → writer lock-free |
+| `src/pipeline/capture_session.*` | `CaptureSession`: capture thread + SER writer thread; counts camera drops vs ring drops |
+| `tools/bench` | `slopcap-bench --sim FILE.ser …`: record through the full pipeline and report fps / drops / ring peak / MB/s |
 | `tools/serinfo` | `slopcap-serinfo FILE.ser…`: header, frames vs header, timestamps, real frame rate, longest gap |
 | `tools/camprobe` | `slopcap-camprobe [--json]`: what each connected ZWO / QHY camera reports (fixtures from real cameras inside) |
 | `tests/` | Catch2 unit tests |

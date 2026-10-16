@@ -24,6 +24,8 @@ add_library(slopcap_core STATIC
   src/io/ser.cpp
   src/camera/camera.cpp
   src/camera/sim_camera.cpp
+  src/pipeline/frame_ring.cpp
+  src/pipeline/capture_session.cpp
 )
 target_include_directories(slopcap_core PUBLIC src)
 target_link_libraries(slopcap_core PRIVATE slopcap_warnings)
@@ -33,6 +35,8 @@ target_link_libraries(slopcap_core PUBLIC Threads::Threads)
 # ---------------------------------------------------------------- tools
 add_executable(slopcap-serinfo tools/serinfo/main.cpp)
 target_link_libraries(slopcap-serinfo PRIVATE slopcap_core slopcap_warnings)
+add_executable(slopcap-bench tools/bench/main.cpp)
+target_link_libraries(slopcap-bench PRIVATE slopcap_core slopcap_warnings)
 
 if(SLOPCAP_BUILD_CAMPROBE)
   if(WIN32 AND NOT WIN_SDK_DLL_DIR)
@@ -47,7 +51,7 @@ if(SLOPCAP_BUILD_TESTS)
   find_package(Catch2 3 CONFIG QUIET)
   if(Catch2_FOUND)
     enable_testing()
-    add_executable(slopcap-tests tests/test_ser.cpp tests/test_sim_camera.cpp)
+    add_executable(slopcap-tests tests/test_ser.cpp tests/test_sim_camera.cpp tests/test_pipeline.cpp)
     target_link_libraries(slopcap-tests PRIVATE slopcap_core slopcap_warnings Catch2::Catch2WithMain)
     include(Catch)
     catch_discover_tests(slopcap-tests)

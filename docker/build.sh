@@ -59,6 +59,9 @@ fi
 
 presets=("$@")
 [ ${#presets[@]} -eq 0 ] && presets=(linux-debug)
+# ThreadSanitizer turns off address-space randomisation at startup via personality(2), which Docker's default seccomp
+# profile blocks. Relax seccomp for TSan runs only (a local, short-lived build container).
+for p in "${presets[@]}"; do [[ $p == *tsan* ]] && run+=(--security-opt seccomp=unconfined) && break; done
 script="set -e"
 for p in "${presets[@]}"; do
     script+="; echo '===== $p'; cmake --preset $p; cmake --build --preset $p"
