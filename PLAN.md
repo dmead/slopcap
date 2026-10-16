@@ -284,6 +284,30 @@ hung inside the QHY SDK and knocked the QHY533M off USB until it was replugged; 
 without trouble. Natively on Windows the QHY5III715C streamed cleanly (0 dropped) at 4.2 fps full-sensor, most likely
 because it's on a slower USB port; not a SlopCap issue, so not pursued.
 
+### Disk: the observatory machine's SSD is the full-frame bottleneck (measured 2026-10-16)
+
+M1 go/no-go runs, Windows native, ZWO at 1 ms exposure:
+
+| Run | Needs | Result |
+|---|---|---|
+| ASI585MC 1040x560, 10 min, buffered writer | 98 MB/s | 100,800 frames, **0 dropped** (writer lagged up to 197 frames) |
+| same, 3 min, direct writer | 98 MB/s | 30,235 frames, **0 dropped**, lag at most 37 frames, worst gap 7.3 ms (vs 16.8 ms) |
+| ASI585MC full frame, 3 min | ~380 MB/s | ~3,100 frames lost to a full ring, either writer |
+| QHY533M full sensor, 10 min | ~241 MB/s | ~2,400 frames lost to a full ring, either writer |
+
+The cameras and SlopCap delivered every frame. The disk, an unbranded "PCIe SSD" (firmware V0513A0), writes at
+full speed for about 40-50 s (~12-15 GB, its fast cache), then falls to ~150-190 MB/s. It reached 83 °C in the small
+chassis, so it's probably throttling as well. BitLocker is off; Defender real-time scanning is on with no
+exclusions. Planetary ROI captures (≤ ~150 MB/s) are fine. Full-frame or full-sensor captures longer than ~40 s
+need a better SSD (TLC with DRAM, and a heatsink).
+
+Consequences for SlopCap:
+- The startup disk check (§6) must write past the drive's fast cache (tens of GB) or watch for the cliff; a short
+  test reports the misleading fast-cache speed.
+- Better: measure the write rate live and, when it falls below the incoming rate, show "ring full in N s" before
+  frames are lost.
+- The direct writer is the default for high data rates (steadier at ROI sizes, up to 2.1 GB/s on the laptop).
+
 ## 9. Milestones
 
 | # | Milestone | Done when |
