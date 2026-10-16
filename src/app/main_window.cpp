@@ -30,7 +30,9 @@
 #include <QSlider>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QShortcut>
 #include <QStandardPaths>
+#include <QStorageInfo>
 #include <QStatusBar>
 #include <QVBoxLayout>
 
@@ -373,6 +375,9 @@ QWidget* MainWindow::buildCaptureTab() {
         if (!d.isEmpty()) outDir_->setText(d);
     });
     connect(record_, &QPushButton::clicked, this, &MainWindow::toggleRecording);
+    record_->setToolTip("Ctrl+R");
+    auto* rec = new QShortcut(QKeySequence("Ctrl+R"), this);
+    connect(rec, &QShortcut::activated, this, &MainWindow::toggleRecording);
     return side;
 }
 
@@ -452,6 +457,7 @@ void MainWindow::populateCameraControls() {
         box->setSingleStep(step);
         box->setDecimals(step < 1 ? 3 : 0);
         box->setKeyboardTracking(false);   // apply on Enter / arrows, not every keystroke
+        if (c.name == "Exposure") box->setSuffix(" µs");   // ZWO and QHY both take exposure in microseconds
         if (auto v = cam_->control(c.name)) box->setValue(*v);
         const std::string name = c.name;
         connect(box, &QDoubleSpinBox::valueChanged, this, [this, name](double v) { setControl(name, v); });
@@ -610,10 +616,16 @@ void MainWindow::updateStats() {
     }
     if (!s.error.empty()) statusLeft_->setText("Error: " + QString::fromStdString(s.error));
     else if (!s.notice.empty()) statusLeft_->setText(QString::fromStdString(s.notice));
-    else if (recording_)
-        statusLeft_->setText(QString::fromStdString(std::format("● REC {:.1f} s · {} frames · {:.0f} MB/s · buffer {}/{}", s.seconds,
-                                                                s.written, s.writeMBps, s.ringQueued, s.ringCapacity)));
-    else statusLeft_->setText("Live");
+    else if (recording_) {
+        const QStorageInfo disk(outDir_->text());
+        const double freeGB = static_cast<double>(disk.bytesAvailable()) / 1e9;
+        const double minutes = s.writeMBps > 1 ? freeGB * 1000 / s.writeMBps / 60 : 0;
+        statusLeft_->setText(QString::fromStdString(std::format("● REC {:.1f} s · {} frames · {:.0f} MB/s · buffer {}/{} · disk {:.0f} GB ({:.0f} min)",
+                                                                s.seconds, s.written, s.writeMBps, s.ringQueued, s.ringCapacity, freeGB, minutes)));
+    } else {
+        const QStorageInfo disk(QDir(outDir_->text()).exists() ? outDir_->text() : QDir::homePath());
+        statusLeft_->setText(QString("Live · %1 GB free for recordings").arg(static_cast<double>(disk.bytesAvailable()) / 1e9, 0, 'f', 0));
+    }
     const uint64_t dropped = s.cameraDropped + s.ringDropped;
     statusRight_->setText(QString::fromStdString(std::format("camera {:.1f} fps · display {:.0f} fps{}", s.captureFps, preview_->displayFps(),
                                                              dropped ? std::format(" · dropped {} cam / {} disk", s.cameraDropped, s.ringDropped) : "")));
