@@ -189,3 +189,37 @@ TEST_CASE("CaptureSession reports a bad output path before starting the camera")
     CHECK_THROWS(session.start());
     CHECK_FALSE(cam.streaming());
 }
+
+TEST_CASE("CaptureSession with no output is a live view: frames reach the preview tap, nothing is written") {
+    TempDir dir;
+    SimCamera cam(makeSer(dir, 64, 32, 200, 59'500), {SimPace::AsFastAsPossible});
+    LatestFrame tap;
+    CaptureOptions opt;
+    opt.ringBytes = 16 * 4096;
+    opt.preview = &tap;
+    CaptureSession session(cam, opt);
+    session.start();
+
+    // Take frames while it runs; each one must be a whole, consistent source frame.
+    uint64_t seen = 0, lastSeq = 0;
+    while (session.stats().running || seen == 0) {
+        if (const auto* f = tap.take()) {
+            REQUIRE(f->info.bytes == 64u * 32u);
+            CHECK(f->pixels[0] == static_cast<std::byte>(f->info.sequence & 0xff));
+            CHECK(f->pixels[100] == static_cast<std::byte>((100 + f->info.sequence) & 0xff));
+            if (seen) CHECK(f->info.sequence > lastSeq);
+            lastSeq = f->info.sequence;
+            ++seen;
+        }
+        if (!session.stats().running) break;
+        std::this_thread::sleep_for(200us);
+    }
+    REQUIRE(session.wait(10s));
+    const auto s = session.stats();
+    CHECK(s.error.empty());
+    CHECK(s.delivered == 200);
+    CHECK(s.written == 0);
+    CHECK(s.ringDropped == 0);
+    CHECK(seen >= 1);
+    CHECK(std::distance(std::filesystem::directory_iterator(dir.path()), {}) == 1);   // only the source file
+}

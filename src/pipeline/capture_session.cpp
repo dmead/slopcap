@@ -63,7 +63,9 @@ void CaptureSession::start() {
             h.observer = opt_.observer;
             h.instrument = info.model;
             h.telescope = opt_.telescope;
-            if (opt_.directIO) {
+            if (opt_.output.empty()) {
+                // live view only: frames are released unwritten
+            } else if (opt_.directIO) {
                 auto d = std::make_unique<ser::DirectWriter>(opt_.output, h, opt_.direct);
                 direct_.store(d.get());
                 w = std::move(d);
@@ -83,6 +85,10 @@ void CaptureSession::start() {
                     continue;
                 }
                 auto& slot = ring_->slot(*s);
+                if (!w) {
+                    ring_->release(*s);
+                    continue;
+                }
                 const auto t0 = std::chrono::steady_clock::now();
                 w->writeFrame(slot.pixels.first(slot.info.bytes), ser::toTicks(slot.info.timestamp));
                 writeLatency_.record(std::chrono::steady_clock::now() - t0);
@@ -90,7 +96,7 @@ void CaptureSession::start() {
                 written_.fetch_add(1, std::memory_order_relaxed);
                 ring_->release(*s);
             }
-            w->finish();
+            if (w) w->finish();
             if (auto* d = direct_.load()) {   // keep the direct writer's numbers after it's gone
                 std::lock_guard lock(directMutex_);
                 finalChunkP99_ = d->chunkWriteLatency().percentileUs(0.99);
@@ -124,28 +130,31 @@ void CaptureSession::start() {
 
 void CaptureSession::captureLoop() {
     std::optional<uint32_t> held;   // a slot we own but haven't filled (kept across timeouts: only the writer frees)
+    const bool recording = !opt_.output.empty();   // live view reads straight into scratch: no ring, no drops
     try {
         while (!stopRequested_.load(std::memory_order_relaxed)) {
             if (opt_.frameLimit && delivered_.load(std::memory_order_relaxed) >= *opt_.frameLimit) break;
             if (opt_.duration && std::chrono::steady_clock::now() - started_ >= *opt_.duration) break;
 
-            if (!held) held = ring_->acquire();
+            if (recording && !held) held = ring_->acquire();
             FrameInfo fi;
             ReadResult r;
             if (held) {
                 auto& slot = ring_->slot(*held);
                 r = cam_.readFrame(slot.pixels, slot.info, std::chrono::milliseconds(250));
                 if (r == ReadResult::Ok) {
+                    if (opt_.preview && opt_.preview->wanted()) opt_.preview->publish(slot.pixels.first(slot.info.bytes), slot.info);
                     ring_->publish(*held);
                     held.reset();
                     delivered_.fetch_add(1, std::memory_order_relaxed);
                 }
             } else {
-                // Ring full: keep the camera flowing, count the loss.
+                // Ring full (or live view): keep the camera flowing, count the loss.
                 r = cam_.readFrame(scratch_, fi, std::chrono::milliseconds(250));
                 if (r == ReadResult::Ok) {
+                    if (opt_.preview && opt_.preview->wanted()) opt_.preview->publish(std::span(scratch_).first(fi.bytes), fi);
                     delivered_.fetch_add(1, std::memory_order_relaxed);
-                    ringDropped_.fetch_add(1, std::memory_order_relaxed);
+                    if (recording) ringDropped_.fetch_add(1, std::memory_order_relaxed);
                 }
             }
             cameraDropped_.store(cam_.droppedFrames(), std::memory_order_relaxed);

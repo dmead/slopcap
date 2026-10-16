@@ -7,6 +7,7 @@
 #include "io/ser_direct.hpp"
 #include "pipeline/frame_ring.hpp"
 #include "pipeline/latency.hpp"
+#include "preview/latest_frame.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -22,13 +23,14 @@
 namespace slopcap {
 
 struct CaptureOptions {
-    std::filesystem::path output;                     ///< SER file to write
+    std::filesystem::path output;                     ///< SER file to write; empty = live view only, nothing recorded
     std::optional<std::chrono::milliseconds> duration;  ///< stop after this long
     std::optional<uint64_t> frameLimit;                 ///< stop after this many frames
     std::size_t ringBytes = std::size_t{1} << 30;       ///< memory for the ring (default 1 GiB)
     std::string observer, telescope;                    ///< SER header text
     bool directIO = false;                              ///< unbuffered chunked writer (ser::DirectWriter)
     ser::DirectWriterOptions direct;                    ///< its chunk size, in-flight count, preallocation
+    LatestFrame* preview = nullptr;                     ///< if set, the capture thread copies a frame in whenever it asks
 };
 
 struct CaptureStats {
