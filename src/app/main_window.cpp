@@ -1,5 +1,6 @@
 #include "app/main_window.hpp"
 
+#include "analysis/identify.hpp"
 #include "app/collimation_panel.hpp"
 #include "app/focus_controller.hpp"
 #include "app/focus_views.hpp"
@@ -186,6 +187,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             rawHist_->setData(preview::rawHistogram(f.pixels, f.info.roi.width, f.info.roi.height, f.info.bitDepth,
                                                     cam_->info().bayer, cam_->info().adcBits));
         }
+        // the automatic target: once a second, and not while recording (the file keeps the name it started with)
+        if (isAutoTarget() && !recording_ && (!identifyClock_.isValid() || identifyClock_.elapsed() >= 1000)) {
+            identifyClock_.start();
+            runAutoTarget(f);
+        }
     });
     connect(preview_, &preview::PreviewWidget::centreRequested, this, &MainWindow::centreRoiOn);
     connect(focus_, &FocusController::liveUpdated, this, &MainWindow::updateTargetInfo);
@@ -222,7 +228,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     resize(1440, 900);
     if (st.contains("window/geometry")) restoreGeometry(st.value("window/geometry").toByteArray());
     outDir_ = st.value("record/dir", QStandardPaths::writableLocation(QStandardPaths::MoviesLocation) + "/SlopCap").toString();
-    target_->setCurrentText(st.value("record/target", "Saturn").toString());
+    target_->setCurrentText(st.value("record/target", "Auto").toString());
     filter_->setCurrentText(st.value("record/filter", "").toString());
     limit_->setCurrentIndex(std::max(0, limit_->findData(st.value("record/limit", 0).toInt())));
     mountSection_->setPulseMs(st.value("mount/pulseMs", 300).toInt());
@@ -234,10 +240,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     s.approachOutward = st.value("focuser/outward", true).toBool();
     s.focalRatio = st.value("optics/focalRatio", 0.0).toDouble();
     s.micronsPerStep = st.value("optics/micronsPerStep", 0.0).toDouble();
+    s.focalLengthMm = st.value("optics/focalLengthMm", 0.0).toDouble();
+    if (st.contains("site/latitude") && st.contains("site/longitude"))
+        s.latitude = st.value("site/latitude").toDouble(), s.longitude = st.value("site/longitude").toDouble();
     applySettings(s);
     focus_->setOutputDir(outDir_);
     if (s.focuserAutoConnect) focus_->connectFocuser(s.indiServer);
     populateCameraUi();
+    updateAutoTarget();
     setMode(Capture);
 }
 
@@ -307,9 +317,16 @@ QWidget* MainWindow::buildHeader() {
         row->addWidget(c);
         h->addLayout(row);
     };
-    combo("Target", target_, {"Saturn", "Jupiter", "Mars", "Moon", "Sun", "Venus", "Uranus", "Neptune", "Star"});
+    combo("Target", target_, {"Auto", "Saturn", "Jupiter", "Mars", "Moon", "Sun", "Venus", "Uranus", "Neptune", "Star"});
     combo("Filter", filter_, {"", "L", "R", "G", "B", "IR", "CH4", "UV"});
-    target_->setToolTip("Used in file names (WinJUPOS style) and sidecars");
+    target_->setToolTip("Used in file names (WinJUPOS style) and sidecars. Auto: the Moon, Mars or an outer planet, "
+                        "identified from the image and the mount");
+    connect(target_, &QComboBox::currentTextChanged, this, [this] {
+        autoName_.clear();
+        pendingAutoName_.clear();
+        identifyClock_.invalidate();
+        updateAutoTarget();
+    });
     filter_->setToolTip("Optional: goes into the file name, e.g. 2026-10-17-0315_4-L-Saturn.ser");
     for (auto* c : {target_, filter_}) connect(c, &QComboBox::currentTextChanged, this, &MainWindow::updateStats);
 
@@ -551,6 +568,9 @@ QWidget* MainWindow::buildCaptureRight() {
     grid->addWidget(theme::stat("Size", tDisc_), 1, 0);
     grid->addWidget(theme::stat("Dispersion R−B", tDisp_), 1, 1);
     v->addLayout(grid);
+    tAuto_ = theme::label("", "muted");   // the automatic target's answer and why
+    tAuto_->setWordWrap(true);
+    v->addWidget(tAuto_);
     auto* focuser = new FocuserSection(*focus_);
     connect(focuser, &FocuserSection::openFocusMode, this, [this] { setMode(Focus); });
     connect(focuser, &FocuserSection::openSettings, this, [this] {
@@ -757,6 +777,9 @@ void MainWindow::disconnectCamera() {
     saveSettings();
     cam_.reset();
     rawHist_->clear();
+    autoName_.clear();
+    autoDetail_.clear();
+    updateAutoTarget();
     populateCameraUi();
 }
 
@@ -945,6 +968,68 @@ void MainWindow::updateRoiInfo() {
     sFrame_->setText(QString("%1×%2 · %3-bit").arg(r.width).arg(r.height).arg(cam_->bitDepth()));
 }
 
+// ================================================================ automatic target
+
+bool MainWindow::isAutoTarget() const { return target_->currentText().trimmed().compare("Auto", Qt::CaseInsensitive) == 0; }
+
+QString MainWindow::targetName() const {
+    if (!isAutoTarget()) return target_->currentText().trimmed();
+    return autoName_.isEmpty() ? "Target" : autoName_;
+}
+
+void MainWindow::runAutoTarget(const LatestFrame::Frame& f) {
+    analysis::IdentifyInput in;
+    in.image = analysis::measureTarget(f.pixels, f.info.roi.width, f.info.roi.height, f.info.bitDepth, cam_->info().bayer);
+    in.jdUtc = analysis::julianDate(f.info.timestamp);
+    if (settings_.focalLengthMm > 0 && cam_->info().pixelUm > 0)
+        in.arcsecPerPixel = 206.265 * cam_->info().pixelUm * std::max(1, f.info.roi.bin) / settings_.focalLengthMm;
+    if (mount_->ready()) {
+        in.pointing = std::array<double, 2>{mount_->ra(), mount_->dec()};
+        if (auto s = mount_->site()) in.site = analysis::Site{(*s)[0], (*s)[1]};
+    }
+    if (!in.site && settings_.latitude && settings_.longitude) in.site = analysis::Site{*settings_.latitude, *settings_.longitude};
+    const auto id = analysis::identifyTarget(in);
+
+    // The name: the body when it's decided, "Target" when it isn't, nothing without a target.
+    const QString name = id.body ? QString(analysis::bodyName(*id.body)) : id.candidates.empty() || !in.image.found ? QString() : "Target";
+    QString detail = id.body ? QString::fromStdString(id.summary) : QString::fromStdString(analysis::candidatesText(id.candidates));
+    if (!id.body && in.image.found) {
+        QStringList need;
+        if (!in.arcsecPerPixel) need << "the focal length (Settings)";
+        if (!in.pointing) need << "the mount";
+        if (!need.isEmpty()) detail += " — " + need.join(" or ") + " would help";
+    }
+    QStringList notes;
+    for (const auto& n : id.notes) notes << QString::fromStdString(n);
+    autoNotes_ = notes.join("\n");
+
+    // A new answer must hold for two runs in a row before it replaces the old one (seeing, a passing cloud).
+    if (name == autoName_ || autoName_.isEmpty()) {
+        autoName_ = name;
+        autoDetail_ = detail;
+        pendingAutoName_.clear();
+    } else if (name == pendingAutoName_) {
+        autoName_ = name;
+        autoDetail_ = detail;
+        pendingAutoName_.clear();
+    } else {
+        pendingAutoName_ = name;
+    }
+    updateAutoTarget();
+}
+
+void MainWindow::updateAutoTarget() {
+    if (!tAuto_) return;
+    tAuto_->setVisible(isAutoTarget());
+    if (!isAutoTarget()) return;
+    if (!cam_) tAuto_->setText("Auto: connect a camera");
+    else if (autoName_.isEmpty()) tAuto_->setText("Auto: no target yet");
+    else if (autoName_ == "Target") tAuto_->setText("Auto: undecided · " + autoDetail_.toHtmlEscaped());
+    else tAuto_->setText(QString("Auto: <b>%1</b>%2").arg(autoName_, autoDetail_.isEmpty() ? "" : " · " + autoDetail_.toHtmlEscaped()));
+    tAuto_->setToolTip(autoNotes_);
+    updateStats();
+}
+
 void MainWindow::updateTargetInfo() {
     const auto& l = focus_->live();
     const auto& s = l.last;
@@ -972,7 +1057,7 @@ void MainWindow::updateTargetInfo() {
     } else {
         const QRectF box(s.targetX0, s.targetY0, s.targetX1 - s.targetX0, s.targetY1 - s.targetY0);
         const QString text = QString("%1 · %2, %3 · %4 × %5 px")
-                                 .arg(target_->currentText())
+                                 .arg(targetName())
                                  .arg(cx, 0, 'f', 0)
                                  .arg(cy, 0, 'f', 0)
                                  .arg(s.targetX1 - s.targetX0)
@@ -1022,6 +1107,13 @@ void MainWindow::saveSettings() const {
     st.setValue("mount/pulseMs", mountSection_->pulseMs());
     st.setValue("optics/focalRatio", settings_.focalRatio);
     st.setValue("optics/micronsPerStep", settings_.micronsPerStep);
+    st.setValue("optics/focalLengthMm", settings_.focalLengthMm);
+    if (settings_.latitude && settings_.longitude) {
+        st.setValue("site/latitude", *settings_.latitude);
+        st.setValue("site/longitude", *settings_.longitude);
+    } else {
+        st.remove("site");
+    }
     st.setValue("focus/metric", analysis::metricName(focus_->liveMetric()));
     if (!cam_) return;
     st.beginGroup("cameras/" + cameraKey());
@@ -1069,7 +1161,7 @@ void MainWindow::setOutputDir(const QString& dir) {
 QString MainWindow::fileStem(const QDateTime& utc) const {
     QString stem = winjupos(utc);
     if (!filter_->currentText().trimmed().isEmpty()) stem += "-" + sanitize(filter_->currentText().trimmed());
-    return stem + "-" + sanitize(target_->currentText().trimmed().isEmpty() ? "capture" : target_->currentText().trimmed());
+    return stem + "-" + sanitize(targetName().isEmpty() ? "capture" : targetName());
 }
 
 void MainWindow::startSession(bool record) {
@@ -1148,7 +1240,8 @@ void MainWindow::writeSidecar(const QString& serPath, const CaptureStats& s, con
     const QDateTime end = recStartUtc_.addMSecs(static_cast<qint64>(s.seconds * 1000));
     o << "SlopCap capture\n";
     o << "File=" << QFileInfo(serPath).fileName() << "\n";
-    o << "Target=" << target_->currentText() << "\n";
+    o << "Target=" << targetName() << "\n";
+    if (isAutoTarget()) o << "TargetAuto=" << autoDetail_ << "\n";
     if (!filter_->currentText().isEmpty()) o << "Filter=" << filter_->currentText() << "\n";
     o << "Camera=" << QString::fromStdString(info.vendor + " " + info.model) << "\n";
     o << "Serial=" << QString::fromStdString(info.serial) << "\n";

@@ -53,12 +53,43 @@ SettingsDialog::SettingsDialog(const Settings& s, QWidget* parent) : QDialog(par
     umStep_->setSpecialValueText("unknown");
     umStep_->setValue(s.micronsPerStep);
     umStep_->setSuffix(" µm/step");
+    focalLength_ = new QDoubleSpinBox;
+    focalLength_->setRange(0, 50000);
+    focalLength_->setDecimals(0);
+    focalLength_->setSingleStep(100);
+    focalLength_->setSpecialValueText("unknown");
+    focalLength_->setValue(s.focalLengthMm);
+    focalLength_->setSuffix(" mm");
     f2->addRow("Focal ratio", fRatio_);
     f2->addRow("Focuser step", umStep_);
+    f2->addRow("Focal length", focalLength_);
     v->addLayout(f2);
-    auto* note = theme::label("Used for the critical focus zone (±2.44 λN²) on the focus sweep.", "dim");
+    auto* note = theme::label("Focal ratio and step: the critical focus zone (±2.44 λN²) on the focus sweep. Focal length "
+                              "(effective, with any Barlow): the image scale, so the automatic target can check the "
+                              "target's size.", "dim");
     note->setWordWrap(true);
     v->addWidget(note);
+
+    // The site, for which targets are above the horizon. The mount's own site is used first when it reports one.
+    v->addWidget(theme::section("Site"));
+    auto* f3 = new QFormLayout;
+    auto coordinate = [](double limit, std::optional<double> value, const QString& suffix) {
+        auto* b = new QDoubleSpinBox;
+        b->setRange(-limit - 1, limit);   // the extra step below the range means "unknown"
+        b->setDecimals(4);
+        b->setSpecialValueText("unknown");
+        b->setValue(value.value_or(-limit - 1));
+        b->setSuffix(suffix);
+        return b;
+    };
+    latitude_ = coordinate(90, s.latitude, "° N");
+    longitude_ = coordinate(180, s.longitude, "° E");
+    f3->addRow("Latitude", latitude_);
+    f3->addRow("Longitude", longitude_);
+    v->addLayout(f3);
+    auto* siteNote = theme::label("South and west are negative. Used when the mount doesn't report its site.", "dim");
+    siteNote->setWordWrap(true);
+    v->addWidget(siteNote);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
@@ -74,6 +105,8 @@ Settings SettingsDialog::settings() const {
     s.approachOutward = approach_->currentIndex() == 0;
     s.focalRatio = fRatio_->value();
     s.micronsPerStep = umStep_->value();
+    s.focalLengthMm = focalLength_->value();
+    if (latitude_->value() >= -90 && longitude_->value() >= -180) s.latitude = latitude_->value(), s.longitude = longitude_->value();
     return s;
 }
 

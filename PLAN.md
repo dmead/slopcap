@@ -69,7 +69,7 @@ Numeric / astronomy libraries (all permissive, so SlopCap's own licence stays op
 | FFT (registration, seeing metrics) | pocketfft (header-only) |
 | Nonlinear fits, if Eigen isn't enough | Ceres Solver |
 | FITS files | CFITSIO |
-| Time scales, precession, ephemerides | ERFA + Astronomy Engine |
+| Time scales, precession, ephemerides | Own low-precision code (`analysis/ephemeris`, enough to identify targets); ERFA + Astronomy Engine if arcsecond work ever needs them |
 | Units in the type system (µm, steps, arcsec) | mp-units |
 
 Avoided for licensing: FFTW and GSL (GPL). OpenCV only if its registration/filtering is actually needed.
@@ -422,7 +422,23 @@ M2 status (2026-10-16):
   - **Focuser fix:** every LX200 driver reports TELESCOPE | GUIDER | FOCUSER, so with the mount driver on the same
     server the focuser could pick the LX200 instead of the EAF. Mounts are now skipped unless named (tested with
     `indi_lx200classic` started first).
+  - **Raw histogram** in the Capture sidebar: per channel, in the ADC's own units, with median / max / clipped.
+  - **Automatic target** (Target: Auto): the Moon, Mars, Jupiter, Saturn, Uranus or Neptune, from the sky and the image
+    together (`analysis/identify`). Positions come from `analysis/ephemeris`: JPL's low-precision planetary elements
+    and the Almanac's lunar series, written here rather than pulling in Astronomy Engine. They are within ~10'
+    (planets) and 0.4° (Moon) of libnova over 2000-2045. Evidence: the mount's pointing, what's above the horizon (the
+    mount's site, or Settings → Site), shape at 15% of peak (Saturn 2.4:1 at any camera rotation), point symmetry
+    (Saturn 0.92-0.98, a crescent 0.71), size against the image scale (Settings → Focal length), or, without the scale,
+    "too many pixels for that body at any amateur scale", and raw colour (ln R/B: Saturn 0.5-0.74, Jupiter 1.03 on the
+    IMX585; Mars and the ice giants are expected ±0.8 beyond). It never guesses: undecided it says what's left ("Moon or
+    Jupiter") and names files "Target". On the recordings here: both Saturns and the crescent are named from the image
+    alone; Jupiter and the full Moon come out as "Moon or Jupiter" until the mount (tested with the simulator on
+    Jupiter's position) or the focal length decides. Not tried yet on Mars, Uranus or Neptune; the colour margins are
+    physics-based estimates. Limb darkening was tried and dropped as a Jupiter test: on the IMX585, Jupiter measured
+    as flat as the full Moon (0.92 against 0.95); only "darkened limb, so not the Moon" is kept.
 - **Still to do:**
+  - Auto target on real Mars / Uranus / Neptune captures: check the colour margins, and the image-only Uranus / Neptune
+    case (a tiny learned model only if that case matters and there are captures to train on).
   - Real-camera check of the GUI **on the laptop** (cameras, EAF and LX200 plugged into it), before the Saturn night.
     Check that the LX200 driver takes guide pulses (the classic LX200 has no pulse command; INDI then times moves at
     the guide rate) and which way N / E move the target on screen.

@@ -35,6 +35,8 @@ add_library(slopcap_core STATIC
   src/analysis/focus.cpp
   src/analysis/sweep.cpp
   src/analysis/collimation.cpp
+  src/analysis/ephemeris.cpp
+  src/analysis/identify.cpp
 )
 target_sources(slopcap_core PRIVATE src/camera/open_camera.cpp)
 target_include_directories(slopcap_core PUBLIC src)
@@ -170,7 +172,8 @@ if(SLOPCAP_BUILD_TESTS)
   find_package(Catch2 3 CONFIG QUIET)
   if(Catch2_FOUND)
     enable_testing()
-    add_executable(slopcap-tests tests/test_ser.cpp tests/test_sim_camera.cpp tests/test_pipeline.cpp tests/test_direct_writer.cpp tests/test_preview.cpp tests/test_focus.cpp tests/test_sweep.cpp tests/test_collimation.cpp)
+    add_executable(slopcap-tests tests/test_ser.cpp tests/test_sim_camera.cpp tests/test_pipeline.cpp tests/test_direct_writer.cpp tests/test_preview.cpp tests/test_focus.cpp tests/test_sweep.cpp tests/test_collimation.cpp
+      tests/test_identify.cpp)
     target_link_libraries(slopcap-tests PRIVATE slopcap_core slopcap_warnings Catch2::Catch2WithMain)
     include(Catch)
     catch_discover_tests(slopcap-tests)

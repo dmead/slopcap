@@ -1,7 +1,10 @@
-// Settings: focuser connection and behaviour, and the optics the critical focus zone needs.
+// Settings: focuser connection and behaviour, the optics (critical focus zone, image scale) and the site (which
+// targets are up, for the automatic target).
 #pragma once
 
 #include <QDialog>
+
+#include <optional>
 
 class QCheckBox;
 class QComboBox;
@@ -18,6 +21,8 @@ struct Settings {
     bool approachOutward = true;
     double focalRatio = 0;       ///< 0 = unknown
     double micronsPerStep = 0;   ///< 0 = unknown
+    double focalLengthMm = 0;    ///< effective (with any Barlow); 0 = unknown
+    std::optional<double> latitude, longitude;   ///< the site, when the mount doesn't say (east positive)
 };
 
 class SettingsDialog : public QDialog {
@@ -33,6 +38,9 @@ private:
     QComboBox* approach_ = nullptr;
     QDoubleSpinBox* fRatio_ = nullptr;
     QDoubleSpinBox* umStep_ = nullptr;
+    QDoubleSpinBox* focalLength_ = nullptr;
+    QDoubleSpinBox* latitude_ = nullptr;
+    QDoubleSpinBox* longitude_ = nullptr;
 };
 
 }  // namespace slopcap::app

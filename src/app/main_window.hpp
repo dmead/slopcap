@@ -94,6 +94,10 @@ private:
     void updateStats();
     void updateRoiInfo();
     void updateTargetInfo();
+    bool isAutoTarget() const;
+    QString targetName() const;                  ///< what files and sidecars are named after (Auto: what was identified)
+    void runAutoTarget(const LatestFrame::Frame& f);
+    void updateAutoTarget();
     void updateFocusMode();
     void writeSidecar(const QString& serPath, const CaptureStats& s, const QDateTime& mid) const;
     QString fileStem(const QDateTime& utc) const;
@@ -117,6 +121,9 @@ private:
     MountSection* mountSection_ = nullptr;
     RawHistogramSection* rawHist_ = nullptr;
     QElapsedTimer rawHistClock_;
+    // the automatic target (Target: Auto)
+    QElapsedTimer identifyClock_;
+    QString autoName_, pendingAutoName_, autoDetail_, autoNotes_;
     bool pendingSweep_ = false;
     int pendingRange_ = 0, pendingStep_ = 0, pendingFrames_ = 0;
     Mode mode_ = Capture;
@@ -169,6 +176,7 @@ private:
 
     // capture right
     QLabel *tCentre_ = nullptr, *tMargin_ = nullptr, *tDisc_ = nullptr, *tDisp_ = nullptr;
+    QLabel* tAuto_ = nullptr;
 
     // preview page
     QButtonGroup* zoom_ = nullptr;

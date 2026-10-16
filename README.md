@@ -21,7 +21,7 @@ Status: **M1 in progress**: capture pipeline + ZWO / QHY backends; ZWO verified 
 | `tools/bench` | `slopcap-bench --camera SPEC …` / `--sim FILE.ser` / `--list`: record through the full pipeline and report fps / drops / ring peak / MB/s |
 | `tools/serinfo` | `slopcap-serinfo FILE.ser…`: header, frames vs header, timestamps, real frame rate, longest gap |
 | `tools/camprobe` | `slopcap-camprobe [--json]`: what each connected ZWO / QHY camera reports (fixtures from real cameras inside) |
-| `src/analysis/` | per-channel focus scoring (4 metrics), focus sweep fits, defocused-star collimation |
+| `src/analysis/` | per-channel focus scoring (4 metrics), focus sweep fits, defocused-star collimation, low-precision ephemerides (Moon, Mars to Neptune) and target identification |
 | `src/devices/` | minimal INDI client (Qt Network), a backlash-aware focuser, and a mount (guide pulses, axis moves, goto, park, tracking) |
 | `tools/diag` | `slopcap-diag FILE.ser…`: optical diagnostics from planetary recordings |
 | `tools/focusbench` | `slopcap-focusbench FILE.ser [frames] [metric]`: time the focus scorer |
@@ -47,7 +47,11 @@ build/linux-release/slopcap --camera asi --focuser localhost:7624
    (Green, Luminance-weighted, Balanced, Red, Blue) and "Go to". Each sweep's per-frame scores are saved as a CSV
    in the recording folder.
 4. **Record** (Ctrl+R): files are named WinJUPOS-style from the mid-capture time and the Target field
-   (`2026-10-17-0315_4-Saturn.ser`), with a `.txt` of the settings and focuser position next to each.
+   (`2026-10-17-0315_4-Saturn.ser`), with a `.txt` of the settings and focuser position next to each. With Target
+   **Auto**, SlopCap identifies the Moon, Mars or an outer planet from the image (Saturn's rings, a crescent's shape,
+   size and colour) and the mount's pointing, and shows why under the Target panel. When it can't decide it says
+   what's left ("Moon or Jupiter") and names the file "Target"; Settings → Focal length (the image scale) and a
+   connected mount, or Settings → Site, settle most cases. The name is fixed while recording.
 
 Afterwards: `slopcap-diag --png OUT/ *.ser` stacks the best frames of each recording and reports dispersion, limb
 sharpness per channel and side, halo and jitter.
