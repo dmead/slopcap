@@ -3,7 +3,7 @@
 A planetary / lunar / solar capture program for Linux and Windows: zero-drop video capture from astronomy cameras,
 a live preview that keeps up, built-in focus / drift / guide-overlay tools, and a REST API. C++20, no Python.
 
-Status: **M1 in progress**: capture pipeline done and benchmarked on the simulated camera; real ZWO / QHY backends next. See [PLAN.md](PLAN.md) for the design and milestones.
+Status: **M1 in progress**: capture pipeline + ZWO / QHY backends; ZWO verified at 168 fps with 0 drops on Linux and Windows. See [PLAN.md](PLAN.md) for the design and milestones.
 
 ## What's here
 
@@ -14,7 +14,9 @@ Status: **M1 in progress**: capture pipeline done and benchmarked on the simulat
 | `src/camera/sim_camera.*` | `SimCamera`: replays a SER recording as a camera (real-time pacing, ROI, drop counting) |
 | `src/pipeline/frame_ring.*` | `FrameRing`: pre-allocated, page-aligned frame slots passed capture → writer lock-free |
 | `src/pipeline/capture_session.*` | `CaptureSession`: capture thread + SER writer thread; counts camera drops vs ring drops |
-| `tools/bench` | `slopcap-bench --sim FILE.ser …`: record through the full pipeline and report fps / drops / ring peak / MB/s |
+| `src/camera/asi_camera.*`, `qhy_camera.*` | ZWO and QHY backends (built when their SDKs are found) |
+| `src/camera/open_camera.*` | open a camera from a spec: `asi[:N]`, `qhy[:N]`, `sim:FILE.ser` |
+| `tools/bench` | `slopcap-bench --camera SPEC …` / `--sim FILE.ser` / `--list`: record through the full pipeline and report fps / drops / ring peak / MB/s |
 | `tools/serinfo` | `slopcap-serinfo FILE.ser…`: header, frames vs header, timestamps, real frame rate, longest gap |
 | `tools/camprobe` | `slopcap-camprobe [--json]`: what each connected ZWO / QHY camera reports (fixtures from real cameras inside) |
 | `tests/` | Catch2 unit tests |

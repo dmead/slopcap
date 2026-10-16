@@ -109,13 +109,14 @@ TEST_CASE("CaptureSession records every frame of a simulated camera to SER") {
     cam.setRoi({16, 8, 32, 16, 1});
     CaptureOptions opt;
     opt.output = dir / "out.ser";
-    opt.ringBytes = 64 * 1024;
+    opt.ringBytes = 400 * 4096;   // room for every frame: an unpaced source may outrun the writer
     opt.observer = "test";
     CaptureSession session(cam, opt);
     session.start();
     REQUIRE(session.wait(10s));
     const auto s = session.stats();
     CHECK(s.error.empty());
+    CHECK(s.ringCapacity >= 300);
     CHECK(s.delivered == 300);
     CHECK(s.written == 300);
     CHECK(s.ringDropped == 0);
@@ -132,6 +133,22 @@ TEST_CASE("CaptureSession records every frame of a simulated camera to SER") {
     r.readFrame(299, buf);
     // pixel (16, 8) of source frame 299: index 8*64+16
     CHECK(buf[0] == static_cast<std::byte>((8u * 64u + 16u + 299u) & 0xff));
+}
+
+TEST_CASE("CaptureSession counts frames lost to a full ring instead of stalling capture") {
+    TempDir dir;
+    SimCamera cam(makeSer(dir, 512, 256, 2000, 59'500), {SimPace::AsFastAsPossible});
+    CaptureOptions opt;
+    opt.output = dir / "small-ring.ser";
+    opt.ringBytes = 0;   // clamps to the 8-slot minimum
+    CaptureSession session(cam, opt);
+    session.start();
+    REQUIRE(session.wait(30s));
+    const auto s = session.stats();
+    CHECK(s.ringCapacity == 8);
+    CHECK(s.delivered == 2000);
+    CHECK(s.written + s.ringDropped == s.delivered);   // every frame is either on disk or counted
+    CHECK(ser::Reader(opt.output).frameCount() == static_cast<int64_t>(s.written));
 }
 
 TEST_CASE("CaptureSession stops at a frame limit and at a duration") {

@@ -39,7 +39,8 @@ void CaptureSession::start() {
     if (captureThread_.joinable()) throw std::logic_error("capture already started");
     const std::size_t fb = cam_.frameBytes();
     if (fb == 0) throw CameraError("camera reports a zero-size frame");
-    const std::size_t slots = std::clamp<std::size_t>(opt_.ringBytes / fb, 8, 1u << 20);
+    const std::size_t slotBytes = (fb + 4095) / 4096 * 4096;   // FrameRing rounds slots up to whole pages
+    const std::size_t slots = std::clamp<std::size_t>(opt_.ringBytes / slotBytes, 8, 1u << 20);
     ring_ = std::make_unique<FrameRing>(slots, fb);
     scratch_.resize(fb);
     stopRequested_ = false;
