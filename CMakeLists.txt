@@ -32,6 +32,8 @@ add_library(slopcap_core STATIC
   src/preview/latest_frame.cpp
   src/preview/render_cpu.cpp
   src/analysis/focus.cpp
+  src/analysis/sweep.cpp
+  src/analysis/collimation.cpp
 )
 target_sources(slopcap_core PRIVATE src/camera/open_camera.cpp)
 target_include_directories(slopcap_core PUBLIC src)
@@ -106,15 +108,20 @@ endif()
 
 # ---------------------------------------------------------------- GUI (Qt 6, OpenGL 3.3)
 if(SLOPCAP_BUILD_GUI)
-  find_package(Qt6 6.4 QUIET COMPONENTS Widgets OpenGL OpenGLWidgets)
+  find_package(Qt6 6.4 QUIET COMPONENTS Widgets OpenGL OpenGLWidgets Network)
   if(Qt6_FOUND)
+    # Devices over INDI (focuser now; mount, filter wheel later). Qt Core + Network only.
+    add_library(slopcap_devices STATIC src/devices/indi_client.cpp src/devices/focuser.cpp)
+    set_target_properties(slopcap_devices PROPERTIES AUTOMOC ON)
+    target_include_directories(slopcap_devices PUBLIC src)
+    target_link_libraries(slopcap_devices PUBLIC Qt6::Core Qt6::Network PRIVATE slopcap_warnings)
     add_library(slopcap_gui STATIC
       src/preview/gl_renderer.cpp
       src/preview/preview_widget.cpp
       src/preview/histogram_widget.cpp
     )
     set_target_properties(slopcap_gui PROPERTIES AUTOMOC ON)
-    target_link_libraries(slopcap_gui PUBLIC slopcap_core Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets PRIVATE slopcap_warnings)
+    target_link_libraries(slopcap_gui PUBLIC slopcap_core slopcap_devices Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets PRIVATE slopcap_warnings)
     add_executable(slopcap-diag tools/diag/main.cpp)
     target_link_libraries(slopcap-diag PRIVATE slopcap_core Qt6::Gui slopcap_warnings)
     add_executable(slopcap WIN32 src/app/main.cpp src/app/main_window.cpp)
@@ -130,7 +137,7 @@ if(SLOPCAP_BUILD_TESTS)
   find_package(Catch2 3 CONFIG QUIET)
   if(Catch2_FOUND)
     enable_testing()
-    add_executable(slopcap-tests tests/test_ser.cpp tests/test_sim_camera.cpp tests/test_pipeline.cpp tests/test_direct_writer.cpp tests/test_preview.cpp tests/test_focus.cpp)
+    add_executable(slopcap-tests tests/test_ser.cpp tests/test_sim_camera.cpp tests/test_pipeline.cpp tests/test_direct_writer.cpp tests/test_preview.cpp tests/test_focus.cpp tests/test_sweep.cpp tests/test_collimation.cpp)
     target_link_libraries(slopcap-tests PRIVATE slopcap_core slopcap_warnings Catch2::Catch2WithMain)
     include(Catch)
     catch_discover_tests(slopcap-tests)
@@ -140,6 +147,9 @@ if(SLOPCAP_BUILD_TESTS)
       add_executable(slopcap-gl-tests tests/test_gl_render.cpp)
       target_link_libraries(slopcap-gl-tests PRIVATE slopcap_gui slopcap_warnings Catch2::Catch2)
       add_test(NAME gl-render COMMAND slopcap-gl-tests)
+      add_executable(slopcap-qt-tests tests/test_indi.cpp)
+      target_link_libraries(slopcap-qt-tests PRIVATE slopcap_devices slopcap_warnings Catch2::Catch2)
+      add_test(NAME indi-focuser COMMAND slopcap-qt-tests)
       set_tests_properties(gl-render PROPERTIES ENVIRONMENT
         "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/sanitizers/lsan-gl.supp")
     endif()
