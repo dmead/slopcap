@@ -296,23 +296,40 @@ FocusScores scoreFrame(std::span<const std::byte> pixels, int width, int height,
             v += sampleAt(pixels.data(), width, bitDepth, x * l.cell + l.sx[refC][k], y * l.cell + l.sy[refC][k]);
         return v / static_cast<float>(l.sites[refC]);
     };
-    float peak = 0;
+    // Sparse grid of the reference channel, then a 3x3 box blur on it: single noisy or hot samples must not set the
+    // peak, the threshold or the target's bounding box.
+    const int gw = (pw + step - 1) / step, gh = (ph + step - 1) / step;
     for (int y = 0; y < ph; y += step)
-        for (int x = 0; x < pw; x += step) {
-            s.push_back(refAt(x, y));
-            peak = std::max(peak, s.back());
+        for (int x = 0; x < pw; x += step) s.push_back(refAt(x, y));
+    std::vector<float> g(s.size());
+    for (int y = 0; y < gh; ++y)
+        for (int x = 0; x < gw; ++x) {
+            float sum = 0;
+            int n = 0;
+            for (int dy = -1; dy <= 1; ++dy)
+                for (int dx = -1; dx <= 1; ++dx) {
+                    const int xx = x + dx, yy = y + dy;
+                    if (xx < 0 || yy < 0 || xx >= gw || yy >= gh) continue;
+                    sum += s[static_cast<std::size_t>(yy) * static_cast<std::size_t>(gw) + static_cast<std::size_t>(xx)];
+                    ++n;
+                }
+            g[static_cast<std::size_t>(y) * static_cast<std::size_t>(gw) + static_cast<std::size_t>(x)] = sum / static_cast<float>(n);
         }
-    const float bg = quantile01(s, 0.25);
+    const float bg = quantile01(g, 0.25);
+    const float peak = *std::max_element(g.begin(), g.end());
     if (peak - bg < 0.02f) return out;   // nothing there (dark frame, cloud)
     const float thresh = bg + 0.15f * (peak - bg);
     double m = 0, mx = 0, my = 0;
-    std::size_t i = 0;
-    for (int y = 0; y < ph; y += step)
-        for (int x = 0; x < pw; x += step, ++i)
-            if (s[i] > thresh) {
-                const double w = s[i] - bg;
-                m += w, mx += w * x, my += w * y;
+    int bx0 = gw, by0 = gh, bx1 = 0, by1 = 0;
+    for (int y = 0; y < gh; ++y)
+        for (int x = 0; x < gw; ++x)
+            if (const float v = g[static_cast<std::size_t>(y) * static_cast<std::size_t>(gw) + static_cast<std::size_t>(x)]; v > thresh) {
+                const double w = v - bg;
+                m += w, mx += w * x * step, my += w * y * step;
+                bx0 = std::min(bx0, x), by0 = std::min(by0, y), bx1 = std::max(bx1, x), by1 = std::max(by1, y);
             }
+    out.targetX0 = bx0 * step * l.cell, out.targetY0 = by0 * step * l.cell;
+    out.targetX1 = std::min(width, (bx1 + 1) * step * l.cell), out.targetY1 = std::min(height, (by1 + 1) * step * l.cell);
     const int cx = static_cast<int>(mx / m), cy = static_cast<int>(my / m);
 
     // 2. Window around it (a square power of two for the FFT), clamped to the frame.

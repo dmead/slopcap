@@ -1,4 +1,4 @@
-// Log-scaled 256-bin histogram with the black and white points marked.
+// Log-scaled histogram as bars: amber between the black and white points, grey outside, red at the clipping end.
 #pragma once
 
 #include "preview/render_cpu.hpp"
@@ -14,7 +14,7 @@ class HistogramWidget : public QWidget {
 public:
     explicit HistogramWidget(QWidget* parent = nullptr);
     void setData(const std::array<uint32_t, 256>& histogram, const Levels& levels);
-    QSize sizeHint() const override { return {256, 90}; }
+    QSize sizeHint() const override { return {360, 56}; }
 
 protected:
     void paintEvent(QPaintEvent*) override;

@@ -1,38 +1,14 @@
 // slopcap: the capture application.
 //   slopcap [--camera SPEC] [--out DIR] [--record] [--screenshot FILE.png] [--quit-after SECONDS]
 #include "app/main_window.hpp"
+#include "app/theme.hpp"
 
 #include <QApplication>
 #include <QCommandLineParser>
-#include <QPalette>
-#include <QStyleFactory>
 #include <QTimer>
 #include <QSurfaceFormat>
 
-namespace {
 
-void darkTheme(QApplication& app) {
-    app.setStyle(QStyleFactory::create("Fusion"));
-    QPalette p;
-    const QColor bg(30, 32, 36), base(22, 23, 26), text(220, 222, 228), accent(70, 130, 220);
-    p.setColor(QPalette::Window, bg);
-    p.setColor(QPalette::WindowText, text);
-    p.setColor(QPalette::Base, base);
-    p.setColor(QPalette::AlternateBase, bg);
-    p.setColor(QPalette::Text, text);
-    p.setColor(QPalette::Button, QColor(42, 44, 50));
-    p.setColor(QPalette::ButtonText, text);
-    p.setColor(QPalette::Highlight, accent);
-    p.setColor(QPalette::HighlightedText, Qt::white);
-    p.setColor(QPalette::ToolTipBase, base);
-    p.setColor(QPalette::ToolTipText, text);
-    p.setColor(QPalette::Disabled, QPalette::Text, QColor(110, 112, 118));
-    p.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(110, 112, 118));
-    p.setColor(QPalette::Disabled, QPalette::WindowText, QColor(110, 112, 118));
-    app.setPalette(p);
-}
-
-}  // namespace
 
 int main(int argc, char** argv) {
     QSurfaceFormat fmt;
@@ -44,7 +20,7 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QApplication::setOrganizationName("SlopCap");
     QApplication::setApplicationName("SlopCap");
-    darkTheme(app);
+    slopcap::app::theme::apply(app);
 
     QCommandLineParser args;
     args.setApplicationDescription("Planetary capture");

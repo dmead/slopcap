@@ -96,13 +96,19 @@ void PreviewWidget::fitToWindow() {
     zoom_ = 1;
     centre_ = {-1, -1};
     update();
+    emit zoomChanged();
 }
 
-void PreviewWidget::zoomOneToOne() {
-    const double fs = fitScale();   // 1 image px = 1 widget px
-    zoom_ = fs > 0 ? 1.0 / fs : 1;
+void PreviewWidget::zoomOneToOne() { zoomTo(1.0); }
+
+void PreviewWidget::zoomTo(double k) {
+    const double fs = fitScale();
+    zoom_ = fs > 0 ? k / fs : 1;
     update();
+    emit zoomChanged();
 }
+
+void PreviewWidget::setDebayer(bool on) { debayer_ = on; }
 
 void PreviewWidget::initializeGL() {
     renderer_.initialize();
@@ -130,7 +136,9 @@ void PreviewWidget::poll() {
     }
     const QSize before = imageSize();
     makeCurrent();
-    renderer_.process(f->pixels.data(), fi.roi.width, fi.roi.height, fi.bitDepth, bayer_, levels_);
+    auto lv = levels_;
+    if (!debayer_) lv.wb = {1, 1, 1};
+    renderer_.process(f->pixels.data(), fi.roi.width, fi.roi.height, fi.bitDepth, debayer_ ? bayer_ : Bayer::None, lv);
     doneCurrent();
     if (imageSize() != before) centre_ = {-1, -1};   // new ROI: recentre
     update();
@@ -201,6 +209,7 @@ void PreviewWidget::wheelEvent(QWheelEvent* e) {
     const double k = scale();
     centre_ = QPointF(img.x() - (at.x() - width() / 2.0) / k, img.y() - (at.y() - height() / 2.0) / k);
     update();
+    emit zoomChanged();
 }
 
 void PreviewWidget::mousePressEvent(QMouseEvent* e) {

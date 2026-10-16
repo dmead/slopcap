@@ -45,6 +45,8 @@ struct FocusScores {
     int channels = 0;                     ///< 3 (R, G, B) for colour, 1 for mono, 0 if there was no target
     std::array<ChannelScore, 3> ch{};     ///< R, G, B (mono: ch[0] only)
     int windowX = 0, windowY = 0, windowW = 0, windowH = 0;   ///< scored region in full-frame pixels
+    int targetX0 = 0, targetY0 = 0, targetX1 = 0, targetY1 = 0;   ///< the target's bounding box (full-frame pixels,
+                                                                  ///< from the locate sample: within a sample step)
 };
 
 /// Score one raw frame (8-bit, or 16-bit little-endian).

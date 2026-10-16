@@ -45,9 +45,13 @@ public:
     void setCrosshair(bool on);
     void fitToWindow();
     void zoomOneToOne();
+    void zoomTo(double widgetPxPerImagePx);   ///< 1 = 100 %, 2 = 200 %
+    void setDebayer(bool on);                 ///< off: show the raw mosaic as grey (checks focus/hot pixels per site)
+    bool fitted() const { return zoom_ == 1.0; }
     QSize imageSize() const { return {renderer_.imageWidth(), renderer_.imageHeight()}; }
 
 signals:
+    void zoomChanged();
     /// A new frame was shown: its histogram, the levels used, and its metadata.
     void frameShown(const std::array<uint32_t, 256>& histogram, const slopcap::preview::Levels& levels,
                     const slopcap::FrameInfo& info);
@@ -82,6 +86,7 @@ private:
     Levels levels_;
     bool auto_ = true;
     bool autoWb_ = true;
+    bool debayer_ = true;
     bool glReady_ = false;
     QTimer timer_;
     QElapsedTimer fpsClock_;
