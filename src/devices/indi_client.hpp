@@ -8,6 +8,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QTcpSocket>
 #include <QXmlStreamReader>
 
@@ -31,6 +32,7 @@ struct IndiProperty {
     QString state;         ///< Idle, Ok, Busy, Alert
     QString perm;          ///< ro, wo, rw
     std::map<QString, IndiElement> elements;
+    QStringList order;     ///< element names in the driver's order (slew rates go slowest first)
     bool busy() const { return state == "Busy"; }
 };
 

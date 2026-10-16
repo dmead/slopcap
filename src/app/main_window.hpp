@@ -1,6 +1,6 @@
 // SlopCap's main window, laid out as the "SlopCap UI" design canvas: a header (modes, target, filter, camera,
 // settings), three columns whose side panels change with the mode, and a status footer.
-//   Capture    camera + capture settings | live preview with toolbar and histogram | target, focuser
+//   Capture    camera + capture settings | live preview with toolbar and histogram | target, focuser, mount
 //   Focus      sweep settings | per-channel focus curves | best focus per channel, strategy, go to
 //   Collimate  method | live preview with ring/shadow overlay | offset readouts
 //   Align, Sequence: in the design, not built yet (shown disabled)
@@ -37,6 +37,9 @@ namespace slopcap::preview {
 class HistogramWidget;
 class PreviewWidget;
 }
+namespace slopcap::devices {
+class Mount;
+}
 
 namespace slopcap::app {
 
@@ -44,6 +47,7 @@ class CollimationPanel;
 class FocusChartPanel;
 class FocusController;
 class FocusResultsPanel;
+class MountSection;
 class SweepPanel;
 
 class MainWindow : public QMainWindow {
@@ -107,6 +111,8 @@ private:
     std::optional<QPoint> roiCentre_;
     Settings settings_;
     FocusController* focus_ = nullptr;
+    devices::Mount* mount_ = nullptr;
+    MountSection* mountSection_ = nullptr;
     bool pendingSweep_ = false;
     int pendingRange_ = 0, pendingStep_ = 0, pendingFrames_ = 0;
     Mode mode_ = Capture;

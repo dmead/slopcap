@@ -20,7 +20,7 @@ SettingsDialog::SettingsDialog(const Settings& s, QWidget* parent) : QDialog(par
     v->setContentsMargins(20, 20, 20, 20);
     v->setSpacing(14);
 
-    v->addWidget(theme::section("Focuser (INDI)"));
+    v->addWidget(theme::section("Focuser and mount (INDI)"));
     auto* f1 = new QFormLayout;
     server_ = new QLineEdit(s.indiServer);
     server_->setProperty("role", "mono");

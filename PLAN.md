@@ -415,8 +415,18 @@ M2 status (2026-10-16):
     0 dropped, GPU preview working; QHY5III715C connected.
   - **Zips** in `build/windows-static/slopcap-windows.zip` and `build/linux-release/slopcap-linux.zip` (not in git).
     The Linux zip relies on system Qt and the INDI SDK packages.
+  - **Mount (M5, first part):** `devices::Mount` over the standard INDI telescope properties: guide pulses
+    (`TELESCOPE_TIMED_GUIDE_NS/WE`), axis moves at a slew rate, goto, abort, park / unpark, tracking, RA / Dec. Tested
+    against `indi_simulator_telescope`. The Capture sidebar's Mount panel (as designed) has the N / E / W / S pulse pad
+    and pulse length, and recordings' `.txt` files carry the mount's RA / Dec. It shares the focuser's INDI server.
+  - **Focuser fix:** every LX200 driver reports TELESCOPE | GUIDER | FOCUSER, so with the mount driver on the same
+    server the focuser could pick the LX200 instead of the EAF. Mounts are now skipped unless named (tested with
+    `indi_lx200classic` started first).
 - **Still to do:**
-  - Real-camera check of the GUI **on the laptop** (cameras and EAF plugged into it), before the Saturn night.
+  - Real-camera check of the GUI **on the laptop** (cameras, EAF and LX200 plugged into it), before the Saturn night.
+    Check that the LX200 driver takes guide pulses (the classic LX200 has no pulse command; INDI then times moves at
+    the guide rate) and which way N / E move the target on screen.
+  - Mount next: hold-to-move at a slew rate, `/v1/mount` in the REST API, and the Align mode's drift measurement.
   - Settings → optics: enter the focal ratio and the EAF's µm per step, so the sweep shows the critical focus zone.
   - Upload through a PBO if texture upload shows up in profiles.
   - ASCOM focuser on Windows (INDI only today).

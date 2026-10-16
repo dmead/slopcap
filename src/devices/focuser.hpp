@@ -1,7 +1,7 @@
 // An INDI focuser with backlash-aware moves: every move ends with an approach from the same direction (by default
 // outward), overshooting by the backlash first when coming from the other side, so a position always means the same
 // optical focus. The first INDI device whose DRIVER_INTERFACE includes FOCUSER_INTERFACE is used (or a named one),
-// and it is connected if it isn't already.
+// skipping mounts that also say FOCUSER (an LX200's focuser port), and it is connected if it isn't already.
 #pragma once
 
 #include "devices/indi_client.hpp"

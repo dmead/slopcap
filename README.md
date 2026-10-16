@@ -22,7 +22,7 @@ Status: **M1 in progress**: capture pipeline + ZWO / QHY backends; ZWO verified 
 | `tools/serinfo` | `slopcap-serinfo FILE.ser…`: header, frames vs header, timestamps, real frame rate, longest gap |
 | `tools/camprobe` | `slopcap-camprobe [--json]`: what each connected ZWO / QHY camera reports (fixtures from real cameras inside) |
 | `src/analysis/` | per-channel focus scoring (4 metrics), focus sweep fits, defocused-star collimation |
-| `src/devices/` | minimal INDI client (Qt Network) and a backlash-aware focuser |
+| `src/devices/` | minimal INDI client (Qt Network), a backlash-aware focuser, and a mount (guide pulses, axis moves, goto, park, tracking) |
 | `tools/diag` | `slopcap-diag FILE.ser…`: optical diagnostics from planetary recordings |
 | `tools/focusbench` | `slopcap-focusbench FILE.ser [frames] [metric]`: time the focus scorer |
 | `tests/` | Catch2 unit tests; `slopcap-gl-tests` checks the GPU preview against the CPU reference |
@@ -36,7 +36,9 @@ build/linux-release/slopcap --camera asi --focuser localhost:7624
 
 1. **Capture tab:** Connect the camera. Set gain/exposure (exposure in µs); the gain-landmark buttons set unity /
    lowest-read-noise gain. Watch "clipped %" under the histogram. Wheel zooms, drag pans, F fits, 1 = 1:1,
-   C = crosshair, right-click "Centre ROI here" moves a planetary ROI onto the target.
+   C = crosshair, right-click "Centre ROI here" moves a planetary ROI onto the target. The Mount panel (the LX200's
+   INDI driver, e.g. `indi_lx200classic`, on the focuser's INDI server) shows RA / Dec; N / E / W / S send guide pulses
+   of the chosen length to nudge the target, Stop halts every motion.
 2. **Collimate tab** (bright star): defocus to a ring 40–100 px across, tick "Analyse", turn the secondary screw toward
    the arrow (the ring's thin side) in small amounts, re-centre the star, repeat until the offset is < 2 %.
 3. **Focus tab:** Connect (INDI server, default localhost:7624; the Gemini EAF is MyFocuserPro2). Set backlash
@@ -82,8 +84,8 @@ Copy `build/windows-static/slopcap.exe` anywhere and run it: no installer, no DL
 camera SDKs to `%LOCALAPPDATA%\SlopCap\SlopCap\sdk\` (a DLL placed next to the exe takes precedence, to try a newer SDK).
 The camera SDKs are delay-loaded, so without them SlopCap still starts and the camera menu says which one is
 missing. Settings live in the registry (`HKCU\Software\SlopCap`). The preview needs OpenGL 3.3; without it (some
-Remote Desktop sessions) capture still works and the preview says why it's blank. The focuser is INDI-only for now
-(no ASCOM yet).
+Remote Desktop sessions) capture still works and the preview says why it's blank. The focuser and mount are INDI-only
+for now (no ASCOM yet).
 
 ## Build
 

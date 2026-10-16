@@ -111,6 +111,7 @@ void IndiClient::parse() {
             const auto tag = xml_.name();
             if (inVector_ && isElementTag(tag)) {
                 elem_.text = elemText_.trimmed();
+                if (!current_.elements.count(elemName_)) current_.order << elemName_;
                 current_.elements[elemName_] = elem_;
                 elemName_.clear();
             } else if (vectorType(tag) && inVector_) {

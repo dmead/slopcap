@@ -6,6 +6,7 @@ namespace slopcap::devices {
 
 namespace {
 constexpr int kFocuserInterface = 8;   // INDI::BaseDevice::FOCUSER_INTERFACE
+constexpr int kTelescopeInterface = 1;
 const QString kAbs = "ABS_FOCUS_POSITION", kAbsElem = "FOCUS_ABSOLUTE_POSITION";
 }  // namespace
 
@@ -33,13 +34,13 @@ bool Focuser::ready() const { return !device_.isEmpty() && client_.property(devi
 
 void Focuser::onDefined(const QString& dev, const QString& name) {
     if (device_.isEmpty()) {
-        bool isFocuser = false;
-        if (name == "DRIVER_INFO") {   // drivers say what they are...
-            if (const auto* p = client_.property(dev, name))
-                if (auto it = p->elements.find("DRIVER_INTERFACE"); it != p->elements.end())
-                    isFocuser = it->second.text.toInt() & kFocuserInterface;
-        }
-        if (name == kAbs) isFocuser = true;   // ...or, for old drivers, have a focuser position
+        int iface = 0;
+        if (const auto* p = client_.property(dev, "DRIVER_INFO"))
+            if (auto it = p->elements.find("DRIVER_INTERFACE"); it != p->elements.end()) iface = it->second.text.toInt();
+        // Drivers say what they are, or, for old drivers, have a focuser position. A mount with a focuser port (every
+        // LX200 driver says TELESCOPE | GUIDER | FOCUSER) is not the focuser to use unless it's asked for by name.
+        bool isFocuser = (name == "DRIVER_INFO" && (iface & kFocuserInterface)) || name == kAbs;
+        if ((iface & kTelescopeInterface) && preferred_ != dev) isFocuser = false;
         if (!isFocuser || (!preferred_.isEmpty() && preferred_ != dev)) return;
         device_ = dev;
         ensureConnected();

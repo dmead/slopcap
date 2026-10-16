@@ -3,6 +3,7 @@
 #include "app/collimation_panel.hpp"
 #include "app/focus_controller.hpp"
 #include "app/focus_views.hpp"
+#include "app/mount_section.hpp"
 #include "app/theme.hpp"
 #include "camera/open_camera.hpp"
 #include "preview/histogram_widget.hpp"
@@ -124,6 +125,7 @@ QPixmap logo(double dpr) {
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle("SlopCap");
     focus_ = new FocusController(this);
+    mount_ = new devices::Mount(focus_->indi(), this);   // same INDI server as the focuser
     preview_ = new preview::PreviewWidget;
     collim_ = new CollimationPanel(preview_, this);
 
@@ -216,6 +218,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     target_->setCurrentText(st.value("record/target", "Saturn").toString());
     filter_->setCurrentText(st.value("record/filter", "").toString());
     limit_->setCurrentIndex(std::max(0, limit_->findData(st.value("record/limit", 0).toInt())));
+    mountSection_->setPulseMs(st.value("mount/pulseMs", 300).toInt());
     camSpec_ = st.value("camera/last").toString();
     Settings s;
     s.indiServer = st.value("focuser/server", s.indiServer).toString();
@@ -551,6 +554,9 @@ QWidget* MainWindow::buildCaptureRight() {
         }
     });
     v->addWidget(focuser);
+    mountSection_ = new MountSection(*mount_, *focus_);
+    connect(mountSection_, &MountSection::message, this, &MainWindow::message);
+    v->addWidget(mountSection_);
     v->addStretch(1);
     return w;
 }
@@ -1003,6 +1009,7 @@ void MainWindow::saveSettings() const {
     st.setValue("focuser/autoConnect", settings_.focuserAutoConnect);
     st.setValue("focuser/backlash", settings_.backlash);
     st.setValue("focuser/outward", settings_.approachOutward);
+    st.setValue("mount/pulseMs", mountSection_->pulseMs());
     st.setValue("optics/focalRatio", settings_.focalRatio);
     st.setValue("optics/micronsPerStep", settings_.micronsPerStep);
     st.setValue("focus/metric", analysis::metricName(focus_->liveMetric()));
@@ -1151,6 +1158,8 @@ void MainWindow::writeSidecar(const QString& serPath, const CaptureStats& s, con
     if (!modes.empty()) o << "Readout=" << QString::fromStdString(modes[static_cast<std::size_t>(std::clamp(cam_->readoutMode(), 0, static_cast<int>(modes.size()) - 1))].name) << "\n";
     for (const auto& [name, val] : recControls_) o << QString::fromStdString(name) << "=" << val << "\n";
     if (focus_->focuser().ready()) o << "Focuser position=" << focus_->focuser().position() << "\n";
+    if (mount_->ready())
+        o << "Mount RA(JNow)=" << QString::number(mount_->ra(), 'f', 5) << " h\nMount Dec(JNow)=" << QString::number(mount_->dec(), 'f', 4) << " deg\n";
     if (!s.error.empty()) o << "Error=" << QString::fromStdString(s.error) << "\n";
 }
 

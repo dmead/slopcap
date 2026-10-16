@@ -115,8 +115,8 @@ endif()
 if(SLOPCAP_BUILD_GUI)
   find_package(Qt6 6.4 QUIET COMPONENTS Widgets OpenGL OpenGLWidgets Network)
   if(Qt6_FOUND)
-    # Devices over INDI (focuser now; mount, filter wheel later). Qt Core + Network only.
-    add_library(slopcap_devices STATIC src/devices/indi_client.cpp src/devices/focuser.cpp)
+    # Devices over INDI (focuser, mount; filter wheel later). Qt Core + Network only.
+    add_library(slopcap_devices STATIC src/devices/indi_client.cpp src/devices/focuser.cpp src/devices/mount.cpp)
     set_target_properties(slopcap_devices PROPERTIES AUTOMOC ON)
     target_include_directories(slopcap_devices PUBLIC src)
     target_link_libraries(slopcap_devices PUBLIC Qt6::Core Qt6::Network PRIVATE slopcap_warnings)
@@ -131,7 +131,7 @@ if(SLOPCAP_BUILD_GUI)
     target_link_libraries(slopcap-diag PRIVATE slopcap_core Qt6::Gui slopcap_warnings)
     # qt_add_executable: with a static Qt it also links the platform plugin (qwindows) into the exe
     qt_add_executable(slopcap WIN32 src/app/main.cpp src/app/main_window.cpp src/app/theme.cpp src/app/focus_controller.cpp
-      src/app/focus_views.cpp src/app/collimation_panel.cpp src/app/settings_dialog.cpp)
+      src/app/focus_views.cpp src/app/collimation_panel.cpp src/app/settings_dialog.cpp src/app/mount_section.cpp)
     set_target_properties(slopcap PROPERTIES AUTOMOC ON)
     # The UI fonts (IBM Plex, OFL), embedded when the build machine has them, so every install looks the same.
     set(SLOPCAP_FONT_DIR /usr/share/fonts/truetype/ibm-plex CACHE PATH "folder with the IBM Plex TTFs to embed")
@@ -181,8 +181,8 @@ if(SLOPCAP_BUILD_TESTS)
       add_test(NAME gl-render COMMAND slopcap-gl-tests)
       add_executable(slopcap-qt-tests tests/test_indi.cpp)
       target_link_libraries(slopcap-qt-tests PRIVATE slopcap_devices slopcap_warnings Catch2::Catch2)
-      add_test(NAME indi-focuser COMMAND slopcap-qt-tests)
-      set_tests_properties(indi-focuser PROPERTIES SKIP_RETURN_CODE 4)   # Catch2's "all skipped" (no INDI installed)
+      add_test(NAME indi-devices COMMAND slopcap-qt-tests)
+      set_tests_properties(indi-devices PROPERTIES SKIP_RETURN_CODE 4)   # Catch2's "all skipped" (no INDI installed)
       set_tests_properties(gl-render PROPERTIES ENVIRONMENT
         "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/sanitizers/lsan-gl.supp")
     endif()
