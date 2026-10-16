@@ -66,6 +66,65 @@ std::array<uint32_t, 256> histogram(std::span<const std::byte> pixels, int bitDe
     return h;
 }
 
+RawHistogram rawHistogram(std::span<const std::byte> pixels, int width, int height, int bitDepth, Bayer bayer,
+                          std::optional<int> adcBits, int bins, std::size_t maxSamples) {
+    RawHistogram r;
+    const std::size_t bytesPer = bitDepth > 8 ? 2 : 1;
+    if (width < 2 || height < 2 || pixels.size() < static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * bytesPer) return r;
+    r.channels = bayer == Bayer::None ? 1 : 3;
+    // 8-bit: as delivered. 16-bit: MSB-aligned, so shift down to the ADC's range when it's known.
+    r.adcBits = bitDepth > 8 ? std::clamp(adcBits.value_or(16), 8, 16) : 8;
+    const int shift = bitDepth > 8 ? 16 - r.adcBits : 0;
+    r.fullScale = (1 << r.adcBits) - 1;
+
+    // Whole 2x2 blocks, every `step`-th block each way, so each channel is sampled evenly.
+    const double total = static_cast<double>(width) * height;
+    const int step = std::max(1, static_cast<int>(std::ceil(std::sqrt(total / static_cast<double>(std::max<std::size_t>(4, maxSamples))))));
+    std::array<std::vector<uint32_t>, 3> exact;   // per ADU value, for exact medians
+    for (int c = 0; c < r.channels; ++c) exact[static_cast<std::size_t>(c)].assign(static_cast<std::size_t>(r.fullScale) + 1, 0);
+    for (int by = 0; by + 1 < height; by += 2 * step) {
+        for (int bx = 0; bx + 1 < width; bx += 2 * step) {
+            for (int dy = 0; dy < 2; ++dy) {
+                for (int dx = 0; dx < 2; ++dx) {
+                    const int x = bx + dx, y = by + dy;
+                    const std::size_t i = static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
+                    unsigned v = bitDepth > 8 ? (std::to_integer<unsigned>(pixels[2 * i]) | (std::to_integer<unsigned>(pixels[2 * i + 1]) << 8)) >> shift
+                                              : std::to_integer<unsigned>(pixels[i]);
+                    v = std::min(v, static_cast<unsigned>(r.fullScale));
+                    const int c = r.channels == 1 ? 0 : siteColor(bayer, x, y);
+                    ++exact[static_cast<std::size_t>(c)][v];
+                }
+            }
+        }
+    }
+    bins = std::max(1, bins);
+    for (int c = 0; c < r.channels; ++c) {
+        const auto ci = static_cast<std::size_t>(c);
+        const auto& e = exact[ci];
+        auto& b = r.bins[ci];
+        b.assign(static_cast<std::size_t>(bins), 0);
+        uint64_t n = 0;
+        for (std::size_t v = 0; v < e.size(); ++v) {
+            if (!e[v]) continue;
+            n += e[v];
+            b[std::min(static_cast<std::size_t>(bins) - 1, v * static_cast<std::size_t>(bins) / e.size())] += e[v];
+            r.max[ci] = static_cast<int>(v);
+        }
+        r.samples[ci] = n;
+        if (!n) continue;
+        r.clipped[ci] = static_cast<double>(e.back()) / static_cast<double>(n);
+        uint64_t seen = 0;
+        for (std::size_t v = 0; v < e.size(); ++v) {
+            seen += e[v];
+            if (2 * seen >= n) {
+                r.median[ci] = static_cast<int>(v);
+                break;
+            }
+        }
+    }
+    return r;
+}
+
 Levels autoLevels(const std::array<uint32_t, 256>& hist, double blackPercentile, double whitePercentile) {
     uint64_t total = 0;
     for (auto c : hist) total += c;

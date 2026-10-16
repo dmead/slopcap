@@ -131,7 +131,8 @@ if(SLOPCAP_BUILD_GUI)
     target_link_libraries(slopcap-diag PRIVATE slopcap_core Qt6::Gui slopcap_warnings)
     # qt_add_executable: with a static Qt it also links the platform plugin (qwindows) into the exe
     qt_add_executable(slopcap WIN32 src/app/main.cpp src/app/main_window.cpp src/app/theme.cpp src/app/focus_controller.cpp
-      src/app/focus_views.cpp src/app/collimation_panel.cpp src/app/settings_dialog.cpp src/app/mount_section.cpp)
+      src/app/focus_views.cpp src/app/collimation_panel.cpp src/app/settings_dialog.cpp src/app/mount_section.cpp
+      src/app/raw_histogram.cpp)
     set_target_properties(slopcap PROPERTIES AUTOMOC ON)
     # The UI fonts (IBM Plex, OFL), embedded when the build machine has them, so every install looks the same.
     set(SLOPCAP_FONT_DIR /usr/share/fonts/truetype/ibm-plex CACHE PATH "folder with the IBM Plex TTFs to embed")

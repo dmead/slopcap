@@ -84,6 +84,53 @@ TEST_CASE("histogram bins 8-bit samples directly and 16-bit by the high byte") {
     CHECK(h[0x80] == 1);
 }
 
+TEST_CASE("rawHistogram splits a Bayer frame by channel, in the ADC's units") {
+    // 64x32 RGGB, 16-bit, from a 12-bit ADC (MSB-aligned): R = 1000, G = 2000, B saturated (4095) on half the B sites.
+    const int w = 64, h = 32;
+    std::vector<std::byte> px(static_cast<std::size_t>(w * h * 2));
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            const int site = (y & 1) * 2 + (x & 1);   // RGGB: 0 R, 1 and 2 G, 3 B
+            const unsigned adu = site == 0 ? 1000 : site == 3 ? (x % 4 == 1 ? 4095 : 3000) : 2000;
+            const unsigned v = adu << 4;
+            const std::size_t i = static_cast<std::size_t>(y * w + x) * 2;
+            px[i] = static_cast<std::byte>(v & 0xff);
+            px[i + 1] = static_cast<std::byte>(v >> 8);
+        }
+    const auto r = rawHistogram(px, w, h, 16, Bayer::RGGB, 12, 64);
+    REQUIRE(r.channels == 3);
+    CHECK(r.fullScale == 4095);
+    CHECK(r.adcBits == 12);
+    CHECK(r.median[0] == 1000);
+    CHECK(r.median[1] == 2000);
+    CHECK(r.max[2] == 4095);
+    CHECK(r.samples[1] == 2 * r.samples[0]);   // two G sites per block
+    CHECK(r.clipped[0] == 0.0);
+    CHECK(r.clipped[2] == Catch::Approx(0.5));
+    CHECK(r.bins[0][1000 * 64 / 4096] == r.samples[0]);
+    CHECK(r.bins[2][63] == r.samples[2] / 2);
+
+    // Unknown ADC depth: the full 16-bit range.
+    CHECK(rawHistogram(px, w, h, 16, Bayer::RGGB, std::nullopt).fullScale == 65535);
+
+    // Sampling a big frame keeps whole blocks: still exactly two G per R.
+    std::vector<std::byte> big(static_cast<std::size_t>(1000 * 800), std::byte{40});
+    const auto s = rawHistogram(big, 1000, 800, 8, Bayer::GRBG, std::nullopt, 128, 10000);
+    CHECK(s.samples[1] == 2 * s.samples[0]);
+    CHECK(s.samples[0] + s.samples[1] + s.samples[2] <= 12000);
+    CHECK(s.median[2] == 40);
+}
+
+TEST_CASE("rawHistogram: mono 8-bit, and frames too small to read") {
+    std::vector<std::byte> px(16 * 16, std::byte{255});
+    const auto r = rawHistogram(px, 16, 16, 8, Bayer::None, std::nullopt);
+    REQUIRE(r.channels == 1);
+    CHECK(r.fullScale == 255);
+    CHECK(r.clipped[0] == 1.0);
+    CHECK(r.samples[0] == 256);
+    CHECK(rawHistogram(px, 16, 32, 8, Bayer::None, std::nullopt).channels == 0);   // buffer shorter than the frame
+}
+
 TEST_CASE("autoLevels puts black at the background and white at the bright tail") {
     std::array<uint32_t, 256> h{};
     h[20] = 9000;   // background

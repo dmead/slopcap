@@ -4,6 +4,7 @@
 #include "app/focus_controller.hpp"
 #include "app/focus_views.hpp"
 #include "app/mount_section.hpp"
+#include "app/raw_histogram.hpp"
 #include "app/theme.hpp"
 #include "camera/open_camera.hpp"
 #include "preview/histogram_widget.hpp"
@@ -179,6 +180,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         if (!cam_) return;
         focus_->onFrame(f, cam_->info().bayer);
         if (mode_ == Collimate) collim_->onFrame(f, cam_->info().bayer);
+        // the readout histogram: up to 10 times a second, while the Capture sidebar shows it
+        if (mode_ == Capture && (!rawHistClock_.isValid() || rawHistClock_.elapsed() >= 100)) {
+            rawHistClock_.start();
+            rawHist_->setData(preview::rawHistogram(f.pixels, f.info.roi.width, f.info.roi.height, f.info.bitDepth,
+                                                    cam_->info().bayer, cam_->info().adcBits));
+        }
     });
     connect(preview_, &preview::PreviewWidget::centreRequested, this, &MainWindow::centreRoiOn);
     connect(focus_, &FocusController::liveUpdated, this, &MainWindow::updateTargetInfo);
@@ -557,6 +564,8 @@ QWidget* MainWindow::buildCaptureRight() {
     mountSection_ = new MountSection(*mount_, *focus_);
     connect(mountSection_, &MountSection::message, this, &MainWindow::message);
     v->addWidget(mountSection_);
+    rawHist_ = new RawHistogramSection;
+    v->addWidget(rawHist_);
     v->addStretch(1);
     return w;
 }
@@ -747,6 +756,7 @@ void MainWindow::disconnectCamera() {
     stopSession();
     saveSettings();
     cam_.reset();
+    rawHist_->clear();
     populateCameraUi();
 }
 
