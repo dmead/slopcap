@@ -385,7 +385,7 @@ Consequences for SlopCap:
 
 M1 is the go/no-go: if the zero-drop capture core doesn't hold up, nothing else matters.
 
-M2 status (2026-10-16, first pass):
+M2 status (2026-10-16):
 - **Done:** `LatestFrame` tap (triple buffer, copied only when the preview asks); live-view sessions with no output;
   camera settings applied mid-stream through `CaptureSession::post`. The GL renderer demosaics and stretches into a
   mipmapped RGBA8 image, then draws it aspect-fitted. It matches the CPU reference to ±1 for every Bayer pattern,
@@ -406,11 +406,37 @@ M2 status (2026-10-16, first pass):
   - No dew trend and no one-sided limb blur.
   - Chromatic focus shift: blue softest at focuser ~64,420 and red softest at ~64,950.
   - The globe's size implies ~0.10″/px, not FireCapture's 0.14″/px setting.
+- **Also done 2026-10-16 (later):**
+  - **GUI restyled and restructured** to the "SlopCap UI" design canvas
+    (https://claude.ai/artifact/HDs3pRiwUQxpxZZRpmvayB). There's a header with modes, and Capture, Focus and Collimate
+    are working modes. Align and Sequence show disabled until built.
+  - **Windows:** one self-contained `slopcap.exe` (`docker/build.sh windows-static`: static Qt 6.11.2, embedded
+    ZWO/QHY SDKs and fonts, SDKs delay-loaded). Tested on the NUC in Remote Desktop: ASI585MC full frame 46.8 fps,
+    0 dropped, GPU preview working; QHY5III715C connected.
+  - **Zips** in `build/windows-static/slopcap-windows.zip` and `build/linux-release/slopcap-linux.zip` (not in git).
+    The Linux zip relies on system Qt and the INDI SDK packages.
 - **Still to do:**
-  - Windows GUI build: Qt for MinGW/MSVC.
-  - Real-camera check of the GUI on the laptop.
+  - Real-camera check of the GUI **on the laptop** (cameras and EAF plugged into it), before the Saturn night.
+  - Settings → optics: enter the focal ratio and the EAF's µm per step, so the sweep shows the critical focus zone.
   - Upload through a PBO if texture upload shows up in profiles.
-  - Critical-focus-zone overlay on the sweep (needs f-ratio and µm/step).
+  - ASCOM focuser on Windows (INDI only today).
+  - Align (drift guide outline) and Sequence modes from the design.
+  - More camera brands: specced in §5b, **parked**.
+
+**Saturn night checklist (laptop):**
+1. Plug the camera and the Gemini EAF into the laptop. `systemctl --user status indiserver` should show
+   `indi_myfocuserpro2_focus`.
+2. `build/linux-release/slopcap` → camera pill → `asi:0`; Focus tab → Connect (localhost:7624).
+3. Collimate on a bright star first (Collimate mode).
+4. Then Saturn: centre the ROI with right-click → "Centre ROI here", and run a Fine sweep. The table shows which
+   metric gives the smallest error. Go to the chosen focus.
+5. Record with Ctrl+R; each file gets a `.txt` of its settings. Afterwards, run `slopcap-diag` on the night's files.
+
+**Where things live:**
+- git: a private `origin` remote, and GitHub.
+- Build images: `slopcap-build` (Linux) and `slopcap-build-mingw` (Windows, static Qt).
+- The NUC: `C:\Users\<you>\slopcap\slopcap.exe`. To start it in the Remote Desktop session from SSH, use a
+  one-off interactive scheduled task.
 
 ## 10. Ground rules
 
