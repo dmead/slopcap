@@ -51,7 +51,7 @@ void CaptureSession::start() {
     std::promise<void> writerReady;
     auto ready = writerReady.get_future();
     writerThread_ = std::thread([this, p = std::move(writerReady)]() mutable {
-        std::unique_ptr<ser::Writer> w;
+        std::unique_ptr<ser::FrameSink> w;
         try {
             const auto& info = cam_.info();
             const Roi r = cam_.roi();
@@ -63,7 +63,13 @@ void CaptureSession::start() {
             h.observer = opt_.observer;
             h.instrument = info.model;
             h.telescope = opt_.telescope;
-            w = std::make_unique<ser::Writer>(opt_.output, h);
+            if (opt_.directIO) {
+                auto d = std::make_unique<ser::DirectWriter>(opt_.output, h, opt_.direct);
+                direct_.store(d.get());
+                w = std::move(d);
+            } else {
+                w = std::make_unique<ser::Writer>(opt_.output, h);
+            }
             p.set_value();
         } catch (...) {
             p.set_exception(std::current_exception());
@@ -77,14 +83,27 @@ void CaptureSession::start() {
                     continue;
                 }
                 auto& slot = ring_->slot(*s);
+                const auto t0 = std::chrono::steady_clock::now();
                 w->writeFrame(slot.pixels.first(slot.info.bytes), ser::toTicks(slot.info.timestamp));
+                writeLatency_.record(std::chrono::steady_clock::now() - t0);
                 bytesWritten_.fetch_add(slot.info.bytes, std::memory_order_relaxed);
                 written_.fetch_add(1, std::memory_order_relaxed);
                 ring_->release(*s);
             }
             w->finish();
+            if (auto* d = direct_.load()) {   // keep the direct writer's numbers after it's gone
+                std::lock_guard lock(directMutex_);
+                finalChunkP99_ = d->chunkWriteLatency().percentileUs(0.99);
+                finalChunkMax_ = d->chunkWriteLatency().maxUs();
+                finalStallMax_ = d->stallLatency().maxUs();
+                direct_.store(nullptr);
+            }
         } catch (const std::exception& e) {
             fail(e);
+            {
+                std::lock_guard lock(directMutex_);   // the writer is about to be destroyed
+                direct_.store(nullptr);
+            }
             // keep draining so capture isn't left without free slots
             while (auto s = ring_->next(std::chrono::milliseconds(50))) ring_->release(*s);
         }
@@ -180,6 +199,21 @@ CaptureStats CaptureSession::stats() const {
         s.writeMBps = static_cast<double>(bytesWritten_.load(std::memory_order_relaxed)) / 1e6 / s.seconds;
     }
     s.running = captureThread_.joinable() && !writerDone_.load(std::memory_order_acquire);
+    s.writeP50Us = writeLatency_.percentileUs(0.5);
+    s.writeP99Us = writeLatency_.percentileUs(0.99);
+    s.writeMaxUs = writeLatency_.maxUs();
+    {
+        std::lock_guard lock(directMutex_);
+        if (auto* d = direct_.load()) {
+            s.chunkP99Us = d->chunkWriteLatency().percentileUs(0.99);
+            s.chunkMaxUs = d->chunkWriteLatency().maxUs();
+            s.stallMaxUs = d->stallLatency().maxUs();
+        } else {
+            s.chunkP99Us = finalChunkP99_;
+            s.chunkMaxUs = finalChunkMax_;
+            s.stallMaxUs = finalStallMax_;
+        }
+    }
     std::lock_guard lock(errorMutex_);
     s.error = error_;
     return s;

@@ -22,6 +22,8 @@ endif()
 # ---------------------------------------------------------------- core library
 add_library(slopcap_core STATIC
   src/io/ser.cpp
+  src/io/direct_file.cpp
+  src/io/ser_direct.cpp
   src/camera/camera.cpp
   src/camera/sim_camera.cpp
   src/pipeline/frame_ring.cpp
@@ -97,7 +99,7 @@ if(SLOPCAP_BUILD_TESTS)
   find_package(Catch2 3 CONFIG QUIET)
   if(Catch2_FOUND)
     enable_testing()
-    add_executable(slopcap-tests tests/test_ser.cpp tests/test_sim_camera.cpp tests/test_pipeline.cpp)
+    add_executable(slopcap-tests tests/test_ser.cpp tests/test_sim_camera.cpp tests/test_pipeline.cpp tests/test_direct_writer.cpp)
     target_link_libraries(slopcap-tests PRIVATE slopcap_core slopcap_warnings Catch2::Catch2WithMain)
     include(Catch)
     catch_discover_tests(slopcap-tests)

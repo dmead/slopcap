@@ -4,7 +4,9 @@
 #pragma once
 
 #include "camera/camera.hpp"
+#include "io/ser_direct.hpp"
 #include "pipeline/frame_ring.hpp"
+#include "pipeline/latency.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -25,6 +27,8 @@ struct CaptureOptions {
     std::optional<uint64_t> frameLimit;                 ///< stop after this many frames
     std::size_t ringBytes = std::size_t{1} << 30;       ///< memory for the ring (default 1 GiB)
     std::string observer, telescope;                    ///< SER header text
+    bool directIO = false;                              ///< unbuffered chunked writer (ser::DirectWriter)
+    ser::DirectWriterOptions direct;                    ///< its chunk size, in-flight count, preallocation
 };
 
 struct CaptureStats {
@@ -39,6 +43,10 @@ struct CaptureStats {
     double writeMBps = 0;          ///< written bytes / seconds
     bool running = false;
     std::string error;             ///< first error from either thread, if any
+    // Time the writer thread spends handing one frame to the writer (copy + any stall), log2-bucketed.
+    uint64_t writeP50Us = 0, writeP99Us = 0, writeMaxUs = 0;
+    // Direct writer only: one chunk to disk, and waits for a free chunk (i.e. the disk falling behind).
+    uint64_t chunkP99Us = 0, chunkMaxUs = 0, stallMaxUs = 0;
 };
 
 class CaptureSession {
@@ -73,6 +81,10 @@ private:
 
     std::atomic<uint64_t> delivered_{0}, written_{0}, ringDropped_{0}, bytesWritten_{0};
     std::atomic<uint64_t> cameraDropped_{0};
+    LatencyHistogram writeLatency_;
+    std::atomic<const ser::DirectWriter*> direct_{nullptr};
+    mutable std::mutex directMutex_;
+    uint64_t finalChunkP99_ = 0, finalChunkMax_ = 0, finalStallMax_ = 0;   ///< guarded by directMutex_
     mutable std::mutex errorMutex_;
     std::string error_;
 };

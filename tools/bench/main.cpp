@@ -2,6 +2,7 @@
 // up: fps, frames lost by the camera vs by the pipeline, peak ring fill, write speed.
 //   slopcap-bench --camera asi|asi:N|qhy|qhy:N|sim:FILE.ser [--readout N] [--set NAME=VALUE ...]
 //                 [--seconds N] [--frames N] [--roi WxH] [--bits 8|16] [--ring-mb N] [--out FILE.ser] [--keep]
+//                 [--writer buffered|direct] [--chunk-mb N] [--inflight N] [--reserve-gb N]
 //   slopcap-bench --sim FILE.ser [--fast] [--loop] ...     (shorthand for a simulated camera)
 //   slopcap-bench --list                                   (connected cameras)
 // Exit status: 0 = nothing dropped, 1 = frames dropped, 2 = usage / setup error.
@@ -27,6 +28,7 @@ namespace {
     if (!msg.empty()) std::cerr << "error: " << msg << "\n";
     std::cerr << "usage: slopcap-bench --camera asi|asi:N|qhy|qhy:N|sim:FILE.ser [--readout N] [--set NAME=VALUE ...]\n"
                  "                     [--seconds N] [--frames N] [--roi WxH] [--bits 8|16] [--ring-mb N] [--out FILE.ser] [--keep]\n"
+                 "                     [--writer buffered|direct] [--chunk-mb N] [--inflight N] [--reserve-gb N]\n"
                  "       slopcap-bench --sim FILE.ser [--fast] [--loop] ...\n"
                  "       slopcap-bench --list\n";
     std::exit(2);
@@ -34,9 +36,11 @@ namespace {
 
 void printStats(const CaptureStats& s, const char* prefix) {
     std::cout << std::format("{}{:6.1f} s  {:8.2f} fps  delivered {:>8}  written {:>8}  camera-dropped {:>5}  ring-dropped {:>5}  "
-                             "ring peak {}/{}  write {:7.1f} MB/s\n",
+                             "ring peak {}/{}  write {:7.1f} MB/s  frame-write p50/p99/max {}/{}/{} us",
                              prefix, s.seconds, s.captureFps, s.delivered, s.written, s.cameraDropped, s.ringDropped,
-                             s.ringHighWater, s.ringCapacity, s.writeMBps);
+                             s.ringHighWater, s.ringCapacity, s.writeMBps, s.writeP50Us, s.writeP99Us, s.writeMaxUs);
+    if (s.chunkMaxUs) std::cout << std::format("  chunk p99/max {}/{} us  stall max {} us", s.chunkP99Us, s.chunkMaxUs, s.stallMaxUs);
+    std::cout << "\n";
 }
 
 }  // namespace
@@ -49,6 +53,10 @@ int main(int argc, char** argv) {
     double seconds = 0;
     uint64_t frames = 0;
     std::size_t ringMb = 1024;
+    std::string writer = "buffered";
+    std::size_t chunkMb = 8;
+    int inflight = 8;
+    double reserveGb = 0;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto val = [&]() -> std::string {
@@ -77,6 +85,10 @@ int main(int argc, char** argv) {
         else if (a == "--bits") bits = std::stoi(val());
         else if (a == "--ring-mb") ringMb = std::stoull(val());
         else if (a == "--out") out = val();
+        else if (a == "--writer") writer = val();
+        else if (a == "--chunk-mb") chunkMb = std::stoull(val());
+        else if (a == "--inflight") inflight = std::stoi(val());
+        else if (a == "--reserve-gb") reserveGb = std::stod(val());
         else usage("unknown option " + a);
     }
     if (sim.empty() == spec.empty()) usage("give exactly one of --camera SPEC or --sim FILE.ser");
@@ -104,6 +116,11 @@ int main(int argc, char** argv) {
         if (seconds > 0) opt.duration = std::chrono::milliseconds(static_cast<int64_t>(seconds * 1000));
         if (frames > 0) opt.frameLimit = frames;
         opt.ringBytes = ringMb << 20;
+        if (writer != "buffered" && writer != "direct") usage("--writer must be buffered or direct");
+        opt.directIO = writer == "direct";
+        opt.direct.chunkBytes = chunkMb << 20;
+        opt.direct.inflight = inflight;
+        opt.direct.reserveBytes = static_cast<uint64_t>(reserveGb * 1e9);
 
         const auto r = cam.roi();
         const auto& inf = cam.info();
@@ -112,7 +129,8 @@ int main(int argc, char** argv) {
         if (auto modes = cam.readoutModes(); !modes.empty()) std::cout << "  readout '" << modes[static_cast<std::size_t>(cam.readoutMode())].name << "'";
         for (const char* c : {"Gain", "Exposure", "Offset", "BandWidth", "USBTraffic"})
             if (auto v = cam.control(c)) std::cout << std::format("  {}={}", c, *v);
-        std::cout << std::format("\nring {} MB -> {}\n", ringMb, opt.output.string());
+        std::cout << std::format("\nring {} MB, {} writer{} -> {}\n", ringMb, writer,
+                                 opt.directIO ? std::format(" ({} MB chunks x {})", chunkMb, inflight) : "", opt.output.string());
 
         CaptureSession session(cam, opt);
         session.start();

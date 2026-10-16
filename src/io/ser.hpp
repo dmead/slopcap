@@ -93,20 +93,29 @@ private:
     std::optional<std::vector<int64_t>> timestamps_;
 };
 
-/// Writes a SER file frame by frame; finish() writes the frame count and timestamp trailer.
+/// Anything that stores a stream of frames (the buffered Writer, the direct-I/O DirectWriter).
+class FrameSink {
+public:
+    virtual ~FrameSink() = default;
+    virtual void writeFrame(std::span<const std::byte> frame, int64_t utcTicks) = 0;
+    virtual void finish() = 0;
+    virtual int64_t framesWritten() const = 0;
+};
+
+/// Writes a SER file frame by frame through the OS page cache; finish() writes the frame count and timestamp trailer.
 /// If the process dies before finish(), the file is still readable by Reader (as truncated).
-class Writer {
+class Writer final : public FrameSink {
 public:
     Writer(const std::filesystem::path& path, Header header);   ///< header.frameCount is ignored
-    ~Writer();
+    ~Writer() override;
     Writer(const Writer&) = delete;
     Writer& operator=(const Writer&) = delete;
 
     /// Append one frame (exactly header.frameBytes()) with its UTC timestamp in ticks.
-    void writeFrame(std::span<const std::byte> frame, int64_t utcTicks);
+    void writeFrame(std::span<const std::byte> frame, int64_t utcTicks) override;
     /// Patch the header frame count and append the timestamp trailer. Called by the destructor if needed.
-    void finish();
-    int64_t framesWritten() const { return static_cast<int64_t>(timestamps_.size()); }
+    void finish() override;
+    int64_t framesWritten() const override { return static_cast<int64_t>(timestamps_.size()); }
 
 private:
     std::filesystem::path path_;
