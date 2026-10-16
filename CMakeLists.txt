@@ -31,9 +31,14 @@ add_library(slopcap_core STATIC
   src/pipeline/capture_session.cpp
   src/preview/latest_frame.cpp
   src/preview/render_cpu.cpp
+  src/analysis/focus.cpp
 )
 target_sources(slopcap_core PRIVATE src/camera/open_camera.cpp)
 target_include_directories(slopcap_core PUBLIC src)
+# Lets SLOPCAP_SIMD_SUM (src/util/simd.hpp) vectorize float reductions; enables the pragma only, no OpenMP runtime.
+if(NOT MSVC)
+  target_compile_options(slopcap_core PRIVATE -fopenmp-simd)
+endif()
 target_link_libraries(slopcap_core PRIVATE slopcap_warnings)
 find_package(Threads REQUIRED)
 target_link_libraries(slopcap_core PUBLIC Threads::Threads)
@@ -86,6 +91,8 @@ message(STATUS "SlopCap camera backends: ${_defs}")
 # ---------------------------------------------------------------- tools
 add_executable(slopcap-serinfo tools/serinfo/main.cpp)
 target_link_libraries(slopcap-serinfo PRIVATE slopcap_core slopcap_warnings)
+add_executable(slopcap-focusbench tools/focusbench/main.cpp)
+target_link_libraries(slopcap-focusbench PRIVATE slopcap_core slopcap_warnings)
 add_executable(slopcap-bench tools/bench/main.cpp)
 target_link_libraries(slopcap-bench PRIVATE slopcap_core slopcap_warnings)
 
@@ -121,7 +128,7 @@ if(SLOPCAP_BUILD_TESTS)
   find_package(Catch2 3 CONFIG QUIET)
   if(Catch2_FOUND)
     enable_testing()
-    add_executable(slopcap-tests tests/test_ser.cpp tests/test_sim_camera.cpp tests/test_pipeline.cpp tests/test_direct_writer.cpp tests/test_preview.cpp)
+    add_executable(slopcap-tests tests/test_ser.cpp tests/test_sim_camera.cpp tests/test_pipeline.cpp tests/test_direct_writer.cpp tests/test_preview.cpp tests/test_focus.cpp)
     target_link_libraries(slopcap-tests PRIVATE slopcap_core slopcap_warnings Catch2::Catch2WithMain)
     include(Catch)
     catch_discover_tests(slopcap-tests)
