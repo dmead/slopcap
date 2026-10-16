@@ -6,11 +6,14 @@
 #include "pipeline/capture_session.hpp"
 #include "preview/latest_frame.hpp"
 
+#include <QDateTime>
 #include <QMainWindow>
+#include <QPoint>
 #include <QTimer>
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 
 class QCheckBox;
@@ -22,6 +25,7 @@ class QLineEdit;
 class QPushButton;
 class QSlider;
 class QSpinBox;
+class QTabWidget;
 class QVBoxLayout;
 
 namespace slopcap::preview {
@@ -32,6 +36,9 @@ struct Levels;
 
 namespace slopcap::app {
 
+class CollimationPanel;
+class FocusPanel;
+
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -41,7 +48,10 @@ public:
     void connectCamera(const QString& spec);   ///< also what --camera does
     void setOutputDir(const QString& dir);
     void toggleRecording();
-    void stopCapture() { stopSession(); }      ///< stop live view / recording (keeps the camera connected)
+    void stopCapture() { stopSession(); }
+    void showTab(const QString& name);
+    /// Connect the focuser; optionally start a sweep when it's ready (0 = keep the panel's value).
+    void startFocuser(const QString& hostPort, bool sweep, int range, int step, int frames);      ///< stop live view / recording (keeps the camera connected)
     void printSummary() const;                  ///< status line and stats to stdout (smoke tests)
 
 protected:
@@ -49,6 +59,12 @@ protected:
 
 private:
     QWidget* buildSidebar();
+    QWidget* buildCaptureTab();
+    void restoreCameraSettings();               ///< per-camera ROI / depth / readout / controls, before streaming
+    void saveSettings() const;
+    void centreRoiOn(QPointF imagePixel);
+    void writeSidecar(const QString& serPath, const CaptureStats& s, const QDateTime& mid) const;
+    QString cameraKey() const;
     void refreshCameraList();
     void disconnectCamera();
     void populateCameraControls();
@@ -85,6 +101,14 @@ private:
     QLineEdit* outDir_ = nullptr;
     QSpinBox* limitSeconds_ = nullptr;
     QPushButton* record_ = nullptr;
+    QLineEdit* target_ = nullptr;
+    QLabel* histInfo_ = nullptr;
+    QTabWidget* tabs_ = nullptr;
+    FocusPanel* focus_ = nullptr;
+    CollimationPanel* collim_ = nullptr;
+    std::optional<QPoint> roiCentre_;            ///< sensor pixel the ROI is centred on (unset = sensor centre)
+    QDateTime recStartUtc_;
+    std::map<std::string, double> recControls_;  ///< control values when the recording started (for the sidecar)
     QLabel* statusLeft_ = nullptr;
     QLabel* statusRight_ = nullptr;
     QTimer statsTimer_;

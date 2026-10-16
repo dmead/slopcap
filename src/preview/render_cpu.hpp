@@ -15,7 +15,12 @@ struct Levels {
     double black = 0.0;   ///< input level mapped to 0 (0..1 of full scale)
     double white = 1.0;   ///< input level mapped to 1
     double gamma = 1.0;   ///< applied after the black/white mapping (output = x^(1/gamma))
+    std::array<double, 3> wb{1.0, 1.0, 1.0};   ///< display white balance: R, G, B gains applied before the levels
 };
+
+/// Gray-world white balance on the target: gains that make the bright part of the frame neutral (G stays 1).
+/// Display only; recordings stay raw.
+std::array<double, 3> autoWhiteBalance(std::span<const std::byte> pixels, int width, int height, int bitDepth, Bayer bayer);
 
 /// 256-bin histogram of one frame (8-bit samples directly, 16-bit by their high byte), optionally on every Nth pixel.
 std::array<uint32_t, 256> histogram(std::span<const std::byte> pixels, int bitDepth, int stride = 1);

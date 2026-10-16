@@ -45,7 +45,8 @@ int siteColor(Bayer b, int x, int y) {
     return 1;
 }
 
-uint8_t stretch(double v, const Levels& lv) {
+uint8_t stretch(double v, const Levels& lv, int channel) {
+    v *= lv.wb[static_cast<std::size_t>(channel)];
     const double span = std::max(1e-9, lv.white - lv.black);
     double x = std::clamp((v - lv.black) / span, 0.0, 1.0);
     if (lv.gamma != 1.0) x = std::pow(x, 1.0 / lv.gamma);
@@ -108,10 +109,38 @@ std::vector<uint8_t> renderRgb(std::span<const std::byte> pixels, int width, int
                 for (int c = 0; c < 3; ++c) rgb[c] = c == own ? raw.at(x, y) : (n[c] ? sum[c] / n[c] : 0.0);
             }
             uint8_t* o = &out[(static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x)) * 3];
-            for (int c = 0; c < 3; ++c) o[c] = stretch(rgb[c], lv);
+            for (int c = 0; c < 3; ++c) o[c] = stretch(rgb[c], lv, c);
         }
     }
     return out;
+}
+
+std::array<double, 3> autoWhiteBalance(std::span<const std::byte> pixels, int width, int height, int bitDepth, Bayer bayer) {
+    if (bayer == Bayer::None || width < 4 || height < 4) return {1, 1, 1};
+    const Raw raw{pixels.data(), width, height, bitDepth};
+    // sample ~20k 2x2 cells
+    const int step = std::max(1, static_cast<int>(std::sqrt(static_cast<double>(width) * height / 4 / 20000.0)));
+    struct Cell { double c[3]; };
+    std::vector<Cell> cells;
+    double gmax = 0;
+    for (int y = 0; y + 1 < height; y += 2 * step)
+        for (int x = 0; x + 1 < width; x += 2 * step) {
+            Cell cell{{0, 0, 0}};
+            for (int dy = 0; dy < 2; ++dy)
+                for (int dx = 0; dx < 2; ++dx) {
+                    const int c = siteColor(bayer, x + dx, y + dy);
+                    cell.c[c] += raw.at(x + dx, y + dy) * (c == 1 ? 0.5 : 1.0);
+                }
+            gmax = std::max(gmax, cell.c[1]);
+            cells.push_back(cell);
+        }
+    // the target: cells well above the sky, not clipped
+    double sum[3] = {0, 0, 0};
+    for (const auto& cell : cells)
+        if (cell.c[1] > 0.3 * gmax && cell.c[0] < 0.98 && cell.c[1] < 0.98 && cell.c[2] < 0.98)
+            for (int c = 0; c < 3; ++c) sum[c] += cell.c[c];
+    if (sum[0] <= 0 || sum[2] <= 0 || sum[1] <= 0) return {1, 1, 1};
+    return {std::clamp(sum[1] / sum[0], 0.25, 4.0), 1.0, std::clamp(sum[1] / sum[2], 0.25, 4.0)};
 }
 
 }  // namespace slopcap::preview

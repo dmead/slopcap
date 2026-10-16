@@ -36,6 +36,12 @@ IndiClient::IndiClient(QObject* parent) : QObject(parent) {
     connect(&socket_, &QTcpSocket::readyRead, this, &IndiClient::onReadyRead);
 }
 
+IndiClient::~IndiClient() {
+    // The socket is destroyed after this object's own members; don't let its last signals reach a half-gone client.
+    socket_.disconnect(this);
+    socket_.abort();
+}
+
 void IndiClient::connectToServer(const QString& host, quint16 port) {
     socket_.abort();
     socket_.connectToHost(host, port);

@@ -60,7 +60,7 @@ TEST_CASE("GPU demosaic + stretch matches the CPU reference") {
     r.initialize();
     const auto bayer = GENERATE(Bayer::None, Bayer::RGGB, Bayer::GRBG, Bayer::GBRG, Bayer::BGGR);
     const int bits = GENERATE(8, 16);
-    const Levels lv = GENERATE(Levels{0.0, 1.0, 1.0}, Levels{0.1, 0.6, 2.2});
+    const Levels lv = GENERATE(Levels{0.0, 1.0, 1.0, {1, 1, 1}}, Levels{0.1, 0.6, 2.2, {1.6, 1.0, 1.3}});
     // odd sizes exercise the mirrored edges on both parities
     const int w = 37, h = 22;
     const auto raw = noise(w, h, bits, 1234);

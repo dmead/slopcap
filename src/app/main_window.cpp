@@ -1,5 +1,7 @@
 #include "app/main_window.hpp"
 
+#include "app/collimation_panel.hpp"
+#include "app/focus_panel.hpp"
 #include "camera/open_camera.hpp"
 #include "preview/histogram_widget.hpp"
 #include "preview/preview_widget.hpp"
@@ -10,7 +12,9 @@
 #include <QDateTime>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -19,6 +23,9 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSettings>
+#include <QTabWidget>
+#include <QTextStream>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QSpinBox>
@@ -55,6 +62,11 @@ QString sanitize(const std::string& s) {
     return out;
 }
 
+/// WinJUPOS time stamp: YYYY-MM-DD-HHMM_T, T = tenths of a minute.
+QString winjupos(const QDateTime& utc) {
+    return utc.toString("yyyy-MM-dd-HHmm") + "_" + QString::number(utc.time().second() / 6);
+}
+
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
@@ -65,7 +77,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     split->addWidget(buildSidebar());
     split->setStretchFactor(0, 1);
     split->setStretchFactor(1, 0);
-    split->setSizes({1100, 340});
+    split->setSizes({1020, 420});
     setCentralWidget(split);
 
     statusLeft_ = new QLabel("No camera");
@@ -77,17 +89,173 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             [this](const std::array<uint32_t, 256>& h, const preview::Levels& lv, const FrameInfo&) {
                 histogram_->setData(h, lv);
                 if (preview_->autoStretch()) showLevels(lv);
+                uint64_t total = 0;
+                int top = 0;
+                for (int b = 0; b < 256; ++b)
+                    if (h[static_cast<std::size_t>(b)]) total += h[static_cast<std::size_t>(b)], top = b;
+                const double clipped = total ? 100.0 * h[255] / static_cast<double>(total) : 0;
+                histInfo_->setText(QString("max %1 %  ·  clipped %2 %").arg(top * 100 / 255).arg(clipped, 0, 'f', 2));
+                histInfo_->setStyleSheet(clipped > 0.1 ? "color: #f06a5a" : "");
             });
+    connect(preview_, &preview::PreviewWidget::rawFrame, this, [this](const LatestFrame::Frame& f) {
+        if (!cam_) return;
+        focus_->onFrame(f, cam_->info().bayer);
+        collim_->onFrame(f, cam_->info().bayer);
+    });
+    connect(preview_, &preview::PreviewWidget::centreRequested, this, &MainWindow::centreRoiOn);
     connect(&statsTimer_, &QTimer::timeout, this, &MainWindow::updateStats);
     statsTimer_.start(250);
     refreshCameraList();
     setConfigEnabled(false);
     resize(1440, 900);
+
+    QSettings st;
+    if (st.contains("window/geometry")) restoreGeometry(st.value("window/geometry").toByteArray());
+    if (st.contains("record/dir")) outDir_->setText(st.value("record/dir").toString());
+    target_->setText(st.value("record/target", "Saturn").toString());
+    limitSeconds_->setValue(st.value("record/limit", 0).toInt());
+    if (st.contains("camera/last")) cameraSpec_->setEditText(st.value("camera/last").toString());
+    focus_->setBacklash(st.value("focuser/backlash", 600).toInt(), st.value("focuser/outward", true).toBool());
+    focus_->setMetric(st.value("focus/metric", "gradient").toString());
+    focus_->setOutputDir(outDir_->text());
+    connect(outDir_, &QLineEdit::textChanged, focus_, &FocusPanel::setOutputDir);
+    if (st.value("focuser/connected", false).toBool()) focus_->connectFocuser(st.value("focuser/server", "localhost:7624").toString());
 }
 
 MainWindow::~MainWindow() { stopSession(); }
 
+void MainWindow::saveSettings() const {
+    QSettings st;
+    st.setValue("window/geometry", saveGeometry());
+    st.setValue("record/dir", outDir_->text());
+    st.setValue("record/target", target_->text());
+    st.setValue("record/limit", limitSeconds_->value());
+    st.setValue("camera/last", cameraSpec_->currentData().isValid() ? cameraSpec_->currentData().toString() : cameraSpec_->currentText());
+    st.setValue("focuser/server", focus_->focuserServer());
+    st.setValue("focuser/connected", focus_->focuserPosition() >= 0);
+    st.setValue("focuser/backlash", focus_->backlash());
+    st.setValue("focuser/outward", focus_->approachOutward());
+    st.setValue("focus/metric", focus_->metricName());
+    if (!cam_) return;
+    st.beginGroup("cameras/" + cameraKey());
+    const Roi r = cam_->roi();
+    st.setValue("roi", QRect(r.x, r.y, r.width, r.height));
+    st.setValue("bits", cam_->bitDepth());
+    st.setValue("readout", cam_->readoutMode());
+    for (const auto& [name, box] : controlBoxes_) st.setValue("controls/" + QString::fromStdString(name), box->value());
+    st.endGroup();
+}
+
+QString MainWindow::cameraKey() const {
+    const auto& info = cam_->info();
+    return sanitize(info.vendor + "-" + info.model + "-" + info.serial);
+}
+
+void MainWindow::restoreCameraSettings() {
+    QSettings st;
+    st.beginGroup("cameras/" + cameraKey());
+    try {
+        if (st.contains("readout")) cam_->setReadoutMode(st.value("readout").toInt());
+        if (st.contains("bits")) cam_->setBitDepth(st.value("bits").toInt());
+        if (st.contains("roi")) {
+            const QRect r = st.value("roi").toRect();
+            cam_->setRoi({r.x(), r.y(), r.width(), r.height(), 1});
+            const auto& info = cam_->info();
+            if (r.width() < info.sensorWidth || r.height() < info.sensorHeight) roiCentre_ = r.center();
+        }
+    } catch (const std::exception& e) {
+        statusLeft_->setText(QString("Saved format not accepted: %1").arg(e.what()));
+    }
+    st.beginGroup("controls");
+    for (const auto& key : st.childKeys()) {
+        try {
+            cam_->setControl(key.toStdString(), st.value(key).toDouble());
+        } catch (const std::exception&) {
+            // controls differ between drivers / SDK versions: skip what this one doesn't take
+        }
+    }
+}
+
+void MainWindow::centreRoiOn(QPointF img) {
+    if (!cam_ || recording_) return;
+    const Roi cur = cam_->roi();
+    roiCentre_ = QPoint(cur.x + static_cast<int>(img.x()), cur.y + static_cast<int>(img.y()));
+    const auto& info = cam_->info();
+    if (cur.width >= info.sensorWidth && cur.height >= info.sensorHeight && roi_->count() > 1) {
+        // full frame can't move: switch to a planetary-sized ROI
+        int pick = 1;
+        for (int i = 1; i < roi_->count(); ++i)
+            if (roi_->itemData(i).toSize().width() <= 1024) {
+                pick = i;
+                break;
+            }
+        const QSignalBlocker b(roi_);
+        roi_->setCurrentIndex(pick);
+    }
+    applyFormat();
+}
+
+void MainWindow::writeSidecar(const QString& serPath, const CaptureStats& s, const QDateTime& mid) const {
+    QFile f(QFileInfo(serPath).path() + "/" + QFileInfo(serPath).completeBaseName() + ".txt");
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) return;
+    QTextStream o(&f);
+    const auto& info = cam_->info();
+    const Roi r = cam_->roi();
+    const QDateTime end = recStartUtc_.addMSecs(static_cast<qint64>(s.seconds * 1000));
+    o << "SlopCap capture\n";
+    o << "File=" << QFileInfo(serPath).fileName() << "\n";
+    o << "Target=" << target_->text() << "\n";
+    o << "Camera=" << QString::fromStdString(info.vendor + " " + info.model) << "\n";
+    o << "Serial=" << QString::fromStdString(info.serial) << "\n";
+    o << "Start(UT)=" << recStartUtc_.toString(Qt::ISODateWithMs) << "\n";
+    o << "Mid(UT)=" << mid.toString(Qt::ISODateWithMs) << "\n";
+    o << "End(UT)=" << end.toString(Qt::ISODateWithMs) << "\n";
+    o << "Duration=" << QString::number(s.seconds, 'f', 3) << " s\n";
+    o << "Frames=" << s.written << "\n";
+    o << "FPS=" << QString::number(s.captureFps, 'f', 2) << "\n";
+    o << "Dropped(camera)=" << s.cameraDropped << "\n";
+    o << "Dropped(disk)=" << s.ringDropped << "\n";
+    o << "ROI=" << r.width << "x" << r.height << "\n";
+    o << "ROI(Offset)=" << r.x << "x" << r.y << "\n";
+    o << "BitDepth=" << cam_->bitDepth() << "\n";
+    o << "Bayer=" << bayerName(info.bayer) << "\n";
+    o << "Readout=" << readout_->currentText() << "\n";
+    for (const auto& [name, v] : recControls_) o << QString::fromStdString(name) << "=" << v << "\n";
+    if (focus_->focuserPosition() >= 0) o << "Focuser position=" << focus_->focuserPosition() << "\n";
+    if (!s.error.empty()) o << "Error=" << QString::fromStdString(s.error) << "\n";
+}
+
 QWidget* MainWindow::buildSidebar() {
+    auto* tabs = tabs_ = new QTabWidget;
+    tabs->addTab(buildCaptureTab(), "Capture");
+    auto scrolled = [](QWidget* w) {
+        auto* sa = new QScrollArea;
+        sa->setWidget(w);
+        sa->setWidgetResizable(true);
+        sa->setFrameShape(QFrame::NoFrame);
+        sa->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);   // panels reflow to the sidebar's width
+        return sa;
+    };
+    focus_ = new FocusPanel(preview_);
+    tabs->addTab(scrolled(focus_), "Focus");
+    collim_ = new CollimationPanel(preview_);
+    tabs->addTab(scrolled(collim_), "Collimate");
+    tabs->setMinimumWidth(380);
+    return tabs;
+}
+
+void MainWindow::showTab(const QString& name) {
+    for (int i = 0; i < tabs_->count(); ++i)
+        if (tabs_->tabText(i).compare(name, Qt::CaseInsensitive) == 0) tabs_->setCurrentIndex(i);
+    if (name.compare("collimate", Qt::CaseInsensitive) == 0) collim_->setAnalysing(true);
+}
+
+void MainWindow::startFocuser(const QString& hostPort, bool sweep, int range, int step, int frames) {
+    focus_->connectFocuser(hostPort);
+    if (sweep) focus_->sweepWhenReady(range, step, frames);
+}
+
+QWidget* MainWindow::buildCaptureTab() {
     auto* side = new QWidget;
     auto* col = new QVBoxLayout(side);
 
@@ -143,9 +311,18 @@ QWidget* MainWindow::buildSidebar() {
     auto* dispLay = new QVBoxLayout(dispBox);
     histogram_ = new preview::HistogramWidget;
     dispLay->addWidget(histogram_);
+    histInfo_ = new QLabel;
+    dispLay->addWidget(histInfo_);
     autoStretch_ = new QCheckBox("Auto stretch");
     autoStretch_->setChecked(true);
-    dispLay->addWidget(autoStretch_);
+    auto* wbRow = new QHBoxLayout;
+    wbRow->addWidget(autoStretch_);
+    auto* autoWb = new QCheckBox("Auto white balance");
+    autoWb->setChecked(true);
+    autoWb->setToolTip("Display only: recordings stay raw");
+    wbRow->addWidget(autoWb);
+    dispLay->addLayout(wbRow);
+    connect(autoWb, &QCheckBox::toggled, this, [this](bool on) { preview_->setAutoWhiteBalance(on); });
     auto* lvForm = new QFormLayout;
     auto slider = [](int max) {
         auto* s = new QSlider(Qt::Horizontal);
@@ -179,6 +356,9 @@ QWidget* MainWindow::buildSidebar() {
     dirRow->addWidget(outDir_, 1);
     dirRow->addWidget(browse);
     recLay->addRow("Folder", dirRow);
+    target_ = new QLineEdit;
+    target_->setToolTip("Used in the file name (WinJUPOS style: 2026-10-17-0315_4-Saturn.ser) and the sidecar");
+    recLay->addRow("Target", target_);
     limitSeconds_ = new QSpinBox;
     limitSeconds_->setRange(0, 24 * 3600);
     limitSeconds_->setSuffix(" s");
@@ -217,6 +397,8 @@ void MainWindow::connectCamera(const QString& spec) {
         return;
     }
     if (cameraSpec_->currentText().isEmpty() || cameraSpec_->currentData().toString() != spec) cameraSpec_->setEditText(spec);
+    roiCentre_.reset();
+    restoreCameraSettings();
     const auto& info = cam_->info();
     cameraName_->setText(QString::fromStdString(std::format("{} {} · {}×{} · {:.2f} µm · {}", info.vendor, info.model, info.sensorWidth,
                                                             info.sensorHeight, info.pixelUm, bayerName(info.bayer))));
@@ -246,6 +428,7 @@ void MainWindow::connectCamera(const QString& spec) {
 
 void MainWindow::disconnectCamera() {
     stopSession();
+    saveSettings();
     cam_.reset();
     connect_->setText("Connect");
     cameraSpec_->setEnabled(true);
@@ -315,8 +498,12 @@ void MainWindow::applyFormat() {
         cam_->setBitDepth(bits_->currentData().toInt());
         const QSize s = roi_->currentData().toSize();
         const auto& info = cam_->info();
-        // centred, on offsets every driver accepts (multiple of 8 across, even down; keeps the Bayer phase)
-        cam_->setRoi({(info.sensorWidth - s.width()) / 2 / 8 * 8, (info.sensorHeight - s.height()) / 2 / 2 * 2, s.width(), s.height(), 1});
+        // centred (on the chosen point, else the sensor), on offsets every driver accepts (multiple of 8 across, even
+        // down; keeps the Bayer phase)
+        const QPoint c = roiCentre_.value_or(QPoint(info.sensorWidth / 2, info.sensorHeight / 2));
+        const int x = std::clamp(c.x() - s.width() / 2, 0, info.sensorWidth - s.width()) / 8 * 8;
+        const int y = std::clamp(c.y() - s.height() / 2, 0, info.sensorHeight - s.height()) / 2 * 2;
+        cam_->setRoi({x, y, s.width(), s.height(), 1});
     } catch (const std::exception& e) {
         QMessageBox::warning(this, "SlopCap", e.what());
     }
@@ -333,8 +520,10 @@ void MainWindow::startSession(bool record) {
             QMessageBox::warning(this, "SlopCap", "Can't create " + outDir_->text());
             record = false;
         } else {
-            recordingPath_ = dir.filePath(QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss") + "_" +
-                                          sanitize(cam_->info().model) + ".ser");
+            recStartUtc_ = QDateTime::currentDateTimeUtc();
+            recordingPath_ = dir.filePath(winjupos(recStartUtc_) + "-" + sanitize(target_->text().isEmpty() ? "capture" : target_->text().toStdString()) + ".ser");
+            recControls_.clear();
+            for (const auto& [name, box] : controlBoxes_) recControls_[name] = box->value();
             opt.output = recordingPath_.toStdString();
             opt.directIO = true;
             if (limitSeconds_->value() > 0) opt.duration = std::chrono::seconds(limitSeconds_->value());
@@ -359,6 +548,14 @@ void MainWindow::stopSession() {
     if (!session_) return;
     session_->stop();
     const auto s = session_->stats();
+    if (recording_ && s.written > 0) {
+        // WinJUPOS wants the mid-capture time in the name: rename now that the length is known.
+        const QDateTime mid = recStartUtc_.addMSecs(static_cast<qint64>(s.seconds * 500));
+        const QString named = QFileInfo(recordingPath_).path() + "/" + winjupos(mid) + "-" +
+                              sanitize(target_->text().isEmpty() ? "capture" : target_->text().toStdString()) + ".ser";
+        if (named != recordingPath_ && !QFileInfo::exists(named) && QFile::rename(recordingPath_, named)) recordingPath_ = named;
+        writeSidecar(recordingPath_, s, mid);
+    }
     if (recording_)
         statusLeft_->setText(QString::fromStdString(std::format("Saved {} frames ({:.1f} s, {:.0f} MB/s), dropped {} by camera, {} by disk{}",
                                                                 s.written, s.seconds, s.writeMBps, s.cameraDropped, s.ringDropped,
@@ -433,6 +630,7 @@ void MainWindow::closeEvent(QCloseEvent* e) {
         e->ignore();
         return;
     }
+    saveSettings();
     stopSession();
     e->accept();
 }

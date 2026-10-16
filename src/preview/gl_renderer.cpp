@@ -28,6 +28,7 @@ uniform ivec2 size;
 uniform int mosaic;      // 0 = mono
 uniform ivec2 redAt;     // parity of the red sites; blue sits at the opposite parity
 uniform vec3 levels;     // black, white, gamma
+uniform vec3 wb;         // display white balance gains
 out vec4 color;
 
 int mirror(int v, int n) {
@@ -71,16 +72,20 @@ void main() {
         float c0 = at(p);
         if (own == 0) rgb.r = c0; else if (own == 1) rgb.g = c0; else rgb.b = c0;
     }
+    rgb *= wb;
     color = vec4(stretch(rgb.r), stretch(rgb.g), stretch(rgb.b), 1.0);
 }
 )";
 
 // Pass 2: raw row 0 is at the bottom of the texture, so flip to put it at the top of the window.
+// uvMin/uvMax: the visible part of the image (texture coordinates; raw row 0 is t = 0, the top of the picture).
 constexpr const char* kBlitFs = R"(#version 330 core
 uniform sampler2D img;
+uniform vec2 uvMin;
+uniform vec2 uvMax;
 in vec2 uv;
 out vec4 color;
-void main() { color = texture(img, vec2(uv.x, 1.0 - uv.y)); }
+void main() { color = texture(img, vec2(mix(uvMin.x, uvMax.x, uv.x), mix(uvMax.y, uvMin.y, uv.y))); }
 )";
 
 // Parity (x & 1, y & 1) of the red sites for each pattern.
@@ -189,6 +194,7 @@ void GlRenderer::runPass1(const Levels& levels) {
     glUniform2i(debayer_->uniformLocation("redAt"), rx, ry);
     debayer_->setUniformValue("levels", static_cast<float>(levels.black), static_cast<float>(levels.white),
                               static_cast<float>(levels.gamma));
+    debayer_->setUniformValue("wb", static_cast<float>(levels.wb[0]), static_cast<float>(levels.wb[1]), static_cast<float>(levels.wb[2]));
     vao_->bind();
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     vao_->release();
@@ -198,24 +204,32 @@ void GlRenderer::runPass1(const Levels& levels) {
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFbo));
 }
 
-void GlRenderer::draw(unsigned fbo, int targetWidth, int targetHeight) {
+void GlRenderer::draw(unsigned fbo, int targetWidth, int targetHeight, double x, double y, double w, double h) {
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, targetWidth, targetHeight);
     glClearColor(0.04f, 0.04f, 0.05f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-    if (!hasImage()) return;
-    // Aspect fit, centred.
-    const double s = std::min(static_cast<double>(targetWidth) / width_, static_cast<double>(targetHeight) / height_);
-    const int w = std::max(1, static_cast<int>(width_ * s)), h = std::max(1, static_cast<int>(height_ * s));
-    glViewport((targetWidth - w) / 2, (targetHeight - h) / 2, w, h);
+    if (!hasImage() || w <= 0 || h <= 0) return;
+    // Visible part of the image rectangle, in whole target pixels.
+    const double vx0 = std::max(0.0, x), vy0 = std::max(0.0, y), vx1 = std::min<double>(targetWidth, x + w),
+                 vy1 = std::min<double>(targetHeight, y + h);
+    const int ix0 = static_cast<int>(std::floor(vx0)), iy0 = static_cast<int>(std::floor(vy0));
+    const int ix1 = static_cast<int>(std::ceil(vx1)), iy1 = static_cast<int>(std::ceil(vy1));
+    if (ix1 <= ix0 || iy1 <= iy0) return;
+    glViewport(ix0, targetHeight - iy1, ix1 - ix0, iy1 - iy0);   // GL's origin is bottom-left
     blit_->bind();
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, rgbTex_);
     blit_->setUniformValue("img", 0);
+    blit_->setUniformValue("uvMin", static_cast<float>((ix0 - x) / w), static_cast<float>((iy0 - y) / h));
+    blit_->setUniformValue("uvMax", static_cast<float>((ix1 - x) / w), static_cast<float>((iy1 - y) / h));
     vao_->bind();
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     vao_->release();
     blit_->release();
+    // leave the state as found, so QPainter can draw overlays on top
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glViewport(0, 0, targetWidth, targetHeight);
 }
 
 std::vector<uint8_t> GlRenderer::readRgb() {

@@ -38,6 +38,7 @@ class IndiClient : public QObject {
     Q_OBJECT
 public:
     explicit IndiClient(QObject* parent = nullptr);
+    ~IndiClient() override;
     void connectToServer(const QString& host, quint16 port);
     void disconnectFromServer();
     bool isConnected() const { return socket_.state() == QAbstractSocket::ConnectedState; }

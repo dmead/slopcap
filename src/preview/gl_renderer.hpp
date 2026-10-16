@@ -33,8 +33,9 @@ public:
     /// Re-run pass 1 on the last frame with new levels (slider moved while the stream is paused).
     void reprocess(const Levels& levels);
 
-    /// Pass 2: draw the processed image aspect-fitted into framebuffer `fbo` of the given pixel size.
-    void draw(unsigned fbo, int targetWidth, int targetHeight);
+    /// Pass 2: draw the processed image into framebuffer `fbo` (targetWidth x targetHeight pixels) so that it covers
+    /// the rectangle (x, y, w, h) in target pixels, top-left origin; the rectangle may extend past the edges (zoom).
+    void draw(unsigned fbo, int targetWidth, int targetHeight, double x, double y, double w, double h);
 
     bool hasImage() const { return width_ > 0; }
     int imageWidth() const { return width_; }
