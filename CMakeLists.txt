@@ -9,6 +9,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(SLOPCAP_WERROR "Treat compiler warnings as errors" OFF)
 option(SLOPCAP_BUILD_TESTS "Build the unit tests (needs Catch2 3)" ON)
 option(SLOPCAP_BUILD_CAMPROBE "Build tools/camprobe (needs the ZWO and/or QHY SDK)" ON)
+option(SLOPCAP_BUILD_GUI "Build the Qt GUI (needs Qt 6 Widgets + OpenGL)" ON)
 
 # Warnings for everything we compile (not third-party code).
 add_library(slopcap_warnings INTERFACE)
@@ -96,6 +97,25 @@ if(SLOPCAP_BUILD_CAMPROBE)
   endif()
 endif()
 
+# ---------------------------------------------------------------- GUI (Qt 6, OpenGL 3.3)
+if(SLOPCAP_BUILD_GUI)
+  find_package(Qt6 6.4 QUIET COMPONENTS Widgets OpenGL OpenGLWidgets)
+  if(Qt6_FOUND)
+    add_library(slopcap_gui STATIC
+      src/preview/gl_renderer.cpp
+      src/preview/preview_widget.cpp
+      src/preview/histogram_widget.cpp
+    )
+    set_target_properties(slopcap_gui PROPERTIES AUTOMOC ON)
+    target_link_libraries(slopcap_gui PUBLIC slopcap_core Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets PRIVATE slopcap_warnings)
+    add_executable(slopcap WIN32 src/app/main.cpp src/app/main_window.cpp)
+    set_target_properties(slopcap PROPERTIES AUTOMOC ON)
+    target_link_libraries(slopcap PRIVATE slopcap_gui slopcap_warnings)
+  else()
+    message(STATUS "Qt 6 (Widgets, OpenGL, OpenGLWidgets) not found: GUI not built (Linux: apt install qt6-base-dev)")
+  endif()
+endif()
+
 # ---------------------------------------------------------------- tests
 if(SLOPCAP_BUILD_TESTS)
   find_package(Catch2 3 CONFIG QUIET)
@@ -105,6 +125,15 @@ if(SLOPCAP_BUILD_TESTS)
     target_link_libraries(slopcap-tests PRIVATE slopcap_core slopcap_warnings Catch2::Catch2WithMain)
     include(Catch)
     catch_discover_tests(slopcap-tests)
+    # Needs an OpenGL 3.3 context: a desktop session, or Xvfb + Mesa (docker/build.sh starts Xvfb). Not under TSan:
+    # the test is single-threaded, and uninstrumented Qt / X11 / Mesa only produce false reports there.
+    if(TARGET slopcap_gui AND NOT CMAKE_CXX_FLAGS MATCHES "sanitize=thread")
+      add_executable(slopcap-gl-tests tests/test_gl_render.cpp)
+      target_link_libraries(slopcap-gl-tests PRIVATE slopcap_gui slopcap_warnings Catch2::Catch2)
+      add_test(NAME gl-render COMMAND slopcap-gl-tests)
+      set_tests_properties(gl-render PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/sanitizers/lsan-gl.supp")
+    endif()
   else()
     message(WARNING "Catch2 3 not found: tests disabled (Linux: apt install catch2; Windows: vcpkg install catch2)")
   endif()

@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -40,11 +41,13 @@ struct CaptureStats {
     uint64_t ringDropped = 0;      ///< frames we lost because the ring was full (writer too slow)
     std::size_t ringCapacity = 0;
     std::size_t ringHighWater = 0;
+    std::size_t ringQueued = 0;    ///< frames waiting for the writer right now
     double seconds = 0;            ///< since start
     double captureFps = 0;         ///< delivered / seconds
     double writeMBps = 0;          ///< written bytes / seconds
     bool running = false;
     std::string error;             ///< first error from either thread, if any
+    std::string notice;            ///< last error from a posted action (the session keeps running)
     // Time the writer thread spends handing one frame to the writer (copy + any stall), log2-bucketed.
     uint64_t writeP50Us = 0, writeP99Us = 0, writeMaxUs = 0;
     // Direct writer only: one chunk to disk, and waits for a free chunk (i.e. the disk falling behind).
@@ -63,6 +66,10 @@ public:
     /// Wait until the limit is reached, the stream ends, an error occurs, or `timeout` passes. True if finished.
     bool wait(std::chrono::milliseconds timeout);
     CaptureStats stats() const;
+    /// Run `action` on the capture thread between frames: the way to change exposure, gain etc. mid-stream, since
+    /// cameras aren't thread-safe. Exceptions it throws land in stats().notice. Actions posted after the capture
+    /// thread has finished never run.
+    void post(std::function<void(ICamera&)> action);
 
 private:
     void captureLoop();
@@ -88,7 +95,11 @@ private:
     mutable std::mutex directMutex_;
     uint64_t finalChunkP99_ = 0, finalChunkMax_ = 0, finalStallMax_ = 0;   ///< guarded by directMutex_
     mutable std::mutex errorMutex_;
-    std::string error_;
+    std::string error_, notice_;
+    std::mutex postMutex_;
+    std::vector<std::function<void(ICamera&)>> posted_;
+    std::atomic<bool> hasPosted_{false};
+    void runPosted();
 };
 
 }  // namespace slopcap

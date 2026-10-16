@@ -297,9 +297,14 @@ M1 go/no-go runs, Windows native, ZWO at 1 ms exposure:
 
 The cameras and SlopCap delivered every frame. The disk, an unbranded "PCIe SSD" (firmware V0513A0), writes at
 full speed for about 40-50 s (~12-15 GB, its fast cache), then falls to ~150-190 MB/s. It reached 83 °C in the small
-chassis, so it's probably throttling as well. BitLocker is off; Defender real-time scanning is on with no
-exclusions. Planetary ROI captures (≤ ~150 MB/s) are fine. Full-frame or full-sensor captures longer than ~40 s
-need a better SSD (TLC with DRAM, and a heatsink).
+chassis during back-to-back runs. BitLocker is off; Defender real-time scanning is on with no exclusions.
+
+Rested drive (2026-10-16: 18 min idle first, 36 °C at the start, full-frame ASI585MC, direct writer, 3 min): it kept up
+at ~388 MB/s for ~55 s (~20 GB), then dropped to 153-192 MB/s and stayed there. It peaked at only 66 °C, so **the cliff
+is the fast cache running out, not heat**. Resting buys a slightly bigger cache (~20 GB vs 12-15 GB) but the same
+outcome: 5,373 of 8,443 frames written (vs 5,229-5,399 back-to-back). Planetary ROI captures (≤ ~150 MB/s) are fine.
+Full-frame or full-sensor captures longer than ~50 s need a better SSD (TLC with DRAM). A larger RAM ring only
+stretches the burst: each extra GB adds ~5 s at 380 MB/s in, 170 MB/s out.
 
 Consequences for SlopCap:
 - The startup disk check (§6) must write past the drive's fast cache (tens of GB) or watch for the cliff; a short
@@ -323,6 +328,20 @@ Consequences for SlopCap:
 
 M1 is the go/no-go: if the zero-drop capture core doesn't hold up, nothing else matters.
 
+M2 status (2026-10-16, first pass):
+- **Done:** `LatestFrame` tap (triple buffer, copied only when the preview asks); live-view sessions with no output;
+  camera settings applied mid-stream through `CaptureSession::post`. The GL renderer demosaics and stretches into a
+  mipmapped RGBA8 image, then draws it aspect-fitted. It matches the CPU reference to ±1 for every Bayer pattern,
+  depth and gamma (`slopcap-gl-tests`; Iris Xe, and Mesa llvmpipe under Xvfb in Docker). Histogram with auto or manual
+  levels, gain-landmark buttons, and record with live MB/s, buffer and drop counters.
+- **Measured:** laptop, release build, 3840×2160 8-bit RGGB replay at 39 fps: the display runs at 35 fps while
+  recording at 322 MB/s, 0 dropped.
+- **Still to do:**
+  - Windows GUI build: Qt for MinGW/MSVC on the NUC.
+  - Measure display fps with real cameras on the NUC (UHD 630).
+  - Zoom and pan, and 1:1 view.
+  - Upload through a PBO if texture upload shows up in profiles.
+
 ## 10. Ground rules
 
 - **Clean room.** SlopCap is written from public sources only: camera SDK headers and docs, the SER format
@@ -334,7 +353,7 @@ M1 is the go/no-go: if the zero-drop capture core doesn't hold up, nothing else 
 ## 11. Open questions
 
 0. ~~Platform~~: both Linux and Windows. Linux device testing on the observatory machine runs in WSL2 + usbipd-win (§8).
-1. GUI: Qt Widgets (planned) or QML?
+1. ~~GUI~~: Qt Widgets + QOpenGLWidget (M2).
 2. SlopCap's own license (GPL-3.0 like INDI/KStars, or MIT/Apache)? Check that the ZWO SDK's license allows
    distributing builds that link it.
 3. ~~Which camera SDK comes after ZWO?~~ QHY, alongside ZWO from M1. After those: PlayerOne, ToupTek, SVBony?

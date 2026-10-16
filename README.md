@@ -16,15 +16,18 @@ Status: **M1 in progress**: capture pipeline + ZWO / QHY backends; ZWO verified 
 | `src/pipeline/capture_session.*` | `CaptureSession`: capture thread + SER writer thread; counts camera drops vs ring drops |
 | `src/camera/asi_camera.*`, `qhy_camera.*` | ZWO and QHY backends (built when their SDKs are found) |
 | `src/camera/open_camera.*` | open a camera from a spec: `asi[:N]`, `qhy[:N]`, `sim:FILE.ser` |
+| `src/preview/` | `LatestFrame` tap, CPU reference debayer/stretch/histogram, `GlRenderer` (GPU), preview + histogram widgets |
+| `src/app/` | `slopcap`: the GUI. `slopcap --camera SPEC [--out DIR] [--record] [--quit-after S --screenshot F.png]` |
 | `tools/bench` | `slopcap-bench --camera SPEC …` / `--sim FILE.ser` / `--list`: record through the full pipeline and report fps / drops / ring peak / MB/s |
 | `tools/serinfo` | `slopcap-serinfo FILE.ser…`: header, frames vs header, timestamps, real frame rate, longest gap |
 | `tools/camprobe` | `slopcap-camprobe [--json]`: what each connected ZWO / QHY camera reports (fixtures from real cameras inside) |
-| `tests/` | Catch2 unit tests |
+| `tests/` | Catch2 unit tests; `slopcap-gl-tests` checks the GPU preview against the CPU reference |
 
 ## Build in Docker (any machine)
 
 `docker/build.sh` builds and tests inside a pinned Ubuntu 26.04 image (GCC 15, CMake, Ninja, Catch2, MinGW-w64,
-ZWO / QHY SDKs). The repo is mounted at the same path as on the host, so `build/<preset>/` works from either side.
+ZWO / QHY SDKs, Qt 6). Tests run under Xvfb (a virtual X display) with Mesa's software OpenGL, so the GPU preview
+tests work without a screen. The repo is mounted at the same path as on the host, so `build/<preset>/` works from either side.
 
 ```bash
 docker/build.sh                          # linux-debug build + tests
@@ -39,7 +42,7 @@ instead of building it, and any changed environment is pushed when first built (
 
 ## Build
 
-Linux (Ubuntu 26.04): `sudo apt install build-essential cmake ninja-build catch2`, plus `indi-3rdparty-libs` from the
+Linux (Ubuntu 26.04): `sudo apt install build-essential cmake ninja-build catch2 qt6-base-dev`, plus `indi-3rdparty-libs` from the
 INDI PPA for the camera SDKs (camprobe only).
 
 ```bash

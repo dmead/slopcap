@@ -1,0 +1,11 @@
+# Mesa / the GL loader / fontconfig keep process-lifetime allocations; they aren't SlopCap leaks.
+leak:libGLX_mesa
+leak:libgallium
+leak:libEGL_mesa
+leak:libGLdispatch
+leak:libLLVM
+leak:libdrm
+leak:libfontconfig
+leak:libQt6Gui
+leak:libX11
+leak:libxcb

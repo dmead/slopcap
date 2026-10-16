@@ -40,7 +40,8 @@ void CaptureSession::start() {
     const std::size_t fb = cam_.frameBytes();
     if (fb == 0) throw CameraError("camera reports a zero-size frame");
     const std::size_t slotBytes = (fb + 4095) / 4096 * 4096;   // FrameRing rounds slots up to whole pages
-    const std::size_t slots = std::clamp<std::size_t>(opt_.ringBytes / slotBytes, 8, 1u << 20);
+    // Live view reads into scratch and never touches the ring, so don't spend memory on one.
+    const std::size_t slots = opt_.output.empty() ? 1 : std::clamp<std::size_t>(opt_.ringBytes / slotBytes, 8, 1u << 20);
     ring_ = std::make_unique<FrameRing>(slots, fb);
     scratch_.resize(fb);
     stopRequested_ = false;
@@ -133,6 +134,7 @@ void CaptureSession::captureLoop() {
     const bool recording = !opt_.output.empty();   // live view reads straight into scratch: no ring, no drops
     try {
         while (!stopRequested_.load(std::memory_order_relaxed)) {
+            if (hasPosted_.load(std::memory_order_acquire)) runPosted();
             if (opt_.frameLimit && delivered_.load(std::memory_order_relaxed) >= *opt_.frameLimit) break;
             if (opt_.duration && std::chrono::steady_clock::now() - started_ >= *opt_.duration) break;
 
@@ -174,6 +176,29 @@ void CaptureSession::captureLoop() {
     ring_->close();
 }
 
+void CaptureSession::post(std::function<void(ICamera&)> action) {
+    std::lock_guard lock(postMutex_);
+    posted_.push_back(std::move(action));
+    hasPosted_.store(true, std::memory_order_release);
+}
+
+void CaptureSession::runPosted() {
+    std::vector<std::function<void(ICamera&)>> todo;
+    {
+        std::lock_guard lock(postMutex_);
+        todo.swap(posted_);
+        hasPosted_.store(false, std::memory_order_relaxed);
+    }
+    for (auto& a : todo) {
+        try {
+            a(cam_);
+        } catch (const std::exception& e) {
+            std::lock_guard lock(errorMutex_);
+            notice_ = e.what();
+        }
+    }
+}
+
 void CaptureSession::stop() {
     stopRequested_.store(true);
     if (captureThread_.joinable()) captureThread_.join();
@@ -199,6 +224,7 @@ CaptureStats CaptureSession::stats() const {
     if (ring_) {
         s.ringCapacity = ring_->capacity();
         s.ringHighWater = ring_->highWater();
+        s.ringQueued = ring_->queued();
     }
     const int64_t fin = finishedNs_.load(std::memory_order_relaxed);
     const auto elapsed = fin ? std::chrono::nanoseconds(fin) : std::chrono::steady_clock::now() - started_;
@@ -225,6 +251,7 @@ CaptureStats CaptureSession::stats() const {
     }
     std::lock_guard lock(errorMutex_);
     s.error = error_;
+    s.notice = notice_;
     return s;
 }
 

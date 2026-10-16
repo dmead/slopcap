@@ -18,7 +18,13 @@ RUN add-apt-repository -y ppa:mutlaqja/ppa \
  && apt-get install -y --no-install-recommends indi-3rdparty-libs \
  && rm -rf /var/lib/apt/lists/*
 
+# Qt 6 for the GUI, and Xvfb + Mesa (llvmpipe) so the OpenGL preview tests run without a display.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      qt6-base-dev libgl-dev libglx-mesa0 libgl1-mesa-dri xvfb xauth \
+ && rm -rf /var/lib/apt/lists/*
+
 # Builds run as the invoking user (docker run --user), so give that user somewhere writable for caches.
 ENV HOME=/tmp
 LABEL org.opencontainers.image.title="slopcap-build" \
-      org.opencontainers.image.description="Build environment for SlopCap (Ubuntu 26.04, GCC 15, CMake, Ninja, Catch2, MinGW-w64, ZWO/QHY SDKs)"
+      org.opencontainers.image.description="Build environment for SlopCap (Ubuntu 26.04, GCC 15, CMake, Ninja, Catch2, MinGW-w64, ZWO/QHY SDKs, Qt 6, Xvfb + Mesa)"

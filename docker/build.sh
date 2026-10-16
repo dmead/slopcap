@@ -62,7 +62,9 @@ presets=("$@")
 # ThreadSanitizer turns off address-space randomisation at startup via personality(2), which Docker's default seccomp
 # profile blocks. Relax seccomp for TSan runs only (a local, short-lived build container).
 for p in "${presets[@]}"; do [[ $p == *tsan* ]] && run+=(--security-opt seccomp=unconfined) && break; done
-script="set -e"
+# One virtual X display for the whole run (GL preview tests). Started directly: xvfb-run's startup handshake can hang
+# in containers.
+script="set -e; if command -v Xvfb >/dev/null; then Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp >/dev/null 2>&1 & export DISPLAY=:99; for i in \$(seq 50); do [ -e /tmp/.X11-unix/X99 ] && break; sleep 0.1; done; fi"
 for p in "${presets[@]}"; do
     script+="; echo '===== $p'; cmake --preset $p; cmake --build --preset $p"
     case $p in windows-cross|linux-release) ;; *) script+="; ctest --preset $p" ;; esac

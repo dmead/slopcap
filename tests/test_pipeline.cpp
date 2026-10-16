@@ -223,3 +223,28 @@ TEST_CASE("CaptureSession with no output is a live view: frames reach the previe
     CHECK(seen >= 1);
     CHECK(std::distance(std::filesystem::directory_iterator(dir.path()), {}) == 1);   // only the source file
 }
+
+TEST_CASE("CaptureSession runs posted actions on the capture thread and reports their errors as notices") {
+    TempDir dir;
+    SimCamera cam(makeSer(dir, 32, 16, 50, 59'500), {SimPace::Realtime, true});
+    CaptureOptions opt;
+    opt.duration = 2s;
+    CaptureSession session(cam, opt);
+    session.start();
+    std::atomic<int> ran{0};
+    std::thread::id where;
+    session.post([&](ICamera&) {
+        where = std::this_thread::get_id();
+        ++ran;
+    });
+    session.post([](ICamera& c) { c.setControl("NoSuchControl", 1); });
+    const auto t0 = std::chrono::steady_clock::now();
+    while (ran == 0 && std::chrono::steady_clock::now() - t0 < 2s) std::this_thread::sleep_for(1ms);
+    std::this_thread::sleep_for(20ms);
+    CHECK(ran == 1);
+    CHECK(where != std::this_thread::get_id());
+    session.stop();
+    const auto s = session.stats();
+    CHECK(s.error.empty());
+    CHECK_FALSE(s.notice.empty());
+}
