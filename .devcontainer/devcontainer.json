@@ -1,0 +1,13 @@
+{
+  "name": "SlopCap build environment",
+  "build": {"dockerfile": "../docker/Dockerfile", "context": "../docker"},
+  "workspaceFolder": "${localWorkspaceFolder}",
+  "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind",
+  "remoteUser": "ubuntu",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-vscode.cmake-tools", "ms-vscode.cpptools"],
+      "settings": {"cmake.useCMakePresets": "always"}
+    }
+  }
+}

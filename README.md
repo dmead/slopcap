@@ -16,6 +16,22 @@ Status: **M0 (skeleton)**. See [PLAN.md](PLAN.md) for the design and milestones.
 | `tools/camprobe` | `slopcap-camprobe [--json]`: what each connected ZWO / QHY camera reports (fixtures from real cameras inside) |
 | `tests/` | Catch2 unit tests |
 
+## Build in Docker (any machine)
+
+`docker/build.sh` builds and tests inside a pinned Ubuntu 26.04 image (GCC 15, CMake, Ninja, Catch2, MinGW-w64,
+ZWO / QHY SDKs). The repo is mounted at the same path as on the host, so `build/<preset>/` works from either side.
+
+```bash
+docker/build.sh                          # linux-debug build + tests
+docker/build.sh linux-asan linux-tsan    # any presets
+docker/build.sh windows-cross            # Windows .exe files (SLOPCAP_WIN_SDK_DLL_DIR=... to include camprobe)
+docker/build.sh --shell                  # shell in the build environment
+```
+
+The image is tagged with the Dockerfile's hash. With a registry in `docker/registry`, a machine pulls the image
+instead of building it, and any changed environment is pushed when first built (`docker/build.sh --push` to retry).
+`.devcontainer/` opens the same environment in VS Code.
+
 ## Build
 
 Linux (Ubuntu 26.04): `sudo apt install build-essential cmake ninja-build catch2`, plus `indi-3rdparty-libs` from the
