@@ -19,11 +19,13 @@ Status: plan only (2026-10-15). Nothing built yet.
 5. **Correct, interoperable files:** SER that AutoStakkert!, PSS, SER Player and WinJUPOS read, with per-capture
    metadata.
 
+6. **Linux and Windows, both first-class** (decided 2026-10-15). The observatory machine is Windows 11 with ASCOM;
+   development and the original FireCapture work are on Linux. Same code, CMake presets per platform, CI on both.
+
 ## 2. Non-goals (for now)
 
 - Deep-sky / long-exposure imaging, plate solving, guiding (PHD2, Ekos and NINA cover these).
-- Windows/macOS. Linux x86-64 first; Raspberry Pi (aarch64) second. Nothing is designed to block a port later.
-- ASCOM. Device control is INDI only.
+- macOS (nothing designed to block it later). Raspberry Pi (aarch64) after the two desktop platforms.
 - Every camera brand on day one. Two SDKs first, ZWO and QHY (we have both to test with), behind one interface
   that later brands plug into.
 
@@ -44,10 +46,10 @@ These numbers are the performance bar: SlopCap must match the SDK's own ceiling 
 | Concern | Choice | Why |
 |---|---|---|
 | Language | **C++20** | INDI's client library and the camera SDKs are C/C++; Qt; mature tooling |
-| Build | CMake + Ninja, presets for debug / release / asan / tsan | |
+| Build | CMake + Ninja; presets for GCC/Clang on Linux and MSVC on Windows, debug / release / asan / tsan | |
 | GUI, threads, networking | **Qt 6** (Widgets for panels, `QOpenGLWidget` for the preview) | one framework; signals across threads |
 | REST API | `QHttpServer` (Qt ≥ 6.4) + WebSocket or SSE for events | no extra dependency |
-| Devices | `libindiclient` (INDI's C++ client library) | first-class INDI |
+| Devices | INDI (`libindiclient`) on Linux; ASCOM on Windows, via Alpaca (HTTP, works on both) or COM | one `IFocuser` / `IMount` / `IFilterWheel` interface over both |
 | Camera | ZWO ASI SDK (`libASICamera2`) and QHY SDK (`libqhyccd`) behind an `ICamera` interface | two SDKs from the start keep the interface honest |
 | SIMD | **Google Highway**: runtime dispatch AVX-512 / AVX2 / NEON | one binary, fast everywhere |
 | Preview | OpenGL shaders: debayer + stretch + overlay on the GPU | takes preview load off the CPU |
@@ -150,6 +152,21 @@ same way for every brand:
     each setting the matching offset too.
   - API: `GET /v1/camera/modes`, `PUT /v1/camera/mode {index}`, `GET /v1/camera/gain-landmarks`.
 
+**What the drivers actually report** (probed 2026-10-15 on the observatory machine, fixtures in
+`tools/camprobe/fixtures/`):
+- *ASI585MC* (SDK 1.41): gain 0–600; lowest read noise at gain 450 / offset 15; offsets 3 for highest dynamic range
+  and unity; presets 0 / 200 / 450; high-speed readout. **The HCG switch gain is not reported**, and the lowest-read-noise
+  gain is not the switch point. `ElecPerADU` (0.053) is in model-dependent units, so unity gain can't be derived from it.
+- *QHY533M* and *QHY5III715C* (SDK 25.6.16): one read mode each ("STANDARD MODE"), no noise curves, no default gain /
+  offset, ADC depth not reported. The 715C supports gain↔dB conversion.
+
+So the drivers alone can't place the landmarks SlopCap wants to show. Two sources fill the gap:
+1. **A per-model sensor table** (HCG switch gain, unity gain, ADC bits, read noise / full well at key gains) taken
+   from the manufacturers' published charts, shipped as data and marked as "published".
+2. **Measure it**: a guided calibration that takes bias and flat pairs at a sweep of gains (lens cap / flat panel)
+   and computes e-/ADU, read noise and full well per gain (photon transfer). The HCG switch shows up as the step in
+   read noise. Results are saved per camera serial and marked "measured", and they override the table.
+
 `tools/camprobe/` (`slopcap-camprobe`, read-only, `--json` available) reports all of this per connected camera.
 Run it on every camera we have before writing `AsiCamera` / `QhyCamera`, and keep its output as test fixtures.
 
@@ -239,6 +256,29 @@ position}}`. `GET /v1/focus/live` returns per-channel live scores. `PUT /v1/focu
 - Analysis tests on stored frames: known centroid / radius / sharpness ordering.
 - CI: release + ASan/UBSan + TSan builds, unit tests, a SimCamera soak test (10 min at max rate, 0 drops).
 
+### Device test rig: Linux on the observatory machine (set up 2026-10-15)
+
+The observatory machine ("observatory", 192.168.1.20, Windows 11) runs Ubuntu 26.04 in WSL2, the same release as the
+development laptop, with INDI 2.2.5 and the ZWO / QHY SDKs from the INDI PPA. `usbipd-win` 5.3 moves a camera from
+Windows into Linux and back; SSH key login from the laptop drives all of it.
+
+| Bus | Camera |
+|---|---|
+| 3-3 | ZWO ASI585MC |
+| 3-2 | QHY533M (USB `1618:c534`) |
+| 5-4 | QHY5III715C (USB `1618:0716`) |
+
+```
+usbipd attach --wsl --busid 3-3      # camera to Linux (Windows apps lose it)
+usbipd detach --busid 3-3            # back to Windows
+```
+
+Measured through the forwarding (ASI585MC, 0 dropped frames in every run): 1040×560 at **168 fps** in both RAW8 and
+RAW16, the same as native; full frame at 43.0 fps RAW8 (native laptop: 46.9), limited to about 360 MB/s. So the rig
+is good for performance work at planetary ROI sizes, not just functional tests. Full-frame benchmarks should still
+be confirmed on native Linux. The WSL kernel has the CH340 / FTDI serial drivers, so INDI serial focusers can be
+tested there too.
+
 ## 9. Milestones
 
 | # | Milestone | Done when |
@@ -264,6 +304,7 @@ M1 is the go/no-go: if the zero-drop capture core doesn't hold up, nothing else 
 
 ## 11. Open questions
 
+0. ~~Platform~~: both Linux and Windows. Linux device testing on the observatory machine runs in WSL2 + usbipd-win (§8).
 1. GUI: Qt Widgets (planned) or QML?
 2. SlopCap's own license (GPL-3.0 like INDI/KStars, or MIT/Apache)? Check that the ZWO SDK's license allows
    distributing builds that link it.

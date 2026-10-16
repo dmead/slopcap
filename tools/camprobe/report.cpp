@@ -53,8 +53,8 @@ void printText(const ProbeResult& r) {
     if (r.sdkAvailable && r.cameras.empty() && r.errors.empty()) std::cout << "  no cameras found\n";
     for (const auto& c : r.cameras) {
         std::cout << std::format("\n  {}  [{}]\n", c.model, c.id);
-        std::cout << std::format("    sensor {} x {}  {} um  ADC {}-bit  {}{}\n", c.sensorWidth, c.sensorHeight,
-                                 num(c.pixelUm), c.adcBits, c.color ? "colour" : "mono",
+        std::cout << std::format("    sensor {} x {}  {} um  ADC {}  {}{}\n", c.sensorWidth, c.sensorHeight,
+                                 num(c.pixelUm), c.adcBits ? std::to_string(c.adcBits) + "-bit" : "not reported", c.color ? "colour" : "mono",
                                  c.bayer.empty() ? "" : " (" + c.bayer + ")");
         std::string f, b;
         for (const auto& x : c.formats) f += x + " ";

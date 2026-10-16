@@ -1,7 +1,6 @@
 // ZWO ASI probe. Read-only: opens each camera, reads properties, controls and preset gains, closes it.
 #include "report.hpp"
 
-#include <cmath>
 #include <format>
 #include <libasi/ASICamera2.h>
 
@@ -81,7 +80,7 @@ ProbeResult probeAsi() {
         if (info.ST4Port) c.capabilities.push_back("ST4 guide port");
         if (info.MechanicalShutter) c.capabilities.push_back("mechanical shutter");
         if (info.IsTriggerCam) c.capabilities.push_back("trigger input");
-        c.capabilities.push_back(std::format("ElecPerADU {:.3f} at gain 0", info.ElecPerADU));
+        c.capabilities.push_back(std::format("ElecPerADU {:.3f} (SDK value, units model-dependent)", info.ElecPerADU));
 
         int nc = 0;
         ASIGetNumOfControls(id, &nc);
@@ -122,11 +121,9 @@ ProbeResult probeAsi() {
         int offHDR = 0, offUnity = 0, gainLRN = 0, offLRN = 0;
         if (ASIGetGainOffset(id, &offHDR, &offUnity, &gainLRN, &offLRN) == ASI_SUCCESS) {
             c.gainLandmarks.push_back({"Highest dynamic range", static_cast<double>(gainMin), offHDR, "ASIGetGainOffset (gain = minimum)"});
-            std::optional<double> unity;
-            if (info.ElecPerADU > 0) unity = std::round(200.0 * std::log10(info.ElecPerADU));   // gain unit is 0.1 dB
-            c.gainLandmarks.push_back({"Unity gain (1 e-/ADU)", unity, offUnity,
-                                       unity ? "offset: ASIGetGainOffset; gain: estimate 200*log10(ElecPerADU)" : "ASIGetGainOffset (no ElecPerADU)"});
-            c.gainLandmarks.push_back({"Lowest read noise (HCG on)", gainLRN, offLRN, "ASIGetGainOffset"});
+            // ElecPerADU's units vary by model (0.053 on the ASI585MC), so unity gain isn't derived from it.
+            c.gainLandmarks.push_back({"Unity gain (offset only)", std::nullopt, offUnity, "ASIGetGainOffset; the SDK gives no unity gain value"});
+            c.gainLandmarks.push_back({"Lowest read noise", gainLRN, offLRN, "ASIGetGainOffset"});
         }
         int lg = 0, mg = 0, hg = 0, ho = 0;
         if (ASIGetLMHGainOffset(id, &lg, &mg, &hg, &ho) == ASI_SUCCESS) {
@@ -134,7 +131,7 @@ ProbeResult probeAsi() {
             c.gainLandmarks.push_back({"Preset medium gain", mg, std::nullopt, "ASIGetLMHGainOffset"});
             c.gainLandmarks.push_back({"Preset high gain (lowest read noise)", hg, ho, "ASIGetLMHGainOffset"});
         }
-        c.notes.push_back("HCG switching is automatic inside the driver; the lowest-read-noise gain is where it is on");
+        c.notes.push_back("HCG switching is automatic inside the driver and its gain is not reported by the SDK; the lowest-read-noise gain is not the switch point");
 
         ASICloseCamera(id);
         r.cameras.push_back(std::move(c));

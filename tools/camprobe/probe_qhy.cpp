@@ -167,7 +167,7 @@ ProbeResult probeQhy() {
             if (p.id == OutputDataActualBits && k.current) c.adcBits = static_cast<int>(*k.current);
             c.controls.push_back(k);
         }
-        if (!c.adcBits) c.adcBits = static_cast<int>(bpp);
+        if (!c.adcBits) c.notes.push_back(std::format("ADC depth not reported by the SDK (current output {}-bit)", bpp));
 
         if (has(h, DefaultGain)) {
             double g = GetQHYCCDParam(h, DefaultGain);
