@@ -279,6 +279,11 @@ is good for performance work at planetary ROI sizes, not just functional tests. 
 be confirmed on native Linux. The WSL kernel has the CH340 / FTDI serial drivers, so INDI serial focusers can be
 tested there too.
 
+**QHY cameras: test natively, not through the WSL forwarding.** On 2026-10-15, QHY live streaming through usbip
+hung inside the QHY SDK and knocked the QHY533M off USB until it was replugged; the ZWO streams through the same path
+without trouble. Natively on Windows the QHY5III715C streamed cleanly (0 dropped) at 4.2 fps full-sensor, most likely
+because it's on a slower USB port; not a SlopCap issue, so not pursued.
+
 ## 9. Milestones
 
 | # | Milestone | Done when |
