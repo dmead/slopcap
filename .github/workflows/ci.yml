@@ -1,0 +1,39 @@
+# Builds and tests SlopCap on Linux (GCC, plus ASan/UBSan and TSan) and Windows (MSVC).
+# Camera SDKs aren't installed on CI runners, so camprobe is skipped there; core + tests need no hardware.
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [linux-debug, linux-asan, linux-tsan, linux-release]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build catch2 g++-14
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }} -DSLOPCAP_BUILD_CAMPROBE=OFF -DCMAKE_CXX_COMPILER=g++-14
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+      - name: Test
+        if: matrix.preset != 'linux-release'
+        run: ctest --preset ${{ matrix.preset }}
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Install Catch2
+        run: vcpkg install catch2:x64-windows
+      - name: Configure
+        run: cmake --preset windows-msvc -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+      - name: Build
+        run: cmake --build --preset windows-msvc
+      - name: Test
+        run: ctest --preset windows-msvc

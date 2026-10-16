@@ -1,0 +1,80 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {"major": 3, "minor": 25, "patch": 0},
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {"SLOPCAP_WERROR": "ON"}
+    },
+    {
+      "name": "linux-debug",
+      "inherits": "base",
+      "displayName": "Linux debug (GCC/Clang)",
+      "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux"},
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug"}
+    },
+    {
+      "name": "linux-release",
+      "inherits": "base",
+      "displayName": "Linux release (-O3, x86-64-v3)",
+      "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux"},
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "CMAKE_CXX_FLAGS": "-O3 -march=x86-64-v3"}
+    },
+    {
+      "name": "linux-asan",
+      "inherits": "linux-debug",
+      "displayName": "Linux AddressSanitizer + UBSan",
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
+      }
+    },
+    {
+      "name": "linux-tsan",
+      "inherits": "linux-debug",
+      "displayName": "Linux ThreadSanitizer",
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread",
+        "SLOPCAP_BUILD_CAMPROBE": "OFF"
+      }
+    },
+    {
+      "name": "windows-msvc",
+      "displayName": "Windows MSVC (x64)",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows"},
+      "cacheVariables": {"SLOPCAP_WERROR": "ON"}
+    },
+    {
+      "name": "windows-cross",
+      "inherits": "base",
+      "displayName": "Windows x64 cross-build from Linux (MinGW-w64)",
+      "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux"},
+      "toolchainFile": "${sourceDir}/tools/camprobe/mingw-w64.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SLOPCAP_BUILD_TESTS": "OFF",
+        "WIN_SDK_DLL_DIR": "$env{SLOPCAP_WIN_SDK_DLL_DIR}"
+      }
+    }
+  ],
+  "buildPresets": [
+    {"name": "linux-debug", "configurePreset": "linux-debug"},
+    {"name": "linux-release", "configurePreset": "linux-release"},
+    {"name": "linux-asan", "configurePreset": "linux-asan"},
+    {"name": "linux-tsan", "configurePreset": "linux-tsan"},
+    {"name": "windows-msvc", "configurePreset": "windows-msvc", "configuration": "Release"},
+    {"name": "windows-cross", "configurePreset": "windows-cross"}
+  ],
+  "testPresets": [
+    {"name": "linux-debug", "configurePreset": "linux-debug", "output": {"outputOnFailure": true}},
+    {"name": "linux-asan", "configurePreset": "linux-asan", "output": {"outputOnFailure": true}},
+    {"name": "linux-tsan", "configurePreset": "linux-tsan", "output": {"outputOnFailure": true}},
+    {"name": "windows-msvc", "configurePreset": "windows-msvc", "configuration": "Release", "output": {"outputOnFailure": true}}
+  ]
+}
