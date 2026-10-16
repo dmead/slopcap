@@ -12,10 +12,11 @@ RUN apt-get update \
       g++-mingw-w64-x86-64-posix software-properties-common gpg-agent \
  && rm -rf /var/lib/apt/lists/*
 
-# ZWO and QHY camera SDKs (headers + libraries) from the INDI project's PPA, for tools/camprobe and the camera backends.
+# ZWO and QHY camera SDKs (headers + libraries) from the INDI project's PPA, for tools/camprobe and the camera backends;
+# indiserver + simulators for the focuser tests.
 RUN add-apt-repository -y ppa:mutlaqja/ppa \
  && apt-get update \
- && apt-get install -y --no-install-recommends indi-3rdparty-libs \
+ && apt-get install -y --no-install-recommends indi-3rdparty-libs indi-bin \
  && rm -rf /var/lib/apt/lists/*
 
 # Qt 6 for the GUI, and Xvfb + Mesa (llvmpipe) so the OpenGL preview tests run without a display.
@@ -26,5 +27,6 @@ RUN apt-get update \
 
 # Builds run as the invoking user (docker run --user), so give that user somewhere writable for caches.
 ENV HOME=/tmp
+ENV LANG=C.UTF-8
 LABEL org.opencontainers.image.title="slopcap-build" \
       org.opencontainers.image.description="Build environment for SlopCap (Ubuntu 26.04, GCC 15, CMake, Ninja, Catch2, MinGW-w64, ZWO/QHY SDKs, Qt 6, Xvfb + Mesa)"

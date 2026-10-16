@@ -150,6 +150,7 @@ if(SLOPCAP_BUILD_TESTS)
       add_executable(slopcap-qt-tests tests/test_indi.cpp)
       target_link_libraries(slopcap-qt-tests PRIVATE slopcap_devices slopcap_warnings Catch2::Catch2)
       add_test(NAME indi-focuser COMMAND slopcap-qt-tests)
+      set_tests_properties(indi-focuser PROPERTIES SKIP_RETURN_CODE 4)   # Catch2's "all skipped" (no INDI installed)
       set_tests_properties(gl-render PROPERTIES ENVIRONMENT
         "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/sanitizers/lsan-gl.supp")
     endif()

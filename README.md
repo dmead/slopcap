@@ -21,7 +21,34 @@ Status: **M1 in progress**: capture pipeline + ZWO / QHY backends; ZWO verified 
 | `tools/bench` | `slopcap-bench --camera SPEC …` / `--sim FILE.ser` / `--list`: record through the full pipeline and report fps / drops / ring peak / MB/s |
 | `tools/serinfo` | `slopcap-serinfo FILE.ser…`: header, frames vs header, timestamps, real frame rate, longest gap |
 | `tools/camprobe` | `slopcap-camprobe [--json]`: what each connected ZWO / QHY camera reports (fixtures from real cameras inside) |
+| `src/analysis/` | per-channel focus scoring (4 metrics), focus sweep fits, defocused-star collimation |
+| `src/devices/` | minimal INDI client (Qt Network) and a backlash-aware focuser |
+| `tools/diag` | `slopcap-diag FILE.ser…`: optical diagnostics from planetary recordings |
+| `tools/focusbench` | `slopcap-focusbench FILE.ser [frames] [metric]`: time the focus scorer |
 | `tests/` | Catch2 unit tests; `slopcap-gl-tests` checks the GPU preview against the CPU reference |
+
+## At the telescope
+
+```bash
+build/linux-release/slopcap                      # remembers the last camera, folder, target, focuser, per-camera settings
+build/linux-release/slopcap --camera asi --focuser localhost:7624
+```
+
+1. **Capture tab:** Connect the camera. Set gain/exposure (exposure in µs); the gain-landmark buttons set unity /
+   lowest-read-noise gain. Watch "clipped %" under the histogram. Wheel zooms, drag pans, F fits, 1 = 1:1,
+   C = crosshair, right-click "Centre ROI here" moves a planetary ROI onto the target.
+2. **Collimate tab** (bright star): defocus to a ring 40–100 px across, tick "Analyse", turn the secondary screw toward
+   the arrow (the ring's thin side) in small amounts, re-centre the star, repeat until the offset is < 2 %.
+3. **Focus tab:** Connect (INDI server, default localhost:7624; the Gemini EAF is MyFocuserPro2). Set backlash
+   (~600) and the final approach direction. Watch the R/G/B bars while nudging; then "Start sweep around current
+   position". The table shows each channel's best focus ± error for every metric and the spread; pick a strategy
+   (Green, Luminance-weighted, Balanced, Red, Blue) and "Go to". Each sweep's per-frame scores are saved as a CSV
+   in the recording folder.
+4. **Record** (Ctrl+R): files are named WinJUPOS-style from the mid-capture time and the Target field
+   (`2026-10-17-0315_4-Saturn.ser`), with a `.txt` of the settings and focuser position next to each.
+
+Afterwards: `slopcap-diag --png OUT/ *.ser` stacks the best frames of each recording and reports dispersion, limb
+sharpness per channel and side, halo and jitter.
 
 ## Build in Docker (any machine)
 
