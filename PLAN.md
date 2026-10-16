@@ -190,6 +190,15 @@ At full frame (3840×2160, 46.9 fps): ~390 MB/s, ~21 ms per frame.
 Acceptance: a 10-minute recording at 1040×560 and at full frame with **0 dropped frames**, preview ≥ 30 fps, on the
 host above.
 
+**Vectorization log** (what was vectorized, why, and what it bought; laptop, -O3 x86-64-v3):
+
+| Code | Why it was a candidate | Result |
+|---|---|---|
+| `analysis/focus.cpp`: Bayer plane extraction, levels/clip count, signal + centroid, gradient, Laplacian, variance | Runs on every displayed frame, over every pixel of the scoring window, in each of the three channels | Written as plain strided/contiguous loops with branch-free selects. Float sums marked with `SLOPCAP_SIMD_SUM` (`src/util/simd.hpp`: OpenMP simd reductions via `-fopenmp-simd`, no runtime). Each one confirmed with `-fopt-info-vec`. In an A/B with vectorization off: 2.65 → 2.04 ms per 4K frame |
+| Same scorer, algorithm | Profile first: scoring the whole frame just to find the planet dominated | Window-only extraction (23 → 2.0 ms). Histogram quantile instead of `nth_element` (perf: 41% of time) → 1.1 ms. Vectorizing alone would not have got there |
+| FFT butterfly (fourier metric) | Hand-written complex multiply, assuming `std::complex` calls `__mulsc3` | **Rejected:** 4× slower (GCC already handled it). Kept as a reminder to measure every change |
+| GPU preview | Demosaic + stretch per pixel per frame | Done in the fragment shader instead of on the CPU |
+
 ## 7. REST API (v1)
 
 Same shape as the FireCapture Remote API we built (that design is ours), served by SlopCap itself:
@@ -336,11 +345,24 @@ M2 status (2026-10-16, first pass):
   levels, gain-landmark buttons, and record with live MB/s, buffer and drop counters.
 - **Measured:** laptop, release build, 3840×2160 8-bit RGGB replay at 39 fps: the display runs at 35 fps while
   recording at 322 MB/s, 0 dropped.
+- **Added since (2026-10-16, for the first live night, Saturn 2026-10-17, GUI on the laptop with the cameras and focuser
+  plugged into it):**
+  - zoom/pan/1:1, crosshair, right-click "Centre ROI here", overlays, display-only auto white balance;
+  - Focus tab, pulled forward from M5/M6: INDI focuser with backlash-aware moves; live R/G/B sharpness; and the §7a
+    sweep, scoring all four metrics on the same frames so the night's data shows which metric is tightest;
+  - Collimate tab: defocused-star ring/shadow fit;
+  - WinJUPOS file names (mid-capture), `.txt` sidecar, persistent settings (per camera serial);
+  - `slopcap-diag`: diagnostics from old recordings.
+- **Findings from the Oct 7–8 Saturn recordings (`slopcap-diag`):**
+  - Dispersion is ~5 px vertical (atmospheric).
+  - No dew trend and no one-sided limb blur.
+  - Chromatic focus shift: blue softest at focuser ~64,420 and red softest at ~64,950.
+  - The globe's size implies ~0.10″/px, not FireCapture's 0.14″/px setting.
 - **Still to do:**
-  - Windows GUI build: Qt for MinGW/MSVC on the NUC.
-  - Measure display fps with real cameras on the NUC (UHD 630).
-  - Zoom and pan, and 1:1 view.
+  - Windows GUI build: Qt for MinGW/MSVC.
+  - Real-camera check of the GUI on the laptop.
   - Upload through a PBO if texture upload shows up in profiles.
+  - Critical-focus-zone overlay on the sweep (needs f-ratio and µm/step).
 
 ## 10. Ground rules
 
