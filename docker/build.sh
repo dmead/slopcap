@@ -2,45 +2,61 @@
 # Build and test SlopCap inside the pinned build image, on any machine with Docker.
 #   docker/build.sh                        # linux-debug build + tests (default)
 #   docker/build.sh linux-asan linux-tsan  # any presets from CMakePresets.json; tests run where the preset has them
-#   docker/build.sh windows-cross          # Windows .exe files; set SLOPCAP_WIN_SDK_DLL_DIR to also build camprobe
+#   docker/build.sh windows-cross          # Windows command-line tools; set SLOPCAP_WIN_SDK_DLL_DIR to also build camprobe
+#   docker/build.sh windows-static         # Windows GUI as one self-contained slopcap.exe (own image: MinGW + static Qt)
 #   docker/build.sh --shell                # interactive shell in the build environment
 #   docker/build.sh --push                 # push the current environment image to the registry (docker/registry)
-# Output goes to build/<preset>/ in the repo, owned by you. The image is rebuilt only when docker/Dockerfile changes.
+# Output goes to build/<preset>/ in the repo, owned by you. Images are rebuilt only when their Dockerfile changes.
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
-TAG=$(sha256sum "$REPO/docker/Dockerfile" | cut -c1-12)
-IMAGE="slopcap-build:$TAG"
 
 # Registry for sharing the environment between machines: docker/registry holds e.g. "registry.example:5000"
-# (override with SLOPCAP_REGISTRY; empty = local only). Images are tagged with the Dockerfile's hash, so a pull
+# (override with SLOPCAP_REGISTRY; empty = local only). Images are tagged with their Dockerfile's hash, so a pull
 # gets exactly this environment, and every changed environment is pushed once, when it is first built.
 REGISTRY=${SLOPCAP_REGISTRY-$(cat "$REPO/docker/registry" 2>/dev/null | tr -d '[:space:]' || true)}
-REMOTE=${REGISTRY:+$REGISTRY/slopcap-build}
 
-if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-    if [ -n "$REMOTE" ] && docker pull -q "$REMOTE:$TAG" >/dev/null 2>&1; then
-        echo "pulled $REMOTE:$TAG"
-        docker tag "$REMOTE:$TAG" "$IMAGE"
-        docker tag "$REMOTE:$TAG" slopcap-build:latest
-    else
-        echo "building image $IMAGE (first run only)..."
-        docker build -t "$IMAGE" -t slopcap-build:latest -f "$REPO/docker/Dockerfile" "$REPO/docker"
-        if [ -n "$REMOTE" ]; then
-            docker tag "$IMAGE" "$REMOTE:$TAG" && docker tag "$IMAGE" "$REMOTE:latest"
-            if docker push -q "$REMOTE:$TAG" && docker push -q "$REMOTE:latest"; then
-                echo "pushed $REMOTE:$TAG"
-            else
-                echo "warning: push to $REGISTRY failed; the image is only local (retry: docker/build.sh --push)" >&2
-            fi
+# ensure_image NAME TAG DOCKERFILE [build args...]: local, else pulled, else built (and pushed).
+ensure_image() {
+    local name=$1 tag=$2 file=$3
+    shift 3
+    local remote=${REGISTRY:+$REGISTRY/$name}
+    docker image inspect "$name:$tag" >/dev/null 2>&1 && return
+    if [ -n "$remote" ] && docker pull -q "$remote:$tag" >/dev/null 2>&1; then
+        echo "pulled $remote:$tag"
+        docker tag "$remote:$tag" "$name:$tag"
+        docker tag "$remote:$tag" "$name:latest"
+        return
+    fi
+    echo "building image $name:$tag (first run only)..."
+    docker build -t "$name:$tag" -t "$name:latest" -f "$file" "$@" "$REPO/docker"
+    if [ -n "$remote" ]; then
+        docker tag "$name:$tag" "$remote:$tag" && docker tag "$name:$tag" "$remote:latest"
+        if docker push -q "$remote:$tag" && docker push -q "$remote:latest"; then
+            echo "pushed $remote:$tag"
+        else
+            echo "warning: push to $REGISTRY failed; the image is only local (retry: docker/build.sh --push)" >&2
         fi
     fi
-fi
+}
+
+TAG=$(sha256sum "$REPO/docker/Dockerfile" | cut -c1-12)
+IMAGE="slopcap-build:$TAG"
+ensure_image slopcap-build "$TAG" "$REPO/docker/Dockerfile"
+REMOTE=${REGISTRY:+$REGISTRY/slopcap-build}
+
+# The Windows single-exe build has its own image (Fedora MinGW + static Qt), derived from the Linux one.
+MINGW_TAG=$( (sha256sum "$REPO/docker/Dockerfile.mingw"; echo "$TAG") | sha256sum | cut -c1-12)
+MINGW_IMAGE="slopcap-build-mingw:$MINGW_TAG"
+needs_mingw() { for p in "$@"; do [ "$p" = windows-static ] && return 0; done; return 1; }
 
 if [ "${1:-}" = "--push" ]; then
     [ -n "$REMOTE" ] || { echo "no registry configured (docker/registry or SLOPCAP_REGISTRY)" >&2; exit 2; }
     docker tag "$IMAGE" "$REMOTE:$TAG" && docker tag "$IMAGE" "$REMOTE:latest"
     docker push "$REMOTE:$TAG" && docker push "$REMOTE:latest"
+    if docker image inspect "$MINGW_IMAGE" >/dev/null 2>&1; then
+        docker tag "$MINGW_IMAGE" "$REGISTRY/slopcap-build-mingw:$MINGW_TAG" && docker push "$REGISTRY/slopcap-build-mingw:$MINGW_TAG"
+    fi
     exit
 fi
 
@@ -59,6 +75,12 @@ fi
 
 presets=("$@")
 [ ${#presets[@]} -eq 0 ] && presets=(linux-debug)
+# windows-static runs in its own image; build it on its own.
+if needs_mingw "${presets[@]}"; then
+    [ ${#presets[@]} -eq 1 ] || { echo "run windows-static on its own (it uses the Windows build image)" >&2; exit 2; }
+    ensure_image slopcap-build-mingw "$MINGW_TAG" "$REPO/docker/Dockerfile.mingw" --build-arg "UBUNTU_IMAGE=$IMAGE"
+    exec "${run[@]}" "$MINGW_IMAGE" bash -c "set -e; cmake --preset windows-static; cmake --build --preset windows-static"
+fi
 # ThreadSanitizer turns off address-space randomisation at startup via personality(2), which Docker's default seccomp
 # profile blocks. Relax seccomp for TSan runs only (a local, short-lived build container).
 for p in "${presets[@]}"; do [[ $p == *tsan* ]] && run+=(--security-opt seccomp=unconfined) && break; done

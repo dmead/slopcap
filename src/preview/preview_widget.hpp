@@ -88,6 +88,7 @@ private:
     bool autoWb_ = true;
     bool debayer_ = true;
     bool glReady_ = false;
+    QString glError_;   ///< why the GPU preview couldn't start (shown in the view instead of crashing)
     QTimer timer_;
     QElapsedTimer fpsClock_;
     int fpsFrames_ = 0;

@@ -391,9 +391,7 @@ QWidget* MainWindow::buildCaptureLeft() {
     };
     sliderRow("Gain", gainValue_, gain_);
     gainPresets_ = new QWidget;
-    new QHBoxLayout(gainPresets_);
-    gainPresets_->layout()->setContentsMargins(0, 0, 0, 0);
-    gainPresets_->layout()->setSpacing(6);
+    new theme::FlowLayout(gainPresets_);
     cb->addWidget(gainPresets_);
     connect(gain_, &QSlider::valueChanged, this, [this](int g) {
         gainValue_->setText(QString::number(g));
@@ -839,8 +837,11 @@ void MainWindow::populateControls() {
         delete item->widget();
         delete item;
     }
+    std::vector<std::pair<double, std::optional<double>>> seen;   // drivers repeat values under different names
     for (const auto& m : cam_->gainLandmarks()) {
         if (!m.gain) continue;
+        if (std::find(seen.begin(), seen.end(), std::pair{*m.gain, m.offset}) != seen.end()) continue;
+        seen.emplace_back(*m.gain, m.offset);
         auto* b = theme::button(QString("%1 %2").arg(landmarkShort(m.kind)).arg(*m.gain));
         b->setStyleSheet(QString("QPushButton { background: transparent; border: 1px solid %1; border-radius: 10px; padding: 2px 8px; color: %2; "
                                  "font-size: 11px; min-height: 0; }")
@@ -853,7 +854,6 @@ void MainWindow::populateControls() {
         });
         gl->addWidget(b);
     }
-    static_cast<QHBoxLayout*>(gl)->addStretch(1);
 }
 
 /// Keep the slider, its label and the "All controls" box showing the same value.

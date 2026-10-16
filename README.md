@@ -59,13 +59,31 @@ tests work without a screen. The repo is mounted at the same path as on the host
 ```bash
 docker/build.sh                          # linux-debug build + tests
 docker/build.sh linux-asan linux-tsan    # any presets
-docker/build.sh windows-cross            # Windows .exe files (SLOPCAP_WIN_SDK_DLL_DIR=... to include camprobe)
+docker/build.sh windows-cross            # Windows command-line tools (SLOPCAP_WIN_SDK_DLL_DIR=... to include camprobe)
+docker/build.sh windows-static           # Windows GUI: one self-contained build/windows-static/slopcap.exe
 docker/build.sh --shell                  # shell in the build environment
 ```
 
 The image is tagged with the Dockerfile's hash. With a registry in `docker/registry`, a machine pulls the image
 instead of building it, and any changed environment is pushed when first built (`docker/build.sh --push` to retry).
 `.devcontainer/` opens the same environment in VS Code.
+
+### Windows: one self-contained slopcap.exe
+
+`windows-static` builds in its own image (`docker/Dockerfile.mingw`: Fedora's MinGW-w64 GCC plus Qt 6 compiled
+statically, once, and cached in the registry). Point `SLOPCAP_WIN_SDK_DLL_DIR` at a folder holding the Windows
+`ASICamera2.dll` and `qhyccd.dll` (e.g. copied from SharpCap's folder) and they are embedded too:
+
+```bash
+SLOPCAP_WIN_SDK_DLL_DIR=tools/camprobe/build-win/sdk docker/build.sh windows-static
+```
+
+Copy `build/windows-static/slopcap.exe` anywhere and run it: no installer, no DLLs. On first use it extracts the
+camera SDKs to `%LOCALAPPDATA%\SlopCap\SlopCap\sdk\` (a DLL placed next to the exe takes precedence, to try a newer SDK).
+The camera SDKs are delay-loaded, so without them SlopCap still starts and the camera menu says which one is
+missing. Settings live in the registry (`HKCU\Software\SlopCap`). The preview needs OpenGL 3.3; without it (some
+Remote Desktop sessions) capture still works and the preview says why it's blank. The focuser is INDI-only for now
+(no ASCOM yet).
 
 ## Build
 

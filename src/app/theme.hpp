@@ -10,6 +10,8 @@
 #include <QFont>
 #include <QString>
 #include <QStringList>
+#include <QLayout>
+#include <QList>
 #include <QWidget>
 
 #include <functional>
@@ -58,6 +60,32 @@ QWidget* pill(QLabel*& text, QLabel*& dot);
 void setDot(QLabel* dot, const QColor& c);
 /// Re-evaluate the style sheet after changing a widget's role/variant property.
 void restyle(QWidget* w);
+
+/// Lays children out left to right, wrapping to new lines (like CSS flex-wrap) so a row of chips never forces its
+/// column wider.
+class FlowLayout : public QLayout {
+public:
+    explicit FlowLayout(QWidget* parent = nullptr, int spacing = 6) : QLayout(parent), spacing_(spacing) { setContentsMargins(0, 0, 0, 0); }
+    ~FlowLayout() override;
+    void addItem(QLayoutItem* item) override { items_.append(item); }
+    int count() const override { return static_cast<int>(items_.size()); }
+    QLayoutItem* itemAt(int i) const override { return items_.value(i); }
+    QLayoutItem* takeAt(int i) override { return i >= 0 && i < items_.size() ? items_.takeAt(i) : nullptr; }
+    Qt::Orientations expandingDirections() const override { return {}; }
+    bool hasHeightForWidth() const override { return true; }
+    int heightForWidth(int w) const override { return arrange(QRect(0, 0, w, 0), false); }
+    void setGeometry(const QRect& r) override {
+        QLayout::setGeometry(r);
+        arrange(r, true);
+    }
+    QSize sizeHint() const override { return minimumSize(); }
+    QSize minimumSize() const override;
+
+private:
+    int arrange(const QRect& r, bool apply) const;
+    QList<QLayoutItem*> items_;
+    int spacing_;
+};
 
 /// Draw a channel's marker (0 = R circle, 1 = G square, 2 = B triangle) centred at (x, y).
 void drawChannelMarker(class QPainter& p, int channel, double x, double y, double size);

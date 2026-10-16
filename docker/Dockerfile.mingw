@@ -1,0 +1,44 @@
+# SlopCap Windows build environment: MinGW-w64 (GCC) from Fedora plus a static Qt built here, so the GUI links into
+# ONE self-contained slopcap.exe (no Qt or compiler-runtime DLLs to ship).
+#   docker/build.sh windows-static     # builds this image once (Qt takes a while), then slopcap.exe
+# The camera SDK headers and the IBM Plex fonts come from the Linux build image (UBUNTU_IMAGE, passed by build.sh).
+ARG UBUNTU_IMAGE=slopcap-build:latest
+FROM ${UBUNTU_IMAGE} AS ubuntu
+
+FROM fedora:44
+
+# Cross toolchain, the build tools, and the native Qt of the same version as the one built below (Qt's
+# cross-build runs the host's moc / rcc / uic).
+ARG QT_VERSION=6.11.2
+RUN dnf -y install --setopt=install_weak_deps=False \
+      mingw64-gcc-c++ mingw64-winpthreads-static cmake ninja-build xz perl python3 \
+      qt6-qtbase-devel-${QT_VERSION} \
+ && dnf clean all
+
+# Static qtbase for Windows: only what SlopCap uses; Qt's bundled zlib/PCRE/PNG/JPEG/FreeType/HarfBuzz, so nothing
+# else needs a static build; desktop OpenGL (the preview's shaders need GL 3.3).
+RUN curl -fsSL "https://download.qt.io/official_releases/qt/${QT_VERSION%.*}/${QT_VERSION}/submodules/qtbase-everywhere-src-${QT_VERSION}.tar.xz" \
+      | tar -xJ -C /tmp \
+ && cmake -S /tmp/qtbase-everywhere-src-${QT_VERSION} -B /tmp/qtbuild -G Ninja \
+      -DCMAKE_TOOLCHAIN_FILE=/usr/share/mingw/toolchain-mingw64.cmake \
+      -DQT_HOST_PATH=/usr -DQT_HOST_PATH_CMAKE_DIR=/usr/lib64/cmake \
+      -DCMAKE_INSTALL_PREFIX=/opt/qt6-mingw-static -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+      -DQT_BUILD_EXAMPLES=OFF -DQT_BUILD_TESTS=OFF -DQT_BUILD_BENCHMARKS=OFF \
+      -DFEATURE_static_runtime=ON -DINPUT_opengl=desktop \
+      -DFEATURE_icu=OFF -DFEATURE_dbus=OFF -DFEATURE_openssl=OFF -DFEATURE_sql=OFF -DFEATURE_printsupport=OFF \
+      -DFEATURE_concurrent=OFF -DFEATURE_testlib=OFF -DFEATURE_zstd=OFF \
+      -DFEATURE_system_zlib=OFF -DFEATURE_system_pcre2=OFF -DFEATURE_system_png=OFF -DFEATURE_system_jpeg=OFF \
+      -DFEATURE_system_freetype=OFF -DFEATURE_system_harfbuzz=OFF -DFEATURE_system_doubleconversion=OFF \
+      -DFEATURE_system_libb2=OFF \
+ && cmake --build /tmp/qtbuild \
+ && cmake --install /tmp/qtbuild \
+ && rm -rf /tmp/qtbase-everywhere-src-${QT_VERSION} /tmp/qtbuild
+
+COPY --from=ubuntu /usr/include/libasi /usr/include/libasi
+COPY --from=ubuntu /usr/include/libqhy /usr/include/libqhy
+COPY --from=ubuntu /usr/share/fonts/truetype/ibm-plex /usr/share/fonts/truetype/ibm-plex
+
+ENV HOME=/tmp
+ENV LANG=C.UTF-8
+LABEL org.opencontainers.image.title="slopcap-build-mingw" \
+      org.opencontainers.image.description="Windows cross-build environment for SlopCap (Fedora 44 MinGW-w64, static Qt)"

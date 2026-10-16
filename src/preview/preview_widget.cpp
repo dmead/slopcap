@@ -111,12 +111,19 @@ void PreviewWidget::zoomTo(double k) {
 void PreviewWidget::setDebayer(bool on) { debayer_ = on; }
 
 void PreviewWidget::initializeGL() {
-    renderer_.initialize();
-    glReady_ = true;
+    try {
+        renderer_.initialize();
+        glReady_ = true;
+    } catch (const std::exception& e) {
+        // e.g. Remote Desktop or an old driver without OpenGL 3.3: capture still works, the preview can't
+        glError_ = QString("The preview needs OpenGL 3.3, which isn't available here (%1). Capture and recording still work.")
+                       .arg(QString::fromLocal8Bit(e.what()).left(300));
+    }
 }
 
 void PreviewWidget::poll() {
-    if (!source_ || !glReady_) return;
+    // Without a GL context frames still flow (histogram, focus, collimation); only the picture is missing.
+    if (!source_ || (!glReady_ && glError_.isEmpty())) return;
     // take() swaps buffers, so the frame is only valid until the next take(): use it right here.
     const LatestFrame::Frame* f = source_->take();
     if (!f) return;
@@ -134,13 +141,15 @@ void PreviewWidget::poll() {
         const auto g = autoWhiteBalance(std::span(f->pixels).first(fi.bytes), fi.roi.width, fi.roi.height, fi.bitDepth, bayer_);
         for (std::size_t c = 0; c < 3; ++c) levels_.wb[c] = levels_.wb[c] == 1.0 && c != 1 ? g[c] : 0.85 * levels_.wb[c] + 0.15 * g[c];
     }
-    const QSize before = imageSize();
-    makeCurrent();
-    auto lv = levels_;
-    if (!debayer_) lv.wb = {1, 1, 1};
-    renderer_.process(f->pixels.data(), fi.roi.width, fi.roi.height, fi.bitDepth, debayer_ ? bayer_ : Bayer::None, lv);
-    doneCurrent();
-    if (imageSize() != before) centre_ = {-1, -1};   // new ROI: recentre
+    if (glReady_) {
+        const QSize before = imageSize();
+        makeCurrent();
+        auto lv = levels_;
+        if (!debayer_) lv.wb = {1, 1, 1};
+        renderer_.process(f->pixels.data(), fi.roi.width, fi.roi.height, fi.bitDepth, debayer_ ? bayer_ : Bayer::None, lv);
+        doneCurrent();
+        if (imageSize() != before) centre_ = {-1, -1};   // new ROI: recentre
+    }
     update();
 
     ++fpsFrames_;
@@ -166,6 +175,10 @@ QTransform PreviewWidget::imageToWidget() const {
 }
 
 void PreviewWidget::paintGL() {
+    if (!glReady_) {
+        overlayLayer_->update();
+        return;
+    }
     const qreal dpr = devicePixelRatioF();
     const QTransform t = imageToWidget();
     const QSize s = imageSize();
@@ -181,6 +194,12 @@ void PreviewWidget::resizeEvent(QResizeEvent* e) {
 }
 
 void PreviewWidget::paintOverlays(QPainter& p) const {
+    if (!glError_.isEmpty()) {
+        p.fillRect(rect(), QColor(13, 15, 18));
+        p.setPen(QColor(255, 138, 141));
+        p.drawText(rect().adjusted(40, 40, -40, -40), Qt::AlignCenter | Qt::TextWordWrap, glError_);
+        return;
+    }
     if (!renderer_.hasImage() || (overlays_.empty() && !crosshair_)) return;
     const QTransform t = imageToWidget();
     const QSize s = imageSize();

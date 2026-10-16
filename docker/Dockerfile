@@ -19,10 +19,11 @@ RUN add-apt-repository -y ppa:mutlaqja/ppa \
  && apt-get install -y --no-install-recommends indi-3rdparty-libs indi-bin \
  && rm -rf /var/lib/apt/lists/*
 
-# Qt 6 for the GUI, and Xvfb + Mesa (llvmpipe) so the OpenGL preview tests run without a display.
+# Qt 6 for the GUI, Xvfb + Mesa (llvmpipe) so the OpenGL preview tests run without a display, and the UI fonts
+# (embedded into the GUI).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      qt6-base-dev libgl-dev libglx-mesa0 libgl1-mesa-dri xvfb xauth \
+      qt6-base-dev libgl-dev libglx-mesa0 libgl1-mesa-dri xvfb xauth fonts-ibm-plex \
  && rm -rf /var/lib/apt/lists/*
 
 # Builds run as the invoking user (docker run --user), so give that user somewhere writable for caches.

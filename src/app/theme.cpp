@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QButtonGroup>
+#include <QDir>
 #include <QFontDatabase>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -34,6 +35,8 @@ QFont monoFont(double pointSize) {
 }
 
 void apply(QApplication& app) {
+    // Fonts embedded at build time (IBM Plex), so the look doesn't depend on what the machine has installed.
+    for (const auto& f : QDir(":/fonts").entryList({"*.ttf"})) QFontDatabase::addApplicationFont(":/fonts/" + f);
     app.setStyle(QStyleFactory::create("Fusion"));
     QPalette p;
     p.setColor(QPalette::Window, kPanel);
@@ -212,6 +215,32 @@ QWidget* pill(QLabel*& text, QLabel*& dot) {
 }
 
 void setDot(QLabel* dot, const QColor& c) { dot->setStyleSheet(QString("background: %1; border-radius: 3px;").arg(c.name())); }
+
+FlowLayout::~FlowLayout() {
+    while (auto* item = takeAt(0)) delete item;
+}
+
+QSize FlowLayout::minimumSize() const {
+    QSize s;
+    for (auto* item : items_) s = s.expandedTo(item->minimumSize());
+    return s;
+}
+
+int FlowLayout::arrange(const QRect& r, bool apply) const {
+    int x = r.x(), y = r.y(), lineH = 0;
+    for (auto* item : items_) {
+        const QSize sz = item->sizeHint();
+        if (x + sz.width() > r.right() + 1 && lineH > 0) {
+            x = r.x();
+            y += lineH + spacing_;
+            lineH = 0;
+        }
+        if (apply) item->setGeometry(QRect(QPoint(x, y), sz));
+        x += sz.width() + spacing_;
+        lineH = std::max(lineH, sz.height());
+    }
+    return y + lineH - r.y();
+}
 
 void drawChannelMarker(QPainter& p, int channel, double x, double y, double s) {
     p.save();

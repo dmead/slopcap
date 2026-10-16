@@ -5,10 +5,51 @@
 
 #include <QApplication>
 #include <QCommandLineParser>
-#include <QTimer>
 #include <QSurfaceFormat>
+#include <QTimer>
 
+#ifdef _WIN32
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
+#include <QStandardPaths>
+#include <windows.h>
+#endif
 
+namespace {
+
+#ifdef _WIN32
+/// Make the camera SDKs loadable before anything calls into them (they are delay-loaded). A DLL next to the exe wins
+/// (lets you try a newer SDK); otherwise the copy embedded in the exe is written once to
+/// %LOCALAPPDATA%\SlopCap\SlopCap\sdk\<content hash>\ and loaded from there. Without either, that camera brand is reported
+/// as missing in the camera menu.
+void prepareCameraSdks() {
+    const QString exeDir = QCoreApplication::applicationDirPath();
+    for (const char* name : {"ASICamera2.dll", "qhyccd.dll"}) {
+        const QString beside = exeDir + "/" + name;
+        if (QFile::exists(beside)) {
+            LoadLibraryW(reinterpret_cast<const wchar_t*>(QDir::toNativeSeparators(beside).utf16()));
+            continue;
+        }
+        QFile res(QString(":/sdk/") + name);
+        if (!res.open(QIODevice::ReadOnly)) continue;
+        const QByteArray bytes = res.readAll();
+        const QString hash = QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex().left(12);
+        const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/sdk/" + hash;
+        const QString path = dir + "/" + name;
+        if (!QFile::exists(path)) {
+            QDir().mkpath(dir);
+            QFile out(path + ".part");
+            if (!out.open(QIODevice::WriteOnly) || out.write(bytes) != bytes.size()) continue;
+            out.close();
+            QFile::rename(path + ".part", path);
+        }
+        LoadLibraryW(reinterpret_cast<const wchar_t*>(QDir::toNativeSeparators(path).utf16()));
+    }
+}
+#endif
+
+}  // namespace
 
 int main(int argc, char** argv) {
     QSurfaceFormat fmt;
@@ -20,6 +61,9 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QApplication::setOrganizationName("SlopCap");
     QApplication::setApplicationName("SlopCap");
+#ifdef _WIN32
+    prepareCameraSdks();
+#endif
     slopcap::app::theme::apply(app);
 
     QCommandLineParser args;

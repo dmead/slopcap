@@ -51,6 +51,21 @@
       "cacheVariables": {"SLOPCAP_WERROR": "ON"}
     },
     {
+      "name": "windows-static",
+      "inherits": "base",
+      "displayName": "Windows x64 GUI as one self-contained slopcap.exe (MinGW-w64 + static Qt, docker/Dockerfile.mingw)",
+      "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux"},
+      "toolchainFile": "${sourceDir}/tools/camprobe/mingw-w64.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SLOPCAP_BUILD_TESTS": "OFF",
+        "CMAKE_PREFIX_PATH": "/opt/qt6-mingw-static",
+        "QT_HOST_PATH": "/usr",
+        "WIN_SDK_DLL_DIR": "$env{SLOPCAP_WIN_SDK_DLL_DIR}",
+        "SLOPCAP_SINGLE_EXE": "ON"
+      }
+    },
+    {
       "name": "windows-cross",
       "inherits": "base",
       "displayName": "Windows x64 cross-build from Linux (MinGW-w64)",
@@ -69,7 +84,8 @@
     {"name": "linux-asan", "configurePreset": "linux-asan"},
     {"name": "linux-tsan", "configurePreset": "linux-tsan"},
     {"name": "windows-msvc", "configurePreset": "windows-msvc", "configuration": "Release"},
-    {"name": "windows-cross", "configurePreset": "windows-cross"}
+    {"name": "windows-cross", "configurePreset": "windows-cross"},
+    {"name": "windows-static", "configurePreset": "windows-static"}
   ],
   "testPresets": [
     {"name": "linux-debug", "configurePreset": "linux-debug", "output": {"outputOnFailure": true}},
