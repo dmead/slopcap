@@ -170,6 +170,54 @@ So the drivers alone can't place the landmarks SlopCap wants to show. Two source
 `tools/camprobe/` (`slopcap-camprobe`, read-only, `--json` available) reports all of this per connected camera.
 Run it on every camera we have before writing `AsiCamera` / `QhyCamera`, and keep its output as test fixtures.
 
+## 5b. Adding camera brands (assessed 2026-10-16)
+
+Every SDK below is already on the laptop: they come in the same INDI `indi-3rdparty-libs` package as the ZWO and QHY
+ones, so Linux builds need nothing new. For Windows, each vendor's DLL is taken from the vendor's own software.
+
+**What one backend is** (from ZWO: 271 lines, QHY: 317, plus a ~150-line `camprobe` probe):
+- an `ICamera` implementation: enumerate, open, controls, ROI/bin/bit depth, readout modes, gain landmarks, a
+  streaming `readFrame` into our buffer with a timeout, and a dropped-frame count;
+- a `slopcap-camprobe` probe and a fixture recorded from a real camera;
+- CMake detection;
+- acceptance as in M1: `slopcap-bench` at the SDK's own frame-rate ceiling, 10 minutes, 0 dropped.
+
+| Brand | SDK (version on disk) | Fit with `ICamera` | Effort | Risk |
+|---|---|---|---|---|
+| **Player One** (Mars, Neptune, Saturn, Uranus, Ares, Apollo) | `PlayerOneCamera` 3.10.1, C, 37 calls, 0.4 MB | Very close to ZWO's flow. `POAGetGainsAndOffsets` returns highest DR / HCG / unity / lowest read noise directly → `GainLandmark`, source Driver. `POAGetSensorModeInfo` → readout modes. `POAGetDroppedImagesCount`, USB bandwidth limit. | ~1 day + ½ day with a camera | Low |
+| **ToupTek and its rebrands**: Altair, Ogma, Omegon, Orion StarShoot G, SVBony (newer models, `svbonycam`), Mallincam, Meade, Bresser, TS-Optics (`tscam`), `nncam` | `toupcam` 60.32226; every rebrand is the same 256-call API under a different prefix (Altair's header differs from ToupTek's in 4 lines after renaming) | Different delivery model: pull mode with an event callback (`StartPullModeWithCallback` → `PullImageV4` into our slot), bridged to `readFrame(timeout)` with a condition variable. Conversion gain LCG / HCG / HDR (`OPTION_CG`) → readout modes. Gain is a percentage (100 = ×1). RAW / bit depth / frame-rate limit via `put_Option`. **One source file serves all eleven brands:** load whichever library is present at run time and resolve `<Prefix>_Function` by name. | 3–4 days for the backend + loader, ~½ day per brand with a camera | Medium (callback threading, timestamps, which library recognises which camera) |
+| **SVBony** (SV305, SV705C, SV905C…; newer models use `svbonycam`, covered above) | `SVBCameraSDK` 1.13.4, C, ~36 calls, 5.5 MB | Derived from ZWO's API: video capture mode, `SVBGetDroppedFrames`, RAW8–16 output, sensor pixel size. No gain-landmark call → published values (`GainLandmark` source Published). | ~1 day + ½ day with a camera | Medium (SDK quirks unknown until tested) |
+
+**Shared work first (~1 day):**
+- **A run-time SDK loader** (`dlopen` / `LoadLibrary` plus a symbol table), generalising the Windows delay-loading
+  added for ZWO/QHY:
+  - a missing SDK never stops SlopCap starting, on either OS;
+  - the large SDKs needn't be linked at all. ToupTek-family libraries are 21–67 MB each on Linux, too big to embed in
+    the Windows single exe, so on Windows they load from beside `slopcap.exe` or from the vendor's install folder.
+  - Player One's 0.4 MB library can be embedded like ZWO's and QHY's.
+- **ROI alignment from the camera:** `CameraInfo` gains ROI step sizes. `MainWindow::applyFormat` currently hardcodes
+  ZWO-safe values (x multiple of 8, y even), which other brands may not need or may not accept.
+- **Published gain landmarks** for brands without an API, as §5a already plans.
+
+**Testing is the real constraint.** We only own ZWO and QHY cameras, and none of these SDKs has a simulated camera. A
+backend can be written, compiled and unit-tested without hardware, but it stays marked *untested* until a `camprobe`
+fixture and a zero-drop bench run come from a real camera of that brand (borrowed, or run by someone who owns one).
+
+**Order:**
+1. Player One: popular for planetary, the cheapest to add, and its API maps best.
+2. The ToupTek family: one backend covers eleven brands.
+3. SVBony's own SDK.
+
+About 7–8 days of code for all three plus the shared work, and ½–1 day per brand once a camera is available.
+
+**Broader fallbacks, if wanted later** (each slower than a native SDK for high-frame-rate planetary work):
+- **ASCOM / Alpaca camera** on Windows: any brand with a driver. Per-frame image transfer limits fps, so it suits
+  focusing and slow cameras. 3–5 days; Alpaca over Qt Network is easier than COM from MinGW.
+- **INDI CCD** on Linux or remote: via the existing `IndiClient` with BLOB streaming. 2–3 days.
+- **The Imaging Source** (DMK/DFK): `tiscamera` on Linux and IC Imaging Control on Windows are two separate backends,
+  4–6 days.
+- **Teledyne FLIR / USB3 Vision** (Spinnaker): 3–5 days.
+
 ## 6. Performance plan
 
 Budget at the Saturn ROI (1040×560 RAW8, 168 fps): 98 MB/s to disk, ~6 ms per frame across all CPU work.
@@ -378,6 +426,6 @@ M2 status (2026-10-16, first pass):
 1. ~~GUI~~: Qt Widgets + QOpenGLWidget (M2).
 2. SlopCap's own license (GPL-3.0 like INDI/KStars, or MIT/Apache)? Check that the ZWO SDK's license allows
    distributing builds that link it.
-3. ~~Which camera SDK comes after ZWO?~~ QHY, alongside ZWO from M1. After those: PlayerOne, ToupTek, SVBony?
+3. ~~Which camera SDK comes after ZWO?~~ QHY, alongside ZWO from M1. After those: Player One, then the ToupTek family, then SVBony (§5b).
 4. File formats beyond SER: FITS cubes? AVI is probably not worth it.
 5. Should the FireCapture skill and plugin be retired once SlopCap reaches M6, or kept as a fallback?
