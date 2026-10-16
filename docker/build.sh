@@ -40,13 +40,14 @@ ensure_image() {
     fi
 }
 
-TAG=$(sha256sum "$REPO/docker/Dockerfile" | cut -c1-12)
+TAG=$(sha256sum < "$REPO/docker/Dockerfile" | cut -c1-12)
 IMAGE="slopcap-build:$TAG"
 ensure_image slopcap-build "$TAG" "$REPO/docker/Dockerfile"
 REMOTE=${REGISTRY:+$REGISTRY/slopcap-build}
 
 # The Windows single-exe build has its own image (Fedora MinGW + static Qt), derived from the Linux one.
-MINGW_TAG=$( (sha256sum "$REPO/docker/Dockerfile.mingw"; echo "$TAG") | sha256sum | cut -c1-12)
+# (hash the contents only: sha256sum's output would also carry the checkout's path, giving each machine its own tag)
+MINGW_TAG=$( (sha256sum < "$REPO/docker/Dockerfile.mingw"; echo "$TAG") | sha256sum | cut -c1-12)
 MINGW_IMAGE="slopcap-build-mingw:$MINGW_TAG"
 needs_mingw() { for p in "$@"; do [ "$p" = windows-static ] && return 0; done; return 1; }
 
