@@ -983,11 +983,8 @@ void MainWindow::runAutoTarget(const LatestFrame::Frame& f) {
     in.jdUtc = analysis::julianDate(f.info.timestamp);
     if (settings_.focalLengthMm > 0 && cam_->info().pixelUm > 0)
         in.arcsecPerPixel = 206.265 * cam_->info().pixelUm * std::max(1, f.info.roi.bin) / settings_.focalLengthMm;
-    if (mount_->ready()) {
-        in.pointing = std::array<double, 2>{mount_->ra(), mount_->dec()};
-        if (auto s = mount_->site()) in.site = analysis::Site{(*s)[0], (*s)[1]};
-    }
-    if (!in.site && settings_.latitude && settings_.longitude) in.site = analysis::Site{*settings_.latitude, *settings_.longitude};
+    // Not the mount: it may not be connected, and an unaligned mount's coordinates mislead.
+    if (settings_.latitude && settings_.longitude) in.site = analysis::Site{*settings_.latitude, *settings_.longitude};
     const auto id = analysis::identifyTarget(in);
 
     // The name: the body when it's decided, "Target" when it isn't, nothing without a target.
@@ -995,8 +992,9 @@ void MainWindow::runAutoTarget(const LatestFrame::Frame& f) {
     QString detail = id.body ? QString::fromStdString(id.summary) : QString::fromStdString(analysis::candidatesText(id.candidates));
     if (!id.body && in.image.found) {
         QStringList need;
-        if (!in.arcsecPerPixel) need << "the focal length (Settings)";
-        if (!in.pointing) need << "the mount";
+        if (!in.arcsecPerPixel) need << "the focal length";
+        if (!in.site) need << "the site";
+        if (!need.isEmpty()) need.back() += " (Settings)";
         if (!need.isEmpty()) detail += " — " + need.join(" or ") + " would help";
     }
     QStringList notes;

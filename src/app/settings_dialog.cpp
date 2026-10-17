@@ -70,7 +70,7 @@ SettingsDialog::SettingsDialog(const Settings& s, QWidget* parent) : QDialog(par
     note->setWordWrap(true);
     v->addWidget(note);
 
-    // The site, for which targets are above the horizon. The mount's own site is used first when it reports one.
+    // The site, for which targets are above the horizon (the automatic target; the mount is never asked).
     v->addWidget(theme::section("Site"));
     auto* f3 = new QFormLayout;
     auto coordinate = [](double limit, std::optional<double> value, const QString& suffix) {
@@ -87,7 +87,8 @@ SettingsDialog::SettingsDialog(const Settings& s, QWidget* parent) : QDialog(par
     f3->addRow("Latitude", latitude_);
     f3->addRow("Longitude", longitude_);
     v->addLayout(f3);
-    auto* siteNote = theme::label("South and west are negative. Used when the mount doesn't report its site.", "dim");
+    auto* siteNote = theme::label("South and west are negative. With the time, it tells the automatic target what is above "
+                                  "the horizon.", "dim");
     siteNote->setWordWrap(true);
     v->addWidget(siteNote);
 

@@ -48,10 +48,11 @@ build/linux-release/slopcap --camera asi --focuser localhost:7624
    in the recording folder.
 4. **Record** (Ctrl+R): files are named WinJUPOS-style from the mid-capture time and the Target field
    (`2026-10-17-0315_4-Saturn.ser`), with a `.txt` of the settings and focuser position next to each. With Target
-   **Auto**, SlopCap identifies the Moon, Mars or an outer planet from the image (Saturn's rings, a crescent's shape,
-   size and colour) and the mount's pointing, and shows why under the Target panel. When it can't decide it says
-   what's left ("Moon or Jupiter") and names the file "Target"; Settings → Focal length (the image scale) and a
-   connected mount, or Settings → Site, settle most cases. The name is fixed while recording.
+   **Auto**, SlopCap identifies the Moon, Mars or an outer planet from the image and the clock: Saturn's rings, the
+   Moon's shape at tonight's phase, a darkened limb, size and colour. It never asks the mount. Why it decided shows
+   under the Target panel. When it can't decide, it says what's left ("Moon or Jupiter") and names the file "Target";
+   Settings → Focal length (the image scale) settles most of those, and Settings → Site rules out what's below the
+   horizon. The name is fixed while recording.
 
 Afterwards: `slopcap-diag --png OUT/ *.ser` stacks the best frames of each recording and reports dispersion, limb
 sharpness per channel and side, halo and jitter.

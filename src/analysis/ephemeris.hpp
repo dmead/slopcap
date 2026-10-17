@@ -21,6 +21,7 @@ struct BodyPosition {
     double distanceAu = 0;      ///< from Earth
     double diameterArcsec = 0;  ///< equatorial diameter of the globe (Saturn without its rings)
     double ringTiltDeg = 0;     ///< Saturn: the rings' opening as seen from Earth (0 = edge-on); 0 for the others
+    double illuminated = 1;     ///< fraction of the disc that is lit: the Moon's phase, Mars down to ~0.84
 };
 
 /// Julian date (UTC) of a time point.

@@ -22,7 +22,7 @@ struct Settings {
     double focalRatio = 0;       ///< 0 = unknown
     double micronsPerStep = 0;   ///< 0 = unknown
     double focalLengthMm = 0;    ///< effective (with any Barlow); 0 = unknown
-    std::optional<double> latitude, longitude;   ///< the site, when the mount doesn't say (east positive)
+    std::optional<double> latitude, longitude;   ///< the site (east positive), for what is above the horizon
 };
 
 class SettingsDialog : public QDialog {

@@ -1,10 +1,12 @@
-// What is the camera looking at? The Moon, Mars or an outer planet (the Target menu's "Auto"). Two independent kinds
-// of evidence, because neither is enough alone:
-//   the sky    positions (analysis/ephemeris) against the mount's pointing, and what is above the horizon at the site
+// What is the camera looking at? The Moon, Mars or an outer planet (the Target menu's "Auto"). From the image and the
+// clock, never the mount: many planetary setups have no mount connection, and an unaligned or unguided mount's
+// coordinates mislead (one night of logs here had RA out by 2.8 h).
 //   the image  the target's shape and symmetry (Saturn's rings: elongated but point-symmetric, at any camera rotation;
-//              a crescent Moon: elongated and lopsided), limb darkening (Jupiter's disc dims to its edge, the full
-//              Moon doesn't), its size in arcseconds when the image scale is known, and its raw colour (Mars red,
-//              Uranus / Neptune blue-green)
+//              the Moon lit from the side: lopsided), a darkened limb (not the Moon), its size in arcseconds when the
+//              image scale is known (or pixels too many for a small body at any scale), and its raw colour (Mars
+//              red, Uranus / Neptune blue-green)
+//   the clock  the Moon's phase tonight (a whole round disc isn't a half Moon; nothing is the new Moon), Saturn's ring
+//              tilt, and, with the site from Settings, what is above the horizon
 // Each piece of evidence rules candidates out; one that would rule out every candidate is reported as a conflict and
 // ignored. One candidate left is the answer; several are reported as such ("Uranus or Neptune"), never guessed.
 // Thresholds are calibrated on recordings of Jupiter, Saturn and the Moon (tests/test_identify.cpp).
@@ -34,6 +36,7 @@ struct TargetFeatures {
     double symmetry = 1;              ///< share of the outline that is also outline when turned 180° about its centre
     double limbRatio = 0;             ///< brightness near the edge / near the centre of the disc (0 if too small to say)
     std::array<double, 3> signal{};   ///< mean above the sky, per channel (R, G, B; mono: [0]), 0..1 of full scale
+    double clipped = 0;               ///< share of the disc with a channel at full scale (colour and limb then mislead)
     bool touchesEdge = false;         ///< cut off by the frame edge: size and shape are lower bounds
 };
 
@@ -49,16 +52,15 @@ struct Site {
 
 struct IdentifyInput {
     TargetFeatures image;
-    std::optional<double> arcsecPerPixel;            ///< image scale, if the focal length and pixel size are known
-    double jdUtc = 0;
-    std::optional<std::array<double, 2>> pointing;   ///< mount RA (h) / Dec (°), equinox of date
-    std::optional<Site> site;
+    std::optional<double> arcsecPerPixel;   ///< image scale, if the focal length and pixel size are known
+    double jdUtc = 0;                       ///< when the frame was taken
+    std::optional<Site> site;               ///< where, if known (Settings → Site)
 };
 
 struct Identification {
     std::optional<Body> body;              ///< the answer, when only one candidate is left
     std::vector<Body> candidates;          ///< what's left (one when identified)
-    std::string summary;                   ///< short, for the UI: "rings 2.4:1 · 0.6° from mount"
+    std::string summary;                   ///< short, for the UI: "rings 2.4:1", "crescent"
     std::vector<std::string> notes;        ///< every step: what each piece of evidence did
 };
 

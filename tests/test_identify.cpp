@@ -1,6 +1,7 @@
-// Target identification: ephemerides against libnova (values computed with libnova 0.16 and precessed to date), the
-// image measurements on synthetic targets, and the decision rules. The thresholds themselves were calibrated on real
-// recordings (ASI585MC Jupiter and Saturn, mono lunar captures), quoted in analysis/identify.cpp.
+// Target identification: ephemerides against libnova (values computed with libnova 0.16, precessed to date), the
+// image measurements on drawn targets, and the decision rules. The thresholds were calibrated on real recordings
+// (ASI585MC Jupiter and Saturn in 2022 and 2026, lunar captures), quoted in analysis/identify.cpp. No mount: the
+// identifier works from the image and the clock (and the site, when it's set).
 #include "analysis/ephemeris.hpp"
 #include "analysis/identify.hpp"
 
@@ -18,7 +19,10 @@ using namespace slopcap::analysis;
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
-const double kOct2026 = 2461321.5 + 5.5 / 24;   // 2026-10-08 05:30 UTC (Saturn rings 7.4° open)
+const double kOct2026 = 2461321.5 + 5.5 / 24;       // 2026-10-08 05:30 UTC: Saturn's rings 7.4° open, the Moon 6.7% lit
+const double kFullMoon2026 = 2461043.5 + 7.2 / 24;  // 2026-01-03 07:12 UTC: the Moon 99.8% lit
+const double kGibbous2022 = 2459808.5 + 8.9 / 24;   // 2022-08-17 08:54 UTC: the Moon 68% lit
+const double kFullMoon2022 = 2459803.5 + 1.6 / 24;  // 2022-08-12 01:36 UTC: full Moon, Saturn's rings 14° open
 
 /// A raw RGGB 8-bit frame: `rgb(x, y)` gives the scene's colour (0..1 per channel) at each pixel, over a dark sky.
 std::vector<std::byte> bayerFrame(int w, int h, const std::function<std::array<double, 3>(double, double)>& rgb) {
@@ -40,10 +44,26 @@ bool inEllipse(double x, double y, double cx, double cy, double a, double b, dou
     return (u * u) / (a * a) + (v * v) / (b * b) <= 1;
 }
 
-IdentifyInput imageOnly(const TargetFeatures& f) {
+/// A sphere of radius r at (cx, cy), lit from +x so that `lit` of its disc is lit (terminator: a half-ellipse).
+bool litSphere(double x, double y, double cx, double cy, double r, double lit) {
+    const double dx = x - cx, dy = y - cy, cosPhase = 2 * lit - 1;
+    return dx * dx + dy * dy <= r * r && dx > -cosPhase * std::sqrt(std::max(0.0, r * r - dy * dy));
+}
+
+/// A round disc of colour c (and limb darkening: brightness × (1 - k + k·cos θ), θ from the centre to the limb).
+std::vector<std::byte> disc(int w, int h, double r, std::array<double, 3> c, double limbDarkening = 0) {
+    return bayerFrame(w, h, [=](double x, double y) -> std::array<double, 3> {
+        const double d = std::hypot(x - w / 2.0, y - h / 2.0);
+        if (d > r) return {0, 0, 0};
+        const double mu = std::sqrt(1 - (d / r) * (d / r)), k = 1 - limbDarkening + limbDarkening * mu;
+        return {c[0] * k, c[1] * k, c[2] * k};
+    });
+}
+
+IdentifyInput at(double jd, const TargetFeatures& f) {
     IdentifyInput in;
     in.image = f;
-    in.jdUtc = kOct2026;
+    in.jdUtc = jd;
     return in;
 }
 
@@ -65,11 +85,20 @@ TEST_CASE("ephemeris: planets and the Moon where libnova puts them") {
     CHECK(bodyPosition(Body::Jupiter, kOct2026).diameterArcsec == Catch::Approx(33.8).margin(0.2));
     CHECK(bodyPosition(Body::Uranus, kOct2026).diameterArcsec == Catch::Approx(3.75).margin(0.05));
 
-    const double fullMoon = 2461043.5 + 7.2 / 24;   // 2026-01-03 07:12 UTC
-    const auto m = bodyPosition(Body::Moon, fullMoon);
+    const auto m = bodyPosition(Body::Moon, kFullMoon2026);
     CHECK(separationDeg(m.ra, m.dec, 6.8431, 27.3050) < 0.4);
     CHECK(m.distanceAu * 149597870.7 == Catch::Approx(362014).epsilon(0.005));
     CHECK(m.diameterArcsec == Catch::Approx(1976).margin(15));
+}
+
+TEST_CASE("ephemeris: the Moon's phase and Mars's, as libnova has them") {
+    CHECK(bodyPosition(Body::Moon, kFullMoon2026).illuminated == Catch::Approx(0.998).margin(0.005));
+    CHECK(bodyPosition(Body::Moon, kOct2026).illuminated == Catch::Approx(0.067).margin(0.005));
+    CHECK(bodyPosition(Body::Moon, kGibbous2022).illuminated == Catch::Approx(0.680).margin(0.005));
+    const double mars = bodyPosition(Body::Mars, kOct2026).illuminated;
+    CHECK(mars > 0.84);   // Mars never shows less than ~84% lit
+    CHECK(mars < 1.0);
+    CHECK(bodyPosition(Body::Neptune, kOct2026).illuminated > 0.9999);
 }
 
 TEST_CASE("ephemeris: Saturn's ring tilt, separations and altitudes") {
@@ -102,134 +131,135 @@ TEST_CASE("measureTarget: Saturn's shape is elongated and symmetric at any rotat
         CHECK(f.elongation >= 1.6);
         CHECK(f.symmetry >= 0.86);
         CHECK(!f.touchesEdge);
+        CHECK(f.clipped == 0);
         CHECK(colourIndex(f).value() == Catch::Approx(std::log(0.55 / 0.27)).margin(0.05));
-        const auto id = identifyTarget(imageOnly(f));
+        const auto id = identifyTarget(at(kOct2026, f));
         CHECK(id.body == Body::Saturn);
         CHECK(id.summary.find("rings") != std::string::npos);
     }
 }
 
-TEST_CASE("measureTarget: a crescent is elongated but lopsided, so the Moon, not Saturn") {
-    const auto px = bayerFrame(400, 400, [](double x, double y) -> std::array<double, 3> {
-        const bool lit = std::hypot(x - 200, y - 200) <= 150 && std::hypot(x - 270, y - 200) > 150;
-        return lit ? std::array<double, 3>{0.5, 0.5, 0.35} : std::array<double, 3>{0, 0, 0};
-    });
-    const auto f = measureTarget(px, 400, 400, 8, Bayer::RGGB);
-    REQUIRE(f.found);
-    CHECK(f.elongation >= 1.6);
-    CHECK(f.symmetry < 0.8);
-    const auto id = identifyTarget(imageOnly(f));
-    CHECK(id.body == Body::Moon);
+TEST_CASE("identify: the Moon at tonight's phase, whether a crescent or gibbous") {
+    for (double jd : {kOct2026, kGibbous2022, kFullMoon2026}) {
+        const double lit = bodyPosition(Body::Moon, jd).illuminated;
+        if (lit > 0.97) continue;   // a full Moon is a round disc: the next test
+        const auto px = bayerFrame(400, 400, [=](double x, double y) -> std::array<double, 3> {
+            return litSphere(x, y, 200, 200, 150, lit) ? std::array<double, 3>{0.5, 0.5, 0.35} : std::array<double, 3>{0, 0, 0};
+        });
+        const auto f = measureTarget(px, 400, 400, 8, Bayer::RGGB);
+        INFO("Moon " << lit * 100 << "% lit");
+        REQUIRE(f.found);
+        const auto id = identifyTarget(at(jd, f));
+        CHECK(id.body == Body::Moon);
+    }
 }
 
-TEST_CASE("identify: a round neutral disc needs the image scale or the mount") {
-    // Jupiter-coloured, 340 px across: round, so not Saturn (rings 7° open); neutral, so not Mars, Uranus or Neptune.
-    const auto px = bayerFrame(600, 500, [](double x, double y) -> std::array<double, 3> {
-        return std::hypot(x - 300, y - 250) <= 170 ? std::array<double, 3>{0.6, 0.45, 0.25} : std::array<double, 3>{0, 0, 0};
-    });
-    const auto f = measureTarget(px, 600, 500, 8, Bayer::RGGB);
-    REQUIRE(f.found);
-    CHECK(f.elongation < 1.3);
-    CHECK(f.diameterPx == Catch::Approx(340).epsilon(0.03));
+TEST_CASE("identify: a round neutral disc, by the Moon's phase, the limb and the image scale") {
+    // Jupiter-coloured, 340 px across: round, so not Saturn (rings open); neutral, so not Mars, Uranus or Neptune.
+    const auto flat = measureTarget(disc(600, 500, 170, {0.6, 0.45, 0.25}), 600, 500, 8, Bayer::RGGB);
+    REQUIRE(flat.found);
+    CHECK(flat.elongation < 1.3);
+    CHECK(flat.symmetry > 0.97);
+    CHECK(flat.diameterPx == Catch::Approx(340).epsilon(0.03));
 
-    auto in = imageOnly(f);
-    auto id = identifyTarget(in);
+    // A thin crescent Moon tonight: a whole disc isn't the Moon.
+    auto id = identifyTarget(at(kOct2026, flat));
+    CHECK(id.body == Body::Jupiter);
+
+    // Under a full Moon it could be either...
+    id = identifyTarget(at(kFullMoon2022, flat));
     CHECK(!id.body);
-    CHECK(id.candidates == std::vector<Body>{Body::Moon, Body::Jupiter});
     CHECK(candidatesText(id.candidates) == "Moon or Jupiter");
 
-    in.arcsecPerPixel = 0.1;   // 34″: Jupiter's size today
-    id = identifyTarget(in);
-    CHECK(id.body == Body::Jupiter);
+    // ...unless the limb is darkened, as Jupiter's is (0.63-0.66 measured on unclipped ASI585MC captures)...
+    const auto darkLimb = measureTarget(disc(600, 500, 170, {0.6, 0.45, 0.25}, 0.9), 600, 500, 8, Bayer::RGGB);
+    CHECK(darkLimb.limbRatio < 0.75);
+    CHECK(identifyTarget(at(kFullMoon2022, darkLimb)).body == Body::Jupiter);
 
-    in.arcsecPerPixel = 5.8;   // ~1970″: the Moon
-    id = identifyTarget(in);
-    CHECK(id.body == Body::Moon);
+    // ...or the image scale says how big it is.
+    auto in = at(kFullMoon2022, flat);
+    in.arcsecPerPixel = bodyPosition(Body::Jupiter, kFullMoon2022).diameterArcsec / 340;
+    CHECK(identifyTarget(in).body == Body::Jupiter);
+    in.arcsecPerPixel = bodyPosition(Body::Moon, kFullMoon2022).diameterArcsec / 340;
+    CHECK(identifyTarget(in).body == Body::Moon);
 
-    in.arcsecPerPixel.reset();   // or the mount, pointed at Jupiter's position
-    const auto j = bodyPosition(Body::Jupiter, kOct2026);
-    in.pointing = std::array<double, 2>{j.ra + 0.05, j.dec - 1.0};   // alignment a degree or so off
-    id = identifyTarget(in);
-    CHECK(id.body == Body::Jupiter);
-    CHECK(id.summary.find("from mount") != std::string::npos);
+    // With Saturn's rings nearly edge-on (early 2026), a round disc could also be Saturn's globe.
+    REQUIRE(std::abs(bodyPosition(Body::Saturn, kFullMoon2026).ringTiltDeg) < 3);
+    CHECK(candidatesText(identifyTarget(at(kFullMoon2026, flat)).candidates) == "Moon, Jupiter or Saturn");
 }
 
-TEST_CASE("identify: colour picks out Mars and the ice giants; the mount tells Uranus from Neptune") {
-    auto disc = [](double r, std::array<double, 3> c) {
-        return bayerFrame(200, 200, [=](double x, double y) -> std::array<double, 3> {
-            return std::hypot(x - 100, y - 100) <= r ? c : std::array<double, 3>{0, 0, 0};
-        });
-    };
-    const auto mars = measureTarget(disc(40, {0.7, 0.3, 0.12}), 200, 200, 8, Bayer::RGGB);   // ln R/B = 1.76
-    CHECK(identifyTarget(imageOnly(mars)).body == Body::Mars);
-
-    const auto blue = measureTarget(disc(18, {0.2, 0.35, 0.45}), 200, 200, 8, Bayer::RGGB);   // ln R/B = -0.81
-    auto in = imageOnly(blue);
-    auto id = identifyTarget(in);
-    CHECK(candidatesText(id.candidates) == "Uranus or Neptune");
-    const auto u = bodyPosition(Body::Uranus, kOct2026);
-    in.pointing = std::array<double, 2>{u.ra, u.dec};
-    CHECK(identifyTarget(in).body == Body::Uranus);
-    const auto n = bodyPosition(Body::Neptune, kOct2026);
-    in.pointing = std::array<double, 2>{n.ra, n.dec};
-    CHECK(identifyTarget(in).body == Body::Neptune);
+TEST_CASE("identify: clipping silences colour and limb") {
+    // A Jupiter overexposed until its channels clip: limb flattened, colour skewed. Neither may decide anything.
+    // Drawn red-heavy (ln R/B 1.4 before clipping, near Mars's): clipped, its colour must not make it Mars.
+    const auto f = measureTarget(disc(600, 500, 170, {1.6, 1.1, 0.4}, 0.9), 600, 500, 8, Bayer::RGGB);
+    REQUIRE(f.found);
+    CHECK(f.clipped > 0.5);
+    const auto id = identifyTarget(at(kFullMoon2022, f));
+    CHECK(!id.body);
+    CHECK(std::find(id.candidates.begin(), id.candidates.end(), Body::Moon) != id.candidates.end());   // limb not used
+    const bool noted = std::any_of(id.notes.begin(), id.notes.end(), [](const std::string& n) { return n.find("clipped") != std::string::npos; });
+    CHECK(noted);
 }
 
-TEST_CASE("identify: conflicting evidence is ignored and reported, not obeyed") {
-    // The mount points at Saturn (Neptune is 8° away this season), but the image is a small blue disc.
-    const auto blue = measureTarget(bayerFrame(200, 200, [](double x, double y) -> std::array<double, 3> {
-        return std::hypot(x - 100, y - 100) <= 18 ? std::array<double, 3>{0.2, 0.35, 0.45} : std::array<double, 3>{0, 0, 0};
-    }), 200, 200, 8, Bayer::RGGB);
-    auto in = imageOnly(blue);
-    const auto s = bodyPosition(Body::Saturn, kOct2026);
-    in.pointing = std::array<double, 2>{s.ra, s.dec};
-    const auto id = identifyTarget(in);
-    CHECK(id.body == Body::Saturn);   // pointing came first and left only Saturn...
-    const bool reported = std::any_of(id.notes.begin(), id.notes.end(), [](const std::string& n) { return n.find("ignored") != std::string::npos; });
-    CHECK(reported);                  // ...and the image's disagreement is in the notes
+TEST_CASE("identify: colour picks out Mars and the ice giants; the site tells Uranus from Neptune") {
+    const auto mars = measureTarget(disc(200, 200, 40, {0.7, 0.3, 0.12}), 200, 200, 8, Bayer::RGGB);   // ln R/B = 1.76
+    CHECK(identifyTarget(at(kOct2026, mars)).body == Body::Mars);
 
-    // Far from everything: the pointing isn't used at all.
-    in.pointing = std::array<double, 2>{18.0, -60.0};
-    const auto far = identifyTarget(in);
-    CHECK(candidatesText(far.candidates) == "Uranus or Neptune");
-}
-
-TEST_CASE("identify: what's below the horizon can't be the target") {
-    const auto px = bayerFrame(200, 200, [](double x, double y) -> std::array<double, 3> {
-        return std::hypot(x - 100, y - 100) <= 18 ? std::array<double, 3>{0.2, 0.35, 0.45} : std::array<double, 3>{0, 0, 0};
-    });
-    auto in = imageOnly(measureTarget(px, 200, 200, 8, Bayer::RGGB));
-    // Find a time when one of Uranus and Neptune is well up and the other well down, at Greenwich.
+    const auto blue = measureTarget(disc(200, 200, 18, {0.2, 0.35, 0.45}), 200, 200, 8, Bayer::RGGB);   // ln R/B = -0.81
+    auto in = at(kOct2026, blue);
+    CHECK(candidatesText(identifyTarget(in).candidates) == "Uranus or Neptune");
+    // With the site: at some hour one of them is well up and the other well down, at Greenwich.
     for (double hour = 0; hour < 24; hour += 0.5) {
         in.jdUtc = kOct2026 + hour / 24;
         in.site = Site{51.5, 0};
         const auto u = bodyPosition(Body::Uranus, in.jdUtc), n = bodyPosition(Body::Neptune, in.jdUtc);
         const double au = altitudeDeg(u.ra, u.dec, in.jdUtc, 51.5, 0), an = altitudeDeg(n.ra, n.dec, in.jdUtc, 51.5, 0);
         if (!((au > 5 && an < -5) || (an > 5 && au < -5))) continue;
-        const auto id = identifyTarget(in);
-        CHECK(id.body == (au > 0 ? Body::Uranus : Body::Neptune));
+        CHECK(identifyTarget(in).body == (au > 0 ? Body::Uranus : Body::Neptune));
         return;
     }
     FAIL("no hour with only one of Uranus and Neptune up");
 }
 
+TEST_CASE("identify: conflicting evidence is ignored and reported, not obeyed") {
+    // A crescent shape on a night of full Moon: nothing tonight looks like that. The shape is set aside.
+    const auto px = bayerFrame(400, 400, [](double x, double y) -> std::array<double, 3> {
+        return litSphere(x, y, 200, 200, 150, 0.2) ? std::array<double, 3>{0.5, 0.5, 0.35} : std::array<double, 3>{0, 0, 0};
+    });
+    const auto id = identifyTarget(at(kFullMoon2026, measureTarget(px, 400, 400, 8, Bayer::RGGB)));
+    const bool ignored = std::any_of(id.notes.begin(), id.notes.end(), [](const std::string& n) { return n.find("ignored") != std::string::npos; });
+    CHECK(ignored);
+    CHECK(!id.candidates.empty());
+}
+
 TEST_CASE("identify: a disc too many pixels across for a small planet at any image scale") {
-    // A mono 1100 px disc (like a whole full Moon): no colour, no scale, no mount. At the finest amateur image scale
-    // Mars, Uranus and Neptune would still be a few hundred pixels at most; the Moon and Jupiter could be this big.
+    // A mono 1200 px disc (like a whole full Moon): no colour, no scale. At the finest amateur image scale Mars,
+    // Uranus and Neptune would still be a few hundred pixels at most; the Moon and Jupiter could be this big.
     const int w = 1400, h = 1300;
     std::vector<std::byte> mono(static_cast<std::size_t>(w * h));
     for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) mono[static_cast<std::size_t>(y * w + x)] = std::byte(std::hypot(x - 700, y - 650) <= 550 ? 180 : 8);
+        for (int x = 0; x < w; ++x) mono[static_cast<std::size_t>(y * w + x)] = std::byte(std::hypot(x - 700, y - 650) <= 600 ? 180 : 8);
     const auto f = measureTarget(mono, w, h, 8, Bayer::None);
     REQUIRE(f.found);
-    const auto id = identifyTarget(imageOnly(f));
-    CHECK(candidatesText(id.candidates) == "Moon or Jupiter");
+    CHECK(candidatesText(identifyTarget(at(kFullMoon2022, f)).candidates) == "Moon or Jupiter");
 
-    // A small disc keeps them all (Saturn aside: round, with its rings open).
+    // A small disc keeps them all but Saturn (round, with its rings open) and, tonight, the thin crescent Moon.
     std::vector<std::byte> small(200 * 200);
     for (int y = 0; y < 200; ++y)
         for (int x = 0; x < 200; ++x) small[static_cast<std::size_t>(y * 200 + x)] = std::byte(std::hypot(x - 100, y - 100) <= 30 ? 180 : 8);
-    CHECK(identifyTarget(imageOnly(measureTarget(small, 200, 200, 8, Bayer::None))).candidates.size() == 5);
+    CHECK(candidatesText(identifyTarget(at(kOct2026, measureTarget(small, 200, 200, 8, Bayer::None))).candidates) ==
+          "Mars, Jupiter, Uranus or Neptune");
+}
+
+TEST_CASE("identify: no Moon near new Moon") {
+    // The new Moon after 2026-10-08: whatever the image, it isn't the Moon.
+    double newMoon = kOct2026;
+    for (double jd = kOct2026; jd < kOct2026 + 5; jd += 1.0 / 24)
+        if (bodyPosition(Body::Moon, jd).illuminated < bodyPosition(Body::Moon, newMoon).illuminated) newMoon = jd;
+    REQUIRE(bodyPosition(Body::Moon, newMoon).illuminated < 0.01);
+    const auto f = measureTarget(disc(600, 500, 170, {0.6, 0.45, 0.25}), 600, 500, 8, Bayer::RGGB);
+    const auto id = identifyTarget(at(newMoon, f));
+    CHECK(std::find(id.candidates.begin(), id.candidates.end(), Body::Moon) == id.candidates.end());
 }
 
 TEST_CASE("measureTarget: nothing there, and mono frames") {

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <format>
 #include <functional>
+#include <iterator>
 
 namespace slopcap::analysis {
 
@@ -32,16 +33,69 @@ double percentile(std::vector<float> v, double p) {
 
 constexpr double kPi = 3.14159265358979323846;
 
-// Thresholds, calibrated on ASI585MC recordings of Jupiter and Saturn and on lunar recordings (tests/test_identify.cpp).
-constexpr double kElongated = 1.6;          ///< outline at or above: Saturn's rings, or a crescent (Saturn measures 2.4)
-constexpr double kRoundElongation = 1.3;    ///< below: round (Jupiter and the full Moon measure 1.00)
-constexpr double kSymmetric = 0.86;         ///< point symmetry at or above: not a lit-from-the-side Moon (Saturn 0.92-0.98)
-constexpr double kLopsided = 0.8;           ///< ...below: a crescent or gibbous Moon (a 5-day crescent: 0.71)
+// Thresholds, calibrated on real recordings (ASI585MC: Jupiter and Saturn in 2022 and 2026; lunar captures) and on
+// drawn phases of a sphere. Measured: Jupiter 1.06-1.07:1, symmetry 0.98-0.99; Saturn 2.3-2.7:1, symmetry 0.92-0.98
+// (rings 7-14° open); the full Moon 1.00 / 1.00; a 5-day crescent 2.15:1 / 0.71.
+constexpr double kRoundElongation = 1.3;    ///< below: round enough to measure limb darkening
+constexpr double kRinged = 1.6;             ///< Saturn with its rings: at least this elongated...
+constexpr double kRingSymmetry = 0.86;      ///< ...and at least this point-symmetric (rings don't have a phase)
 constexpr double kEdgeOnTiltDeg = 3.0;      ///< rings this close to edge-on may not show
-constexpr double kNearDeg = 10.0;           ///< a body this close to the mount's pointing counts as pointed at
-constexpr double kNearMarginDeg = 3.0;      ///< ...unless another is nearer by more than this
 constexpr double kHorizonDeg = -1.0;        ///< below this altitude it can't be the target
+constexpr double kNewMoonLit = 0.01;        ///< less lit than this, the Moon isn't a target
+constexpr double kClippedShare = 0.02;      ///< more of the disc clipped than this: colour and limb aren't used
 constexpr double kSeeingArcsec = 2.0;       ///< blur added to small discs before comparing sizes
+
+/// A lit sphere's outline at each lit fraction (elongation, point symmetry), measured by measureTarget on drawn
+/// phases (terminator a half-ellipse): crescents long and lopsided, gibbous phases nearly round, full round.
+struct PhaseShape {
+    double lit, elongation, symmetry;
+};
+constexpr PhaseShape kPhaseShapes[] = {{0.00, 3.00, 0.00}, {0.05, 3.00, 0.082}, {0.15, 2.99, 0.329}, {0.30, 2.58, 0.647},
+                                       {0.45, 2.04, 0.785}, {0.55, 1.75, 0.844}, {0.70, 1.41, 0.912}, {0.80, 1.24, 0.947},
+                                       {0.85, 1.17, 0.963}, {0.90, 1.11, 0.976}, {0.95, 1.05, 0.988}, {0.98, 1.02, 0.994},
+                                       {1.00, 1.00, 1.000}};
+
+PhaseShape phaseShape(double lit) {
+    lit = std::clamp(lit, 0.0, 1.0);
+    for (std::size_t i = 1; i < std::size(kPhaseShapes); ++i) {
+        const auto& a = kPhaseShapes[i - 1];
+        const auto& b = kPhaseShapes[i];
+        if (lit <= b.lit) {
+            const double t = (lit - a.lit) / (b.lit - a.lit);
+            return {lit, a.elongation + t * (b.elongation - a.elongation), a.symmetry + t * (b.symmetry - a.symmetry)};
+        }
+    }
+    return kPhaseShapes[std::size(kPhaseShapes) - 1];
+}
+
+/// Could this target be body `p` tonight, by its shape? `lit`: p's lit fraction; `tilt`: Saturn's ring opening.
+bool shapeMatches(Body p, const TargetFeatures& im, double lit, double tilt) {
+    const double e = im.elongation, s = im.symmetry;
+    const bool ringed = e >= kRinged && s >= kRingSymmetry;
+    switch (p) {
+        case Body::Moon: {   // generous: real terminators are soft, and the Moon's limb is rough
+            const auto m = phaseShape(lit);
+            return e >= m.elongation / 1.35 - 0.05 && e <= m.elongation * 1.35 + 0.05 && std::abs(s - m.symmetry) <= 0.15;
+        }
+        case Body::Mars: {   // at most a mild gibbous phase
+            const auto m = phaseShape(lit);
+            return e <= m.elongation + 0.15 && s >= m.symmetry - 0.08;
+        }
+        case Body::Jupiter: return e <= 1.2 && s >= 0.93;   // round (6.5% oblate)
+        case Body::Uranus:
+        case Body::Neptune: return e <= 1.25 && s >= 0.9;   // small round discs
+        case Body::Saturn: return ringed || (tilt < kEdgeOnTiltDeg && e <= kRoundElongation && s >= 0.9);   // edge-on: the globe
+    }
+    return true;
+}
+
+/// A few words for the shape, for the summary.
+std::string shapeWords(const TargetFeatures& im) {
+    if (im.elongation >= kRinged && im.symmetry >= kRingSymmetry) return std::format("rings {:.1f}:1", im.elongation);
+    if (im.elongation >= kRinged) return "crescent";
+    if (im.symmetry < 0.95) return "gibbous";
+    return "round";
+}
 constexpr double kJupiterSaturnColour = 0.75;   ///< ln(R/B) on the raw IMX585: Saturn 0.5-0.74, Jupiter 1.03
 constexpr double kRedMargin = 0.8, kBlueMargin = 0.8;   ///< Mars is redder, Uranus / Neptune bluer, by at least this
 /// Limb / centre brightness below this: limb-darkened, so not the Moon (full Moon 0.95). Only that way round: Jupiter,
@@ -146,11 +200,14 @@ TargetFeatures measureTarget(std::span<const std::byte> pixels, int width, int h
     double mx = 0, my = 0;
     std::array<double, 3> sig{}, sky{};
     for (std::size_t c = 0; c < 3; ++c) sky[c] = percentile(ch[c], 0.05);
+    std::size_t clipped = 0;
     for (auto i : disc) {
         mx += xOf(i), my += yOf(i);
         for (std::size_t c = 0; c < 3; ++c) sig[c] += ch[c][i] - sky[c];
+        if (std::max({ch[0][i], ch[1][i], ch[2][i]}) >= 0.98f) ++clipped;
     }
     mx /= cnt, my /= cnt;
+    f.clipped = static_cast<double>(clipped) / cnt;
 
     // Shape from the outline's second moments (+ a cell's own spread).
     const auto& shape = outline.size() >= disc.size() ? outline : disc;
@@ -258,44 +315,26 @@ Identification identifyTarget(const IdentifyInput& in) {
         apply([&](Body p) { return alt[static_cast<std::size_t>(p)] > kHorizonDeg; }, "above the horizon", "");
         if (cand.size() == 1) evidence.push_back("the only one up");
     }
-    if (in.pointing) {
-        std::array<double, 6> sep{};
-        double nearest = 360;
-        Body nearestP = Body::Moon;
-        for (auto p : cand) {
-            const auto& q = pos[static_cast<std::size_t>(p)];
-            sep[static_cast<std::size_t>(p)] = separationDeg((*in.pointing)[0], (*in.pointing)[1], q.ra, q.dec);
-            if (sep[static_cast<std::size_t>(p)] < nearest) nearest = sep[static_cast<std::size_t>(p)], nearestP = p;
-        }
-        if (nearest > kNearDeg) {
-            out.notes.push_back(std::format("mount points {:.0f}° from the nearest candidate ({}): pointing not used", nearest, bodyName(nearestP)));
-        } else {
-            apply([&](Body p) { const double d = sep[static_cast<std::size_t>(p)]; return d <= kNearDeg && d <= nearest + kNearMarginDeg; },
-                  std::format("mount pointing ({:.1f}° from {})", nearest, bodyName(nearestP)), std::format("{:.1f}° from mount", nearest));
-        }
-    }
+    // The Moon's phase, from the clock alone: tonight's Moon has one shape, and near new it can't be the target.
+    const double lit = pos[static_cast<std::size_t>(Body::Moon)].illuminated;
+    if (lit < kNewMoonLit) apply([](Body p) { return p != Body::Moon; }, std::format("new Moon ({:.0f}% lit)", lit * 100), "");
 
     // ---- the image
     const auto& im = in.image;
     if (im.found) {
-        const double tilt = std::abs(pos[static_cast<std::size_t>(Body::Saturn)].ringTiltDeg);
-        // Shape and symmetry (both meaningless when the frame edge cuts the target off).
+        // Shape and symmetry against what each body looks like tonight: the Moon at its phase, Mars at its (mild) phase,
+        // Saturn with its rings as open as they are, the rest round. Meaningless when the frame edge cuts the target off.
         if (!im.touchesEdge) {
-            if (im.elongation >= kElongated && im.symmetry >= kSymmetric) {
-                apply([](Body p) { return p == Body::Saturn; }, std::format("elongated {:.1f}:1 and symmetric (rings)", im.elongation),
-                      std::format("rings {:.1f}:1", im.elongation));
-            } else if (im.symmetry < kLopsided) {
-                apply([](Body p) { return p == Body::Moon; }, std::format("lopsided (symmetry {:.2f}): lit from the side", im.symmetry),
-                      im.elongation >= kElongated ? "crescent" : "phase");
-            } else if (im.elongation >= kElongated) {
-                apply([](Body p) { return p == Body::Saturn || p == Body::Moon; }, std::format("elongated {:.1f}:1", im.elongation), "elongated");
-            } else if (im.elongation < kRoundElongation && tilt >= kEdgeOnTiltDeg) {
-                apply([](Body p) { return p != Body::Saturn; }, std::format("round {:.2f}:1 (rings {:.0f}° open would show)", im.elongation, tilt),
-                      "round");
-            }
+            const double tilt = std::abs(pos[static_cast<std::size_t>(Body::Saturn)].ringTiltDeg);
+            apply([&](Body p) { return shapeMatches(p, im, pos[static_cast<std::size_t>(p)].illuminated, tilt); },
+                  std::format("shape {:.2f}:1, symmetry {:.2f} (the Moon is {:.0f}% lit)", im.elongation, im.symmetry, lit * 100),
+                  shapeWords(im));
         }
+        // Clipping flattens the disc and skews its colour: then limb and colour say nothing.
+        const bool clipped = im.clipped > kClippedShare;
+        if (clipped) out.notes.push_back(std::format("{:.0f}% of the disc clipped: colour and limb not used", im.clipped * 100));
         // Limb darkening: the Moon stays bright to its edge, so a clearly darkened limb isn't the Moon.
-        if (im.limbRatio > 0 && im.limbRatio < kDarkLimb)
+        if (!clipped && im.limbRatio > 0 && im.limbRatio < kDarkLimb)
             apply([](Body p) { return p != Body::Moon; }, std::format("limb-darkened ({:.2f})", im.limbRatio), "limb-darkened");
         // Size, when the image scale is known. Cut off by the frame edge, the size is only a lower bound.
         if (in.arcsecPerPixel) {
@@ -314,7 +353,7 @@ Identification identifyTarget(const IdentifyInput& in) {
                 std::format("{:.0f} px across: too big at any image scale", im.diameterPx), std::format("{:.0f} px", im.diameterPx));
         }
         // Raw colour.
-        if (auto ci = colourIndex(im)) {
+        if (auto ci = colourIndex(im); ci && !clipped) {
             if (*ci >= kJupiterSaturnColour + kRedMargin)
                 apply([](Body p) { return p == Body::Mars; }, std::format("red (ln R/B {:+.2f})", *ci), "red");
             else if (*ci <= kJupiterSaturnColour - kBlueMargin)

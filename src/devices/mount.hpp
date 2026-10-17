@@ -11,7 +11,6 @@
 #include <QStringList>
 #include <QTimer>
 
-#include <array>
 #include <optional>
 
 namespace slopcap::devices {
@@ -33,8 +32,6 @@ public:
     std::optional<bool> tracking() const;  ///< nullopt: the driver doesn't say
     std::optional<bool> parked() const;    ///< at the park position (not on the way); nullopt: the driver can't park
     bool canPulse() const;                 ///< the driver takes timed guide pulses
-    /// The site the mount is set to (latitude, longitude east positive, degrees), if the driver says.
-    std::optional<std::array<double, 2>> site() const;
     bool pulsing() const { return pulsing_; }
 
     /// Guide pulse at the mount's guide rate. One axis at a time: N/S and E/W pulses may overlap.

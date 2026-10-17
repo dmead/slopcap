@@ -52,13 +52,6 @@ std::optional<bool> Mount::parked() const {
 }
 
 bool Mount::canPulse() const { return client_.property(device_, kGuideNS) && client_.property(device_, kGuideWE); }
-
-std::optional<std::array<double, 2>> Mount::site() const {
-    const auto lat = client_.number(device_, "GEOGRAPHIC_COORD", "LAT"), lon = client_.number(device_, "GEOGRAPHIC_COORD", "LONG");
-    if (!ready() || !lat || !lon || (*lat == 0 && *lon == 0)) return std::nullopt;   // 0, 0: never set
-    return std::array<double, 2>{*lat, *lon > 180 ? *lon - 360 : *lon};            // INDI: 0..360 east
-}
-
 void Mount::onDefined(const QString& dev, const QString& name) {
     if (device_.isEmpty()) {
         bool isMount = false;

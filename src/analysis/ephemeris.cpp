@@ -104,6 +104,14 @@ BodyPosition moonPosition(double jdTt) {
     const double km = 6378.14 / std::sin(parallax * kDeg);
     out.distanceAu = km / 149597870.7;
     out.diameterArcsec = 2 * std::asin(1737.4 / km) / kDeg * 3600.0;
+
+    // Phase: the Sun's ecliptic longitude (the Earth's, reversed; precessed to date) against the Moon's.
+    const Vec earth = heliocentric(kEarthMoon, jdTt);
+    const double sunAu = std::sqrt(earth.x * earth.x + earth.y * earth.y + earth.z * earth.z);
+    const double sunLon = std::atan2(-earth.y, -earth.x) + 1.3969713 * t * kDeg;
+    const double elong = std::acos(std::clamp(std::cos(b) * std::cos(l - sunLon), -1.0, 1.0));   // Moon-Earth-Sun
+    const double phase = std::atan2(sunAu * std::sin(elong), out.distanceAu - sunAu * std::cos(elong));   // Sun-Moon-Earth
+    out.illuminated = (1 + std::cos(phase)) / 2;
     return out;
 }
 
@@ -133,10 +141,10 @@ BodyPosition bodyPosition(Body b, double jdUtc) {
     const auto& el = kElements[pi];
     const Vec earth = heliocentric(kEarthMoon, jd);   // the Earth-Moon barycentre: within 5000 km of the Earth
     // Light-time: where the planet was when the light we see left it.
-    Vec g{};
+    Vec g{}, pl{};
     double dist = 0, tau = 0;
     for (int k = 0; k < 3; ++k) {
-        const Vec pl = heliocentric(el, jd - tau);
+        pl = heliocentric(el, jd - tau);
         g = {pl.x - earth.x, pl.y - earth.y, pl.z - earth.z};
         dist = std::sqrt(g.x * g.x + g.y * g.y + g.z * g.z);
         tau = dist * kLightDaysPerAu;
@@ -147,6 +155,10 @@ BodyPosition bodyPosition(Body b, double jdUtc) {
     BodyPosition out;
     out.distanceAu = dist;
     out.diameterArcsec = kDiameterAt1Au[pi] / dist;
+    // Phase angle (Sun-planet-Earth) from the triangle's sides.
+    const double r = std::sqrt(pl.x * pl.x + pl.y * pl.y + pl.z * pl.z);
+    const double re = std::sqrt(earth.x * earth.x + earth.y * earth.y + earth.z * earth.z);
+    out.illuminated = (1 + std::clamp((r * r + dist * dist - re * re) / (2 * r * dist), -1.0, 1.0)) / 2;
     if (b == Body::Saturn) {
         // Sub-Earth latitude on Saturn = the rings' tilt (Saturn's pole, J2000: RA 40.589°, Dec 83.537°).
         const double pra = 40.589 * kDeg, pdec = 83.537 * kDeg;

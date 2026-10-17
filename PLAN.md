@@ -423,19 +423,33 @@ M2 status (2026-10-16):
     server the focuser could pick the LX200 instead of the EAF. Mounts are now skipped unless named (tested with
     `indi_lx200classic` started first).
   - **Raw histogram** in the Capture sidebar: per channel, in the ADC's own units, with median / max / clipped.
-  - **Automatic target** (Target: Auto): the Moon, Mars, Jupiter, Saturn, Uranus or Neptune, from the sky and the image
-    together (`analysis/identify`). Positions come from `analysis/ephemeris`: JPL's low-precision planetary elements
-    and the Almanac's lunar series, written here rather than pulling in Astronomy Engine. They are within ~10'
-    (planets) and 0.4° (Moon) of libnova over 2000-2045. Evidence: the mount's pointing, what's above the horizon (the
-    mount's site, or Settings → Site), shape at 15% of peak (Saturn 2.4:1 at any camera rotation), point symmetry
-    (Saturn 0.92-0.98, a crescent 0.71), size against the image scale (Settings → Focal length), or, without the scale,
-    "too many pixels for that body at any amateur scale", and raw colour (ln R/B: Saturn 0.5-0.74, Jupiter 1.03 on the
-    IMX585; Mars and the ice giants are expected ±0.8 beyond). It never guesses: undecided it says what's left ("Moon or
-    Jupiter") and names files "Target". On the recordings here: both Saturns and the crescent are named from the image
-    alone; Jupiter and the full Moon come out as "Moon or Jupiter" until the mount (tested with the simulator on
-    Jupiter's position) or the focal length decides. Not tried yet on Mars, Uranus or Neptune; the colour margins are
-    physics-based estimates. Limb darkening was tried and dropped as a Jupiter test: on the IMX585, Jupiter measured
-    as flat as the full Moon (0.92 against 0.95); only "darkened limb, so not the Moon" is kept.
+  - **Automatic target** (Target: Auto): the Moon, Mars, Jupiter, Saturn, Uranus or Neptune, from the image and the
+    clock (`analysis/identify`). **Never the mount** (decided 2026-10-16): many planetary setups have no mount
+    connection or are unguided, and the 2022 SharpCap logs here had RA out by 2.8 h on one night. Positions and phases
+    come from `analysis/ephemeris`: JPL's low-precision planetary elements and the Almanac's lunar series, written here
+    rather than pulling in Astronomy Engine. Against libnova over 2000-2045 they are within ~10' (planets) and 0.4°
+    (Moon), with lit fractions within 0.002. Evidence:
+    - shape at 15% of peak and point symmetry, matched against each body's expected shape tonight. The Moon's comes
+      from its phase (a table of drawn phases: crescents long and lopsided, gibbous nearly round). Saturn's is ringed
+      (2.3-2.7:1, symmetry 0.92-0.98 measured), or round when the rings are within 3° of edge-on. The rest are round.
+    - no Moon near new Moon;
+    - a darkened limb rules out the Moon (unclipped Jupiter 0.63-0.66, full Moon 0.95). Not the reverse: camera gamma
+      flattens a limb too, and the identifier can't see it.
+    - size against the image scale (Settings → Focal length); without the scale, "too many pixels for that body at
+      any amateur scale";
+    - raw colour, ln R/B: Saturn 0.5-0.91, Jupiter 0.66-1.03, the Moon 0.88-0.94 (1.36 low in the sky) on the IMX585.
+      Mars and the ice giants are expected ±0.8 beyond.
+    - what's above the horizon, with Settings → Site.
+
+    Colour and limb aren't used when more than 2% of the disc is clipped: overexposed Jupiters gave ln R/B 0.17 and a
+    limb of 0.87. It never guesses: undecided, it says what's left ("Moon or Jupiter") and names files "Target".
+    - **Real recordings (15: Jupiter 2022/2026, Saturn 2022/2026, the Moon 2022-2026), image and time only:** 8
+      named correctly, 7 undecided with the truth among the candidates, 0 wrong. Correct: 3 of 5 Jupiters, all 4
+      Saturns, the crescent. Undecided: two clipped Jupiters, and four Moons cut off by the frame edge (shape unusable).
+      Also the 2026-01-03 full Moon, when Saturn's rings were edge-on so a round disc could be its globe. The focal
+      length settles all of these.
+    - **No Mars, Uranus or Neptune recordings exist on Y: or D:** (searched 2026-10-16), so their colour margins are
+      still physics-based estimates. Venus isn't a candidate (there's one Venus clip on Y:).
 - **Still to do:**
   - Auto target on real Mars / Uranus / Neptune captures: check the colour margins, and the image-only Uranus / Neptune
     case (a tiny learned model only if that case matters and there are captures to train on).
