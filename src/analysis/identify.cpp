@@ -96,8 +96,8 @@ std::string shapeWords(const TargetFeatures& im) {
     if (im.symmetry < 0.95) return "gibbous";
     return "round";
 }
-constexpr double kJupiterSaturnColour = 0.75;   ///< ln(R/B) on the raw IMX585: Saturn 0.5-0.74, Jupiter 1.03
-constexpr double kRedMargin = 0.8, kBlueMargin = 0.8;   ///< Mars is redder, Uranus / Neptune bluer, by at least this
+constexpr double kJupiterSaturnColour = 0.75;   ///< ln(R/B) on the raw IMX585: Saturn 0.5-0.91, Jupiter 0.66-1.03
+constexpr double kBlueMargin = 0.8;             ///< Uranus / Neptune are bluer by at least this (an estimate: no captures)
 /// Limb / centre brightness below this: limb-darkened, so not the Moon (full Moon 0.95). Only that way round: Jupiter,
 /// red-heavy and near clipping on the IMX585, measured 0.92, as flat as the Moon.
 constexpr double kDarkLimb = 0.75;
@@ -352,15 +352,14 @@ Identification identifyTarget(const IdentifyInput& in) {
                 [&](Body p) { return im.diameterPx * kFinestArcsecPerPixel <= largestArcsec(p, pos[static_cast<std::size_t>(p)].diameterArcsec); },
                 std::format("{:.0f} px across: too big at any image scale", im.diameterPx), std::format("{:.0f} px", im.diameterPx));
         }
-        // Raw colour.
+        // Raw colour: only the ice giants stand apart. Mars is NOT red in the raw data: ten ASI585MC captures from
+        // 2022 and 2025 measured ln R/B 0.71-1.45, inside Jupiter's 0.66-1.03 and Saturn's 0.5-0.91 range, so colour
+        // must never rule Mars in or out. (It once did, and named all ten Jupiter.)
         if (auto ci = colourIndex(im); ci && !clipped) {
-            if (*ci >= kJupiterSaturnColour + kRedMargin)
-                apply([](Body p) { return p == Body::Mars; }, std::format("red (ln R/B {:+.2f})", *ci), "red");
-            else if (*ci <= kJupiterSaturnColour - kBlueMargin)
+            if (*ci <= kJupiterSaturnColour - kBlueMargin)
                 apply([](Body p) { return p == Body::Uranus || p == Body::Neptune; }, std::format("blue (ln R/B {:+.2f})", *ci), "blue");
             else
-                apply([](Body p) { return p == Body::Moon || p == Body::Jupiter || p == Body::Saturn; },
-                      std::format("neutral colour (ln R/B {:+.2f})", *ci), "");
+                apply([](Body p) { return p != Body::Uranus && p != Body::Neptune; }, std::format("not blue (ln R/B {:+.2f})", *ci), "");
         }
     } else {
         out.notes.push_back("no target in the frame");

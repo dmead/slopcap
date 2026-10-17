@@ -3,8 +3,8 @@
 // coordinates mislead (one night of logs here had RA out by 2.8 h).
 //   the image  the target's shape and symmetry (Saturn's rings: elongated but point-symmetric, at any camera rotation;
 //              the Moon lit from the side: lopsided), a darkened limb (not the Moon), its size in arcseconds when the
-//              image scale is known (or pixels too many for a small body at any scale), and its raw colour (Mars
-//              red, Uranus / Neptune blue-green)
+//              image scale is known (or pixels too many for a small body at any scale), and its raw colour (only
+//              Uranus / Neptune stand out, blue-green; Mars is no redder than Jupiter in raw IMX585 data)
 //   the clock  the Moon's phase tonight (a whole round disc isn't a half Moon; nothing is the new Moon), Saturn's ring
 //              tilt, and, with the site from Settings, what is above the horizon
 // Each piece of evidence rules candidates out; one that would rule out every candidate is reported as a conflict and
@@ -66,7 +66,7 @@ struct Identification {
 
 Identification identifyTarget(const IdentifyInput& in);
 
-/// Display name of a result: "Saturn", "Uranus or Neptune", "Moon, Jupiter or Saturn", "" for none.
+/// Display name of a result: "Saturn", "Uranus or Neptune", "Mars or Jupiter", "" for none.
 std::string candidatesText(const std::vector<Body>& c);
 
 }  // namespace slopcap::analysis

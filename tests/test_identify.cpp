@@ -162,30 +162,33 @@ TEST_CASE("identify: a round neutral disc, by the Moon's phase, the limb and the
     CHECK(flat.symmetry > 0.97);
     CHECK(flat.diameterPx == Catch::Approx(340).epsilon(0.03));
 
-    // A thin crescent Moon tonight: a whole disc isn't the Moon.
+    // A thin crescent Moon tonight: a whole disc isn't the Moon. Mars and Jupiter look alike (round, limb-darkened,
+    // and the same raw colour on the IMX585), so without the image scale it's one of those two.
     auto id = identifyTarget(at(kOct2026, flat));
-    CHECK(id.body == Body::Jupiter);
+    CHECK(candidatesText(id.candidates) == "Mars or Jupiter");
 
-    // Under a full Moon it could be either...
+    // Under a full Moon it could be the Moon too...
     id = identifyTarget(at(kFullMoon2022, flat));
     CHECK(!id.body);
-    CHECK(candidatesText(id.candidates) == "Moon or Jupiter");
+    CHECK(candidatesText(id.candidates) == "Moon, Mars or Jupiter");
 
-    // ...unless the limb is darkened, as Jupiter's is (0.63-0.66 measured on unclipped ASI585MC captures)...
+    // ...unless the limb is darkened, as Jupiter's and Mars's are (0.51-0.76 measured on unclipped captures)...
     const auto darkLimb = measureTarget(disc(600, 500, 170, {0.6, 0.45, 0.25}, 0.9), 600, 500, 8, Bayer::RGGB);
     CHECK(darkLimb.limbRatio < 0.75);
-    CHECK(identifyTarget(at(kFullMoon2022, darkLimb)).body == Body::Jupiter);
+    CHECK(candidatesText(identifyTarget(at(kFullMoon2022, darkLimb)).candidates) == "Mars or Jupiter");
 
-    // ...or the image scale says how big it is.
+    // ...and the image scale says which, by size.
     auto in = at(kFullMoon2022, flat);
     in.arcsecPerPixel = bodyPosition(Body::Jupiter, kFullMoon2022).diameterArcsec / 340;
     CHECK(identifyTarget(in).body == Body::Jupiter);
+    in.arcsecPerPixel = bodyPosition(Body::Mars, kFullMoon2022).diameterArcsec / 340;
+    CHECK(identifyTarget(in).body == Body::Mars);
     in.arcsecPerPixel = bodyPosition(Body::Moon, kFullMoon2022).diameterArcsec / 340;
     CHECK(identifyTarget(in).body == Body::Moon);
 
     // With Saturn's rings nearly edge-on (early 2026), a round disc could also be Saturn's globe.
     REQUIRE(std::abs(bodyPosition(Body::Saturn, kFullMoon2026).ringTiltDeg) < 3);
-    CHECK(candidatesText(identifyTarget(at(kFullMoon2026, flat)).candidates) == "Moon, Jupiter or Saturn");
+    CHECK(candidatesText(identifyTarget(at(kFullMoon2026, flat)).candidates) == "Moon, Mars, Jupiter or Saturn");
 }
 
 TEST_CASE("identify: clipping silences colour and limb") {
@@ -201,9 +204,10 @@ TEST_CASE("identify: clipping silences colour and limb") {
     CHECK(noted);
 }
 
-TEST_CASE("identify: colour picks out Mars and the ice giants; the site tells Uranus from Neptune") {
-    const auto mars = measureTarget(disc(200, 200, 40, {0.7, 0.3, 0.12}), 200, 200, 8, Bayer::RGGB);   // ln R/B = 1.76
-    CHECK(identifyTarget(at(kOct2026, mars)).body == Body::Mars);
+TEST_CASE("identify: colour picks out the ice giants, never Mars; the site tells Uranus from Neptune") {
+    // However red, colour doesn't make it Mars (real Mars, raw: ln R/B 0.71-1.45, like Jupiter and Saturn).
+    const auto red = measureTarget(disc(200, 200, 40, {0.7, 0.3, 0.12}), 200, 200, 8, Bayer::RGGB);   // ln R/B = 1.76
+    CHECK(candidatesText(identifyTarget(at(kOct2026, red)).candidates) == "Mars or Jupiter");
 
     const auto blue = measureTarget(disc(200, 200, 18, {0.2, 0.35, 0.45}), 200, 200, 8, Bayer::RGGB);   // ln R/B = -0.81
     auto in = at(kOct2026, blue);

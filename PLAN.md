@@ -449,8 +449,12 @@ M2 status (2026-10-16):
       Also the 2026-01-03 full Moon, when Saturn's rings were edge-on so a round disc could be its globe. The focal
       length settles all of these.
     - **No Mars, Uranus or Neptune recordings exist on Y: or D:** (searched 2026-10-16), so their colour margins are
-      still physics-based estimates. Venus isn't a candidate (there's one Venus clip on Y:). (Later the same day,
-      Mars captures turned up on G:\_keep, 2022-10..12; S:\2025-02-25; V:\mars, 2020. Not yet run.)
+      still physics-based estimates. Venus isn't a candidate (there's one Venus clip on Y:).
+    - **Mars, found later (G:\_keep 2022-10..12, S:\2025-02-25, V:\mars 2020):** the first run named all ten Mars
+      captures Jupiter. In raw IMX585 data Mars is not red: ln R/B 0.71-1.45, inside Jupiter's and Saturn's range.
+      The "neutral colour" rule had ruled Mars out. Colour now only separates the (blue) ice giants. On all 25
+      recordings: 5 correct (4 Saturns, the crescent), 20 undecided with the truth among the candidates (Mars and
+      Jupiter both read "Mars or Jupiter" without the focal length), 0 wrong.
   - **Session log** (README, "At the telescope"), one file per run, flushed line by line. It is also where to look
     first if the Gemini EAF won't connect: INDI driver messages, including the `message` attribute on property
     updates (where drivers put "can't open port"), and Alerts are logged.
