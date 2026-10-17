@@ -84,6 +84,8 @@ void IndiClient::parse() {
                 if (a.hasAttribute("group")) current_.group = a.value("group").toString();
                 if (a.hasAttribute("state")) current_.state = a.value("state").toString();
                 if (a.hasAttribute("perm")) current_.perm = a.value("perm").toString();
+                // drivers explain failures in a message on the update itself ("Failed to connect to port ...")
+                if (a.hasAttribute("message") && !a.value("message").isEmpty()) emit message(dev, a.value("message").toString());
             } else if (inVector_ && isElementTag(tag)) {
                 elemName_ = a.value("name").toString();
                 auto it = current_.elements.find(elemName_);

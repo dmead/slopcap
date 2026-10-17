@@ -1,5 +1,7 @@
 #include "devices/focuser.hpp"
 
+#include <QDebug>
+
 #include <algorithm>
 
 namespace slopcap::devices {
@@ -121,6 +123,7 @@ void Focuser::goTo(int position) {
         legs_.push_back(over);
     }
     legs_.push_back(position);
+    qInfo().noquote() << "focuser: go to" << position << "from" << from << (legs_.size() > 1 ? QString("via %1 (backlash)").arg(legs_.front()) : QString());
     setMoving(true);
     sendLeg();
 }

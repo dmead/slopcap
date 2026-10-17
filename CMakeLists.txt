@@ -134,8 +134,15 @@ if(SLOPCAP_BUILD_GUI)
     # qt_add_executable: with a static Qt it also links the platform plugin (qwindows) into the exe
     qt_add_executable(slopcap WIN32 src/app/main.cpp src/app/main_window.cpp src/app/theme.cpp src/app/focus_controller.cpp
       src/app/focus_views.cpp src/app/collimation_panel.cpp src/app/settings_dialog.cpp src/app/mount_section.cpp
-      src/app/raw_histogram.cpp)
+      src/app/raw_histogram.cpp src/app/session_log.cpp)
     set_target_properties(slopcap PROPERTIES AUTOMOC ON)
+    # The build's git version, for the session log ("unknown" outside a checkout, or when git refuses one it doesn't own).
+    execute_process(COMMAND git -c safe.directory=* describe --always --dirty WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                    OUTPUT_VARIABLE SLOPCAP_GIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(NOT SLOPCAP_GIT)
+      set(SLOPCAP_GIT unknown)
+    endif()
+    target_compile_definitions(slopcap PRIVATE SLOPCAP_GIT="${SLOPCAP_GIT}")
     # The UI fonts (IBM Plex, OFL), embedded when the build machine has them, so every install looks the same.
     set(SLOPCAP_FONT_DIR /usr/share/fonts/truetype/ibm-plex CACHE PATH "folder with the IBM Plex TTFs to embed")
     set(font_files "")

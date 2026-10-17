@@ -1,5 +1,7 @@
 #include "devices/mount.hpp"
 
+#include <QDebug>
+
 #include <algorithm>
 
 namespace slopcap::devices {
@@ -143,6 +145,7 @@ void Mount::pulse(Direction d, int ms) {
     const bool ns = isNS(d);
     const QString elem = d == Direction::North ? "TIMED_GUIDE_N" : d == Direction::South ? "TIMED_GUIDE_S" : d == Direction::East ? "TIMED_GUIDE_E" : "TIMED_GUIDE_W";
     const QString other = d == Direction::North ? "TIMED_GUIDE_S" : d == Direction::South ? "TIMED_GUIDE_N" : d == Direction::East ? "TIMED_GUIDE_W" : "TIMED_GUIDE_E";
+    qInfo().noquote() << "mount: pulse" << elem.right(1) << ms << "ms";
     (ns ? nsBusy_ : weBusy_) = true;
     (ns ? nsTimeout_ : weTimeout_).start(ms + 3000);
     updatePulsing();
@@ -180,18 +183,22 @@ void Mount::goTo(double raHours, double decDegrees) {
 }
 
 void Mount::abort() {
+    qInfo() << "mount: abort";
     if (ready()) client_.sendSwitch(device_, kAbort, "ABORT");
 }
 
 void Mount::park() {
+    qInfo() << "mount: park";
     if (ready()) client_.sendSwitch(device_, kPark, "PARK");
 }
 
 void Mount::unpark() {
+    qInfo() << "mount: unpark";
     if (ready()) client_.sendSwitch(device_, kPark, "UNPARK");
 }
 
 void Mount::setTracking(bool on) {
+    qInfo() << "mount: tracking" << on;
     if (ready()) client_.sendSwitch(device_, kTrack, on ? "TRACK_ON" : "TRACK_OFF");
 }
 

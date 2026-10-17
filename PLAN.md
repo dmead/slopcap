@@ -449,7 +449,11 @@ M2 status (2026-10-16):
       Also the 2026-01-03 full Moon, when Saturn's rings were edge-on so a round disc could be its globe. The focal
       length settles all of these.
     - **No Mars, Uranus or Neptune recordings exist on Y: or D:** (searched 2026-10-16), so their colour margins are
-      still physics-based estimates. Venus isn't a candidate (there's one Venus clip on Y:).
+      still physics-based estimates. Venus isn't a candidate (there's one Venus clip on Y:). (Later the same day,
+      Mars captures turned up on G:\_keep, 2022-10..12; S:\2025-02-25; V:\mars, 2020. Not yet run.)
+  - **Session log** (README, "At the telescope"), one file per run, flushed line by line. It is also where to look
+    first if the Gemini EAF won't connect: INDI driver messages, including the `message` attribute on property
+    updates (where drivers put "can't open port"), and Alerts are logged.
 - **Still to do:**
   - Auto target on real Mars / Uranus / Neptune captures: check the colour margins, and the image-only Uranus / Neptune
     case (a tiny learned model only if that case matters and there are captures to train on).

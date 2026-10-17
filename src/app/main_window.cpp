@@ -128,6 +128,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle("SlopCap");
     focus_ = new FocusController(this);
     mount_ = new devices::Mount(focus_->indi(), this);   // same INDI server as the focuser
+    logDevices();
     preview_ = new preview::PreviewWidget;
     collim_ = new CollimationPanel(preview_, this);
 
@@ -255,6 +256,10 @@ MainWindow::~MainWindow() { stopSession(); }
 
 void MainWindow::applySettings(const Settings& s) {
     settings_ = s;
+    qInfo().noquote() << "settings: INDI" << s.indiServer << (s.focuserAutoConnect ? "(connect at start)" : "") << "· backlash" << s.backlash
+                      << (s.approachOutward ? "outward" : "inward") << "· f/" << s.focalRatio << "·" << s.micronsPerStep << "um/step ·"
+                      << s.focalLengthMm << "mm · site" << (s.latitude ? QString("%1, %2").arg(*s.latitude).arg(*s.longitude) : QString("unset"))
+                      << "· folder" << outDir_;
     focus_->focuser().setBacklash(s.backlash);
     focus_->focuser().setApproachOutward(s.approachOutward);
     focus_->setOptics(s.focalRatio, s.micronsPerStep);
@@ -379,6 +384,7 @@ QWidget* MainWindow::buildFooter() {
 }
 
 void MainWindow::message(const QString& text) {
+    if (text != fMessage_->text()) qInfo().noquote() << "ui:" << text;   // (errors are re-shown every stats tick)
     fMessage_->setText(text);
     messageTimer_.start(12000);
 }
@@ -761,8 +767,15 @@ void MainWindow::connectCamera(const QString& spec) {
     try {
         cam_ = openCamera(spec.trimmed().toStdString());
     } catch (const std::exception& e) {
+        qWarning().noquote() << "camera: could not open" << spec << "-" << e.what();
         QMessageBox::warning(this, "SlopCap", QString("Could not open %1:\n%2").arg(spec, e.what()));
         return;
+    }
+    {
+        const auto& i = cam_->info();
+        qInfo().noquote() << "camera: opened" << spec << "·" << QString::fromStdString(i.vendor + " " + i.model) << "serial"
+                          << QString::fromStdString(i.serial) << "·" << i.sensorWidth << "x" << i.sensorHeight << "·" << i.pixelUm << "um ·"
+                          << "ADC" << (i.adcBits ? QString::number(*i.adcBits) : QString("?")) << "bits ·" << bayerName(i.bayer);
     }
     camSpec_ = spec;
     roiCentre_.reset();
@@ -915,6 +928,7 @@ void MainWindow::syncControlWidgets(const std::string& name, double value) {
 
 void MainWindow::setControl(const std::string& name, double value) {
     if (!cam_) return;
+    qInfo().noquote() << "control:" << QString::fromStdString(name) << "=" << value;
     syncControlWidgets(name, value);
     if (session_) {
         session_->post([name, value](ICamera& c) { c.setControl(name, value); });
@@ -929,6 +943,9 @@ void MainWindow::setControl(const std::string& name, double value) {
 
 void MainWindow::applyFormat(std::optional<QSize> size, std::optional<int> bits, std::optional<int> readout) {
     if (!cam_ || recording_) return;
+    qInfo().noquote() << "format:" << (size ? QString("%1x%2").arg(size->width()).arg(size->height()) : QString("size same")) << "·"
+                      << (bits ? QString("%1-bit").arg(*bits) : QString("bits same")) << "·"
+                      << (readout ? QString("readout %1").arg(*readout) : QString("readout same"));
     stopSession();
     try {
         if (readout && *readout != cam_->readoutMode()) cam_->setReadoutMode(*readout);
@@ -968,6 +985,54 @@ void MainWindow::updateRoiInfo() {
     sFrame_->setText(QString("%1×%2 · %3-bit").arg(r.width).arg(r.height).arg(cam_->bitDepth()));
 }
 
+// ================================================================ session log: devices
+
+void MainWindow::logDevices() {
+    auto& indi = focus_->indi();
+    auto text = [&indi](const QString& dev, const QString& name) {
+        QStringList parts;
+        if (const auto* p = indi.property(dev, name))
+            for (const auto& e : p->order) parts << e + "=" + p->elements.at(e).text;
+        return parts.join(' ');
+    };
+    connect(&indi, &devices::IndiClient::serverConnected, this, [this] { qInfo().noquote() << "indi: connected to" << focus_->server(); });
+    connect(&indi, &devices::IndiClient::serverDisconnected, this, [] { qWarning().noquote() << "indi: disconnected"; });
+    connect(&indi, &devices::IndiClient::errorOccurred, this, [](const QString& e) { qWarning().noquote() << "indi: error:" << e; });
+    // Driver messages carry the reasons things fail ("Failed to connect to port /dev/ttyUSB0", "Error reading ...").
+    connect(&indi, &devices::IndiClient::message, this, [](const QString& dev, const QString& m) { qInfo().noquote() << "indi:" << dev << "says:" << m; });
+    connect(&indi, &devices::IndiClient::propertyDefined, this, [&indi, text](const QString& dev, const QString& name) {
+        if (name == "DRIVER_INFO" || name == "DEVICE_PORT" || name == "CONNECTION")
+            qInfo().noquote() << "indi:" << dev << name << text(dev, name);
+    });
+    connect(&indi, &devices::IndiClient::propertyUpdated, this, [&indi, text](const QString& dev, const QString& name) {
+        const auto* p = indi.property(dev, name);
+        if (!p) return;
+        if (p->state == "Alert") qWarning().noquote() << "indi:" << dev << name << "Alert" << text(dev, name);
+        else if (name == "DEVICE_PORT" || name == "CONNECTION") qInfo().noquote() << "indi:" << dev << name << p->state << text(dev, name);
+    });
+
+    auto& f = focus_->focuser();
+    connect(&f, &devices::Focuser::readyChanged, this, [this](bool ok) {
+        const auto& fo = focus_->focuser();
+        qInfo().noquote() << "focuser:" << (ok ? "ready" : "not ready") << fo.device() << "at" << fo.position() << "of" << fo.maxPosition()
+                          << "· backlash" << fo.backlash() << (fo.approachOutward() ? "outward" : "inward");
+    });
+    connect(&f, &devices::Focuser::arrived, this, [](int pos) { qInfo().noquote() << "focuser: arrived at" << pos; });
+    connect(&f, &devices::Focuser::failed, this, [](const QString& why) { qWarning().noquote() << "focuser: failed:" << why; });
+    connect(focus_, &FocusController::sweepProgress, this, [](const QString& t) { qInfo().noquote() << "sweep:" << t; });
+    connect(focus_, &FocusController::sweepStateChanged, this, [this](bool running) {
+        const auto& s = focus_->sweepSettings();
+        qInfo().noquote() << "sweep:" << (running ? "started" : "ended") << "· from" << s.from << "to" << s.to << "step" << s.step << "·" << s.frames
+                          << "frames, settle" << s.settleMs << "ms · start position" << focus_->sweepStart();
+    });
+
+    connect(mount_, &devices::Mount::readyChanged, this, [this](bool ok) {
+        qInfo().noquote() << "mount:" << (ok ? "ready" : "not ready") << mount_->device() << "· RA" << mount_->ra() << "Dec" << mount_->dec()
+                          << "· pulses" << (mount_->canPulse() ? "yes" : "no");
+    });
+    connect(mount_, &devices::Mount::failed, this, [](const QString& why) { qWarning().noquote() << "mount: failed:" << why; });
+}
+
 // ================================================================ automatic target
 
 bool MainWindow::isAutoTarget() const { return target_->currentText().trimmed().compare("Auto", Qt::CaseInsensitive) == 0; }
@@ -1002,6 +1067,7 @@ void MainWindow::runAutoTarget(const LatestFrame::Frame& f) {
     autoNotes_ = notes.join("\n");
 
     // A new answer must hold for two runs in a row before it replaces the old one (seeing, a passing cloud).
+    const QString before = autoName_;
     if (name == autoName_ || autoName_.isEmpty()) {
         autoName_ = name;
         autoDetail_ = detail;
@@ -1013,6 +1079,12 @@ void MainWindow::runAutoTarget(const LatestFrame::Frame& f) {
     } else {
         pendingAutoName_ = name;
     }
+    if (autoName_ != before)
+        qInfo().noquote() << "target: auto" << (autoName_.isEmpty() ? "(none)" : autoName_) << "·" << autoDetail_ << "· features: diameter"
+                          << in.image.diameterPx << "px, elongation" << in.image.elongation << ", symmetry" << in.image.symmetry << ", limb"
+                          << in.image.limbRatio << ", clipped" << in.image.clipped << ", ln R/B"
+                          << (analysis::colourIndex(in.image) ? QString::number(*analysis::colourIndex(in.image), 'f', 2) : "-") << "· steps:"
+                          << notes.join(" | ");
     updateAutoTarget();
 }
 
@@ -1190,7 +1262,16 @@ void MainWindow::startSession(bool record) {
         record = false;
     }
     recording_ = record && session_;
-    if (session_) preview_->setSource(&tap_, cam_->info().bayer);
+    if (session_) {
+        const Roi r = cam_->roi();
+        QStringList controls;
+        for (const auto& [name, box] : controlBoxes_) controls << QString("%1=%2").arg(QString::fromStdString(name)).arg(box->value());
+        qInfo().noquote() << (recording_ ? "record: start" : "preview: start") << (recording_ ? recordingPath_ : QString()) << "· ROI"
+                          << r.width << "x" << r.height << "+" << r.x << "," << r.y << "bin" << r.bin << "·" << cam_->bitDepth() << "-bit ·"
+                          << "target" << targetName() << "· filter" << filter_->currentText() << "·" << controls.join(' ');
+        statsLogTick_ = 0;
+        preview_->setSource(&tap_, cam_->info().bayer);
+    }
     for (auto* w : std::initializer_list<QWidget*>{roiPreset_, roiCentreBtn_, roiMax_, bitsBox_, highSpeed_, readout_}) w->setEnabled(!recording_);
     record_->setProperty("variant", recording_ ? "stop" : "record");
     record_->setText(recording_ ? "■  Stop · 00:00" : "●  Record");
@@ -1204,6 +1285,11 @@ void MainWindow::stopSession() {
     if (!session_) return;
     session_->stop();
     const auto s = session_->stats();
+    qInfo().noquote() << (recording_ ? "record: stop" : "preview: stop") << QString::fromStdString(std::format(
+                             "· {} delivered, {} written, {:.1f} s, {:.1f} fps, dropped camera {} disk {}, ring peak {}/{}, {:.0f} MB/s, "
+                             "write p50 {} us p99 {} us max {} us{}",
+                             s.delivered, s.written, s.seconds, s.captureFps, s.cameraDropped, s.ringDropped, s.ringHighWater,
+                             s.ringCapacity, s.writeMBps, s.writeP50Us, s.writeP99Us, s.writeMaxUs, s.error.empty() ? "" : " · error: " + s.error));
     if (recording_ && s.written > 0) {
         // WinJUPOS wants the mid-capture time in the name: rename now that the length is known.
         const QDateTime mid = recStartUtc_.addMSecs(static_cast<qint64>(s.seconds * 500));
@@ -1304,6 +1390,17 @@ void MainWindow::updateStats() {
     const uint64_t dropped = s.cameraDropped + s.ringDropped;
     fDropped_->setText(dropped ? QString("%1 dropped (%2 camera, %3 disk)").arg(dropped).arg(s.cameraDropped).arg(s.ringDropped) : "0 dropped");
     fDropped_->setStyleSheet(QString("color: %1").arg((dropped ? theme::kRecText : theme::kGood).name()));
+    if (++statsLogTick_ % 40 == 0) {   // every 10 s (stats run every 250 ms): the night's timeline
+        const auto& l = focus_->live();
+        qInfo().noquote() << QString::fromStdString(std::format(
+                                 "stats: {} {:.0f} s · {:.1f} fps · display {:.0f} fps · {} written · dropped camera {} disk {} · ring {}/{} "
+                                 "(peak {}) · {:.0f} MB/s · write p99 {} us",
+                                 recording_ ? "recording" : "preview", s.seconds, s.captureFps, preview_->displayFps(), s.written,
+                                 s.cameraDropped, s.ringDropped, s.ringQueued, s.ringCapacity, s.ringHighWater, s.writeMBps, s.writeP99Us))
+                          << "·" << freeText << "· focuser" << (focus_->focuser().ready() ? QString::number(focus_->focuser().position()) : "-")
+                          << "· sharpness R/G/B" << QString("%1/%2/%3").arg(l.median[0], 0, 'g', 4).arg(l.median[1], 0, 'g', 4).arg(l.median[2], 0, 'g', 4)
+                          << "· target" << targetName();
+    }
     if (recording_) {
         const double minutes = s.writeMBps > 1 ? static_cast<double>(disk.bytesAvailable()) / 1e6 / s.writeMBps / 60 : 0;
         fRing_->setText(QString("buffer %1% · %2 / %3")

@@ -1,11 +1,13 @@
 // slopcap: the capture application.
 //   slopcap [--camera SPEC] [--out DIR] [--record] [--screenshot FILE.png] [--quit-after SECONDS]
 #include "app/main_window.hpp"
+#include "app/session_log.hpp"
 #include "app/theme.hpp"
 
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QSurfaceFormat>
+#include <QSysInfo>
 #include <QTimer>
 
 #ifdef _WIN32
@@ -61,6 +63,10 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QApplication::setOrganizationName("SlopCap");
     QApplication::setApplicationName("SlopCap");
+    const QString logFile = slopcap::app::sessionlog::start();
+    qInfo().noquote() << "SlopCap" << SLOPCAP_GIT << "· Qt" << qVersion() << "·" << QSysInfo::prettyProductName() << "·"
+                      << QSysInfo::machineHostName() << "· args:" << QCoreApplication::arguments().mid(1).join(' ');
+    qInfo().noquote() << "log:" << (logFile.isEmpty() ? "(stderr only)" : logFile);
 #ifdef _WIN32
     prepareCameraSdks();
 #endif

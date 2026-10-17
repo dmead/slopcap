@@ -54,6 +54,12 @@ build/linux-release/slopcap --camera asi --focuser localhost:7624
    Settings → Focal length (the image scale) settles most of those, and Settings → Site rules out what's below the
    horizon. The name is fixed while recording.
 
+Every run writes a session log: `~/.local/share/SlopCap/SlopCap/logs/slopcap-<UTC start>.log` (Windows:
+`%LOCALAPPDATA%\SlopCap\SlopCap\logs`). It records the version, settings, camera and controls; each recording's start
+and stop, with drops and writer latency; a stats line every 10 s; INDI connections, driver messages and Alerts (e.g. a
+focuser whose serial port won't open); focuser moves and sweeps; mount pulses; and automatic-target decisions with
+their measurements.
+
 Afterwards: `slopcap-diag --png OUT/ *.ser` stacks the best frames of each recording and reports dispersion, limb
 sharpness per channel and side, halo and jitter.
 

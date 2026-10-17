@@ -94,6 +94,7 @@ private:
     void updateStats();
     void updateRoiInfo();
     void updateTargetInfo();
+    void logDevices();                           ///< INDI, focuser, mount and sweep events into the session log
     bool isAutoTarget() const;
     QString targetName() const;                  ///< what files and sidecars are named after (Auto: what was identified)
     void runAutoTarget(const LatestFrame::Frame& f);
@@ -121,6 +122,7 @@ private:
     MountSection* mountSection_ = nullptr;
     RawHistogramSection* rawHist_ = nullptr;
     QElapsedTimer rawHistClock_;
+    int statsLogTick_ = 0;   // stats lines go to the session log every 40 ticks
     // the automatic target (Target: Auto)
     QElapsedTimer identifyClock_;
     QString autoName_, pendingAutoName_, autoDetail_, autoNotes_;
