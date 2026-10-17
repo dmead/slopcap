@@ -15,7 +15,14 @@ const QString kAbs = "ABS_FOCUS_POSITION", kAbsElem = "FOCUS_ABSOLUTE_POSITION";
 Focuser::Focuser(IndiClient& client, QObject* parent) : QObject(parent), client_(client) {
     connect(&client_, &IndiClient::propertyDefined, this, &Focuser::onDefined);
     connect(&client_, &IndiClient::propertyUpdated, this, &Focuser::onUpdated);
+    reconnect_.setSingleShot(true);
+    connect(&reconnect_, &QTimer::timeout, this, [this] {
+        const auto* p = client_.property(device_, "CONNECTION");
+        if (p && p->elements.count("CONNECT") && !p->elements.at("CONNECT").on() && !p->busy())
+            client_.sendSwitch(device_, "CONNECTION", "CONNECT");
+    });
     connect(&client_, &IndiClient::serverDisconnected, this, [this] {
+        reconnect_.stop();
         device_.clear();
         legs_.clear();
         setMoving(false);
@@ -64,8 +71,14 @@ void Focuser::onDefined(const QString& dev, const QString& name) {
 
 void Focuser::ensureConnected() {
     const auto* p = client_.property(device_, "CONNECTION");
-    if (p && p->elements.count("CONNECT") && !p->elements.at("CONNECT").on() && !p->busy())
-        client_.sendSwitch(device_, "CONNECTION", "CONNECT");
+    if (!p || !p->elements.count("CONNECT") || p->elements.at("CONNECT").on() || p->busy()) return;
+    // After a failed connect (EAF unplugged, wrong port), try again every 10 s rather than at once: an immediate retry
+    // hammers the driver and floods the log, and a later try still picks the focuser up when it's plugged in.
+    if (p->state == "Alert") {
+        if (!reconnect_.isActive()) reconnect_.start(10000);
+        return;
+    }
+    client_.sendSwitch(device_, "CONNECTION", "CONNECT");
 }
 
 void Focuser::onUpdated(const QString& dev, const QString& name) {

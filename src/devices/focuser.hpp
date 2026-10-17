@@ -58,6 +58,7 @@ private:
     bool moving_ = false, legSeenBusy_ = false;
     std::deque<int> legs_;
     QTimer legTimeout_;
+    QTimer reconnect_;   // the next try after a failed connect
 };
 
 }  // namespace slopcap::devices

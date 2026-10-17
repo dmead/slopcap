@@ -18,7 +18,14 @@ bool isNS(Mount::Direction d) { return d == Mount::Direction::North || d == Moun
 Mount::Mount(IndiClient& client, QObject* parent) : QObject(parent), client_(client) {
     connect(&client_, &IndiClient::propertyDefined, this, &Mount::onDefined);
     connect(&client_, &IndiClient::propertyUpdated, this, &Mount::onUpdated);
+    reconnect_.setSingleShot(true);
+    connect(&reconnect_, &QTimer::timeout, this, [this] {
+        const auto* p = client_.property(device_, "CONNECTION");
+        if (p && p->elements.count("CONNECT") && !p->elements.at("CONNECT").on() && !p->busy())
+            client_.sendSwitch(device_, "CONNECTION", "CONNECT");
+    });
     connect(&client_, &IndiClient::serverDisconnected, this, [this] {
+        reconnect_.stop();
         device_.clear();
         nsBusy_ = weBusy_ = slewing_ = false;
         nsTimeout_.stop();
@@ -78,8 +85,13 @@ void Mount::onDefined(const QString& dev, const QString& name) {
 
 void Mount::ensureConnected() {
     const auto* p = client_.property(device_, "CONNECTION");
-    if (p && p->elements.count("CONNECT") && !p->elements.at("CONNECT").on() && !p->busy())
-        client_.sendSwitch(device_, "CONNECTION", "CONNECT");
+    if (!p || !p->elements.count("CONNECT") || p->elements.at("CONNECT").on() || p->busy()) return;
+    // After a failed connect, try again every 10 s rather than at once (as the focuser does).
+    if (p->state == "Alert") {
+        if (!reconnect_.isActive()) reconnect_.start(10000);
+        return;
+    }
+    client_.sendSwitch(device_, "CONNECTION", "CONNECT");
 }
 
 void Mount::readCoords() {

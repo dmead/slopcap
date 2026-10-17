@@ -69,6 +69,7 @@ private:
     bool slewing_ = false, pulsing_ = false;
     bool nsBusy_ = false, weBusy_ = false;   // a pulse sent on that axis hasn't finished
     QTimer nsTimeout_, weTimeout_;
+    QTimer reconnect_;   // the next try after a failed connect
 };
 
 }  // namespace slopcap::devices
