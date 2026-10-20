@@ -88,7 +88,7 @@ private:
         StreamSecond second;   ///< this second so far
         // stats for the UI (written by the encoder, read here)
         std::atomic<double> fps{0};
-        std::atomic<int> shownQuality{75}, shownScale{1};
+        std::atomic<int> shownQuality{85}, shownScale{1};
     };
     struct Client {
         QTcpSocket* socket = nullptr;

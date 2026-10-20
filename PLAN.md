@@ -470,18 +470,19 @@ M2 status (2026-10-16):
     not the REST API of §7: it needs a low-latency frame stream with acks for flow control. The stream stays raw
     (each Bayer site its own JPEG plane, 16-bit through a square-root curve), so the client's preview, histograms and
     analysis run unchanged; `RemoteCamera` is an `ICamera`. Recording from a client records on the server. Per-viewer
-    rate control (`net/rate_control`): quality, then 1/2 or 1/4 size on a slow link; a slow viewer keeps its quality
-    (a step down that brings no more frames is undone); the link's measured capacity stops doomed steps up. Full
+    rate control (`net/rate_control`), detail first (Dan, 2026-10-20: "this is astronomy, not TV"): quality 85 at full
+    size, and a slow link drops frames instead; only below a 5 fps floor does it step down a ladder (quality 75, 65,
+    then 1/2 and 1/4 size). Steps up only when the link's measured capacity says the floor still holds. Full
     screen with a self-hiding gain / exposure / record bar. Tested: unit tests (codec, framing, state, rate control in
     simulated conditions, loopback server + client with reconnect) clean under ASan; `tools/remote-test.sh` (three
     containers: discovery, controls both ways, two viewers, recording on the server only, full screen); a Windows
     server + client on one desktop over loopback. A synthetic QHY533M frame (3008², 16-bit) encodes in ~31 ms
-    (Release, desktop CPU) and streams at ~130 Mbps full size: more than the NUC's 100 Mbps Ethernet, so expect 1/2
-    size there. Not yet tried between two machines, or with a real camera.
+    (Release, desktop CPU) and is ~1 MB at quality 85: over the NUC's 100 Mbps Ethernet expect ~11 fps at full
+    detail. Not yet tried between two machines, or with a real camera.
 - **Still to do:**
-  - Remote viewing after its first real night (NUC with the QHY533M → desktop): acks from a network thread on the
-    client (a client busy drawing delays its acks; the rate control tells that apart from a slow link for now), and
-    the focuser and mount over the link.
+  - Remote viewing after its first real night (NUC with the QHY533M → desktop): a lossless top rung (CFA planes,
+    left-neighbour deltas, deflate; keeps 16 bits) for small ROIs on a fast link; acks from a network thread on the
+    client (a client busy drawing delays its acks); the focuser and mount over the link.
   - Auto target on real Uranus / Neptune captures (none exist yet): check the blue margin, and the image-only Uranus /
     Neptune case (a tiny learned model only if that case matters and there are captures to train on).
   - The laptop's indiserver service has only the EAF driver: add the LX200's (e.g. `indi_lx200classic`) for the Mount

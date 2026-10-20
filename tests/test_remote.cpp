@@ -218,50 +218,69 @@ TEST_CASE("rate control: a fast link and viewer get the best picture") {
     CHECK(r.minFpsLate >= 30);
 }
 
-TEST_CASE("rate control: a 100 Mbps link with big frames settles without stutter") {
+TEST_CASE("rate control: a 100 Mbps link keeps full detail and drops frames instead") {
     Conditions c;
-    c.linkMbps = 100;   // the NUC's Ethernet
+    c.linkMbps = 100;   // the NUC's Ethernet: a full-size 1 MB frame gets through about 11 times a second
+    net::RateControl rc;
+    const auto r = run(c, rc, 600);
+    INFO("quality " << rc.quality << ", 1/" << rc.scale << ", " << r.changes << " changes, worst " << r.minFpsLate << " fps");
+    CHECK(rc.quality == 85);
+    CHECK(rc.scale == 1);
+    CHECK(r.changes == 0);
+    CHECK(r.minFpsLate >= 10);
+}
+
+TEST_CASE("rate control: a link too slow for the frame-rate floor gives up detail, and stays put") {
+    Conditions c;
+    c.linkMbps = 10;   // full size: about one frame a second
     net::RateControl rc;
     const auto r = run(c, rc, 600);
     INFO("quality " << rc.quality << ", 1/" << rc.scale << ", " << r.lateChanges << " changes in the last minute, worst " << r.minFpsLate << " fps");
-    CHECK(r.minFpsLate >= 24);     // no dips back into a too-big setting
-    CHECK(r.lateChanges <= 1);
-    CHECK(rc.scale == 2);          // full size can't make 30 fps through 100 Mbps; half size can, at good quality
-    CHECK(rc.quality >= 75);
+    CHECK(rc.scale == 2);              // the best rung that still makes 0.8 x kMinStreamFps
+    CHECK(r.minFpsLate >= 0.8 * net::kMinStreamFps);
+    CHECK(r.lateChanges == 0);         // no trying a rung the link's capacity says won't fit
 }
 
-TEST_CASE("rate control: a slow viewer keeps its quality") {
+TEST_CASE("rate control: a slow viewer keeps full detail") {
     Conditions c;
     c.viewerFps = 20;   // a laptop busy drawing a 4K projector
     c.fullFrameKB = 60;
     net::RateControl rc;
     run(c, rc, 300);
-    CHECK(rc.quality >= 75);
+    CHECK(rc.quality == 85);
     CHECK(rc.scale == 1);
 }
 
-TEST_CASE("rate control: a slow encoder shrinks frames, not quality") {
+TEST_CASE("rate control: encoding speed only matters below the floor") {
     Conditions c;
-    c.encodeMsFull = 120;   // a full QHY533M frame on a small CPU
+    c.encodeMsFull = 120;   // a full QHY533M frame on a small CPU: 8 fps is fine
     c.fullFrameKB = 300;
     net::RateControl rc;
-    const auto r = run(c, rc, 300);
-    CHECK(rc.scale >= 2);
-    CHECK(rc.quality >= 65);
-    CHECK(r.minFpsLate >= 24);
+    auto r = run(c, rc, 300);
+    CHECK(rc.scale == 1);
+    CHECK(rc.quality == 85);
+    CHECK(r.minFpsLate >= 8);
+
+    c.encodeMsFull = 400;   // 2.5 fps: shrink (quality wouldn't help)
+    net::RateControl slow;
+    r = run(c, slow, 300);
+    CHECK(slow.scale == 2);
+    CHECK(slow.quality == 75);
+    CHECK(r.minFpsLate >= 9);
+    CHECK(r.lateChanges == 0);
 }
 
 TEST_CASE("rate control: the link getting better is noticed") {
     Conditions c;
-    c.linkMbps = 30;
+    c.linkMbps = 10;
     net::RateControl rc;
     run(c, rc, 300);
     const int scaleSlow = rc.scale;
     c.linkMbps = 1000;
-    run(c, rc, 400);   // the capacity estimate is forgotten after two minutes, then it climbs
+    run(c, rc, 120);
     CHECK(scaleSlow > 1);
     CHECK(rc.scale == 1);
-    CHECK(rc.quality >= 80);
+    CHECK(rc.quality == 85);
 }
 
 TEST_CASE("a client watches and steers a server's camera over loopback") {

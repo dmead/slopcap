@@ -20,8 +20,8 @@
 //   Notice   server → client    {"text":"..."}: something the user should read (e.g. a refused request)
 //   Frame    server → client    binary: u32 header length | JSON header | compressed pixels (frame_codec.hpp)
 //   Ack      client → server    {"seq":N} for every Frame. The server keeps at most kWindow frames unacknowledged
-//                               per client, so a slow link lowers the frame rate (then the quality) instead of
-//                               queueing delay.
+//                               per client, so a slow link lowers the frame rate instead of queueing delay (and
+//                               only below kMinStreamFps the detail: rate_control.hpp).
 #pragma once
 
 #include "camera/camera.hpp"
@@ -44,6 +44,7 @@ inline constexpr quint16 kDiscoveryPort = 45721;  ///< UDP
 inline constexpr char kProbe[] = "SLOPCAP?1";
 inline constexpr int kWindow = 3;                 ///< frames in flight per client (rides out a viewer's ~100 ms stalls)
 inline constexpr double kMaxStreamFps = 30;       ///< plenty for a projector; spares the link and the server's CPU
+inline constexpr double kMinStreamFps = 5;        ///< below this a viewer gives up detail (quality, then size) for frames
 inline constexpr std::size_t kMaxMessage = 64u << 20;
 
 enum class Msg : uint8_t { Hello = 1, State = 2, Control = 3, Format = 4, Record = 5, Status = 6, Notice = 7, Frame = 8, Ack = 9 };
