@@ -10,6 +10,7 @@
 #include "app/theme.hpp"
 #include "camera/open_camera.hpp"
 #include "net/discovery.hpp"
+#include "net/frame_codec.hpp"
 #include "net/remote_client.hpp"
 #include "net/remote_server.hpp"
 #include "preview/histogram_widget.hpp"
@@ -1588,6 +1589,7 @@ void MainWindow::ensureDiscovery() {
         if (!connectFirst_) return;
         for (const auto& s : discovery_->servers()) {
             if (server_ && s.local && s.port == server_->port()) continue;   // ourselves
+            if (s.protocol != net::kProtocol) continue;
             connectFirst_ = false;
             connectRemote(s.address.toString(), s.port);
             break;
@@ -1776,11 +1778,11 @@ void MainWindow::showRemoteMenu() {
         const auto v = server_->viewers();
         if (v.empty()) menu.addAction(QString("No one is watching yet (port %1)").arg(server_->port()))->setEnabled(false);
         for (const auto& x : v)
-            menu.addAction(QString("%1 (%2) · %3 Mbps · %4 fps · quality %5%6")
+            menu.addAction(QString("%1 (%2) · %3 Mbps · %4 fps · %5%6")
                                .arg(x.host, x.address)
                                .arg(x.mbps, 0, 'f', 1)
                                .arg(x.fps, 0, 'f', 0)
-                               .arg(x.quality)
+                               .arg(net::qualityName(x.quality))
                                .arg(x.scale > 1 ? QString(" · 1/%1 size").arg(x.scale) : QString()))
                 ->setEnabled(false);
     } else {
@@ -1794,8 +1796,10 @@ void MainWindow::showRemoteMenu() {
         const QString addr = srv.address.toString() + (srv.port != net::kStreamPort ? QString(":%1").arg(srv.port) : QString());
         QString text = QString("    %1 · %2 (%3)").arg(srv.name, srv.camera.isEmpty() ? "no camera" : srv.camera, addr);
         if (srv.viewers) text += QString(" · %1 watching").arg(srv.viewers);
+        const bool compatible = srv.protocol == net::kProtocol;
+        if (!compatible) text += QString(" · a different SlopCap version (protocol %1, this one %2): update one").arg(srv.protocol).arg(net::kProtocol);
         auto* a = menu.addAction(text);
-        a->setEnabled(!(remote_ && remote_->host() == srv.address.toString() && remote_->port() == srv.port));
+        a->setEnabled(compatible && !(remote_ && remote_->host() == srv.address.toString() && remote_->port() == srv.port));
         connect(a, &QAction::triggered, this, [this, host = srv.address.toString(), port = srv.port] { connectRemote(host, port); });
         ++listed;
     }
@@ -1827,10 +1831,10 @@ void MainWindow::updateRemoteUi() {
             case net::RemoteClient::Link::Connected:
                 pill = "⇄ " + name;
                 badge = "⇄ LIVE FROM " + name.toUpper();
-                foot = QString("⇄ %1 Mbps · %2 fps · quality %3%4")
+                foot = QString("⇄ %1 Mbps · %2 fps · %3%4")
                            .arg(remote_->mbps(), 0, 'f', 1)
                            .arg(remote_->fps(), 0, 'f', 0)
-                           .arg(remote_->quality())
+                           .arg(net::qualityName(remote_->quality()))
                            .arg(remote_->scale() > 1 ? QString(" · 1/%1 size").arg(remote_->scale()) : QString());
                 break;
             case net::RemoteClient::Link::Connecting:
@@ -1859,7 +1863,7 @@ void MainWindow::updateRemoteUi() {
             badge = "⇄ SHARED WITH " + names.join(", ").toUpper();
             foot = QString("⇄ %1 Mbps to %2").arg(server_->mbps(), 0, 'f', 1).arg(v.size() == 1 ? names[0] : QString("%1 viewers").arg(v.size()));
             if (v.size() == 1)
-                foot += QString(" · %1 fps · quality %2%3").arg(v[0].fps, 0, 'f', 0).arg(v[0].quality).arg(v[0].scale > 1 ? QString(" · 1/%1 size").arg(v[0].scale) : QString());
+                foot += QString(" · %1 fps · %2%3").arg(v[0].fps, 0, 'f', 0).arg(net::qualityName(v[0].quality)).arg(v[0].scale > 1 ? QString(" · 1/%1 size").arg(v[0].scale) : QString());
         }
     }
     remotePill_->setText(pill);

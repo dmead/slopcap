@@ -19,6 +19,7 @@ struct ServerInfo {
     quint16 port = 0;
     QString camera;        ///< model, empty without one
     int viewers = 0;
+    int protocol = 0;      ///< its protocol version: another than kProtocol can't be watched (update one side)
     qint64 seenMs = 0;     ///< when it last answered (QDateTime ms)
     bool local = false;    ///< answered on a loopback address: this machine
 };

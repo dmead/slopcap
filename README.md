@@ -80,11 +80,14 @@ e.g. a laptop on a projector across the field). Any build (Windows, Linux) can b
 - **Full screen** (toolbar button or F11; Esc leaves): the preview over a whole screen; with several screens, pick
   which. Gain, exposure, stretch and record sit in a bar that hides itself (and the cursor) after 3 s; move the mouse
   to bring it back.
-- The stream is the raw frame, lossy: each Bayer site as its own JPEG plane, 16-bit through a square-root curve.
-  **Detail first, frame rate second:** frames go at JPEG quality 85 and full size, as many as the link carries (up to
-  30 fps); a slow link drops frames, not detail. Only when fewer than ~4 fps get through (5 fps is the floor) does a
-  viewer step down: quality 75, 65, then 1/2 and 1/4 size. Each change and its reason goes to the session log
-  (`remote: … quality`).
+- The stream is the raw frame: **lossless** first (every bit, 16-bit included: each Bayer plane predicted pixel by
+  pixel, the residuals deflated), else JPEG (each Bayer site its own plane, 16-bit through a square-root curve).
+  **Detail first, frame rate second:** frames go at the best setting as many as the link carries (up to 30 fps); a
+  slow link drops frames, not detail. Only when fewer than ~4 fps get through (5 fps is the floor) does a viewer step
+  down: JPEG quality 85, 75, 65, then 1/2 and 1/4 size. Each change and its reason goes to the session log
+  (`remote: … lossless → quality 85 …`). Measured on real recordings (desktop CPU): a 512×320 8-bit Saturn is
+  127 kB lossless, a 1468×1188 16-bit Moon 1.6 MB (8 fps over 100 Mbps, so it stays lossless), a 3008×3008 16-bit
+  Moon 5.6 MB (2 fps: it goes as JPEG 85, 333 kB, at 30 fps).
 
 Ports: TCP 45720 (the stream; the next free one up to 45729 if taken) and UDP 45721 (discovery). On Windows the server
 needs both allowed in, e.g. as admin:

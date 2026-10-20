@@ -54,8 +54,9 @@ void Discovery::read() {
     while (sock_->hasPendingDatagrams()) {
         const QNetworkDatagram d = sock_->receiveDatagram();
         const auto o = QJsonDocument::fromJson(d.data()).object();
-        if (o["slopcap"].toInt() != kProtocol) continue;
+        if (o["slopcap"].toInt() <= 0) continue;   // not a SlopCap answer
         ServerInfo s;
+        s.protocol = o["slopcap"].toInt();
         s.name = o["name"].toString();
         s.port = static_cast<quint16>(o["port"].toInt());
         s.camera = o["camera"].toString();

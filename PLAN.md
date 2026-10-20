@@ -467,22 +467,26 @@ M2 status (2026-10-16):
     styled `::drop-down` away. Installs from before Auto keep their saved Target (e.g. "Saturn"); choose Auto.
   - **Remote viewing (2026-10-20)**, for outreach nights: one SlopCap shares its camera, others watch and steer it
     (README, "Remote viewing"; `src/net/`). Own TCP protocol with JSON control messages and UDP broadcast discovery,
-    not the REST API of §7: it needs a low-latency frame stream with acks for flow control. The stream stays raw
-    (each Bayer site its own JPEG plane, 16-bit through a square-root curve), so the client's preview, histograms and
-    analysis run unchanged; `RemoteCamera` is an `ICamera`. Recording from a client records on the server. Per-viewer
-    rate control (`net/rate_control`), detail first (Dan, 2026-10-20: "this is astronomy, not TV"): quality 85 at full
-    size, and a slow link drops frames instead; only below a 5 fps floor does it step down a ladder (quality 75, 65,
-    then 1/2 and 1/4 size). Steps up only when the link's measured capacity says the floor still holds. Full
+    not the REST API of §7: it needs a low-latency frame stream with acks for flow control. The stream stays raw, so
+    the client's preview, histograms and analysis run unchanged; `RemoteCamera` is an `ICamera`. Two codecs: lossless
+    (per CFA plane, the JPEG-LS median edge predictor, zigzagged residuals split into low / high byte blocks, padding
+    bits shifted out, deflate level 1 in up to 8 parallel chunks; 1.3:1 on 8-bit high-gain Saturn, 2-3.2:1 on 14-bit
+    lunar data) and JPEG (each Bayer site its own plane, 16-bit through a square-root curve). Recording from a client
+    records on the server. Per-viewer rate control (`net/rate_control`), detail first (Dan, 2026-10-20: "this is
+    astronomy, not TV"): lossless, and a slow link drops frames instead; only below a 5 fps floor does it step down a
+    ladder (JPEG 85, 75, 65, then 1/2 and 1/4 size). Steps up only when the link's measured capacity says the floor
+    still holds (lossless : JPEG size and encode-time ratios are measured at each switch between them). Full
     screen with a self-hiding gain / exposure / record bar. Tested: unit tests (codec, framing, state, rate control in
     simulated conditions, loopback server + client with reconnect) clean under ASan; `tools/remote-test.sh` (three
     containers: discovery, controls both ways, two viewers, recording on the server only, full screen); a Windows
     server + client on one desktop over loopback. A synthetic QHY533M frame (3008², 16-bit) encodes in ~31 ms
-    (Release, desktop CPU) and is ~1 MB at quality 85: over the NUC's 100 Mbps Ethernet expect ~11 fps at full
-    detail. Not yet tried between two machines, or with a real camera.
+    (Release, desktop CPU). A real 3008² 14-bit lunar frame is 5.6 MB lossless (33 ms to encode, 47 to decode) and
+    333 kB as JPEG 85: over the NUC's 100 Mbps Ethernet, full frames go as JPEG 85 at 30 fps; ROIs up to ~1500 px
+    stay lossless at 8+ fps. Not yet tried between two machines, or with a real camera.
 - **Still to do:**
-  - Remote viewing after its first real night (NUC with the QHY533M → desktop): a lossless top rung (CFA planes,
-    left-neighbour deltas, deflate; keeps 16 bits) for small ROIs on a fast link; acks from a network thread on the
-    client (a client busy drawing delays its acks); the focuser and mount over the link.
+  - Remote viewing after its first real night (NUC with the QHY533M → desktop): acks from a network thread on the
+    client (a client busy drawing delays its acks); the focuser and mount over the link; a better entropy coder than
+    deflate for lossless (Rice / Golomb as in JPEG-LS) if the 100 Mbps link makes it worth it.
   - Auto target on real Uranus / Neptune captures (none exist yet): check the blue margin, and the image-only Uranus /
     Neptune case (a tiny learned model only if that case matters and there are captures to train on).
   - The laptop's indiserver service has only the EAF driver: add the LX200's (e.g. `indi_lx200classic`) for the Mount

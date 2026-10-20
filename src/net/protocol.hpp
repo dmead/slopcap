@@ -5,11 +5,11 @@
 //
 // Discovery (UDP kDiscoveryPort): a client sends kProbe to the broadcast addresses (and to localhost); every server
 // answers the sender with one JSON datagram:
-//   {"slopcap":1, "name":"observatory", "port":45720, "camera":"QHY533M", "viewers":0}
+//   {"slopcap":2, "name":"observatory", "port":45720, "camera":"QHY533M", "viewers":0}
 // Stream (TCP kStreamPort, or the next free one; the discovery answer says which): length-prefixed messages,
 //   u32 length (big-endian; counts the type byte and the payload) | u8 type | payload
 // JSON payloads unless noted:
-//   Hello    both ways, first   {"proto":1, "app":"SlopCap", "version":"9a82bf3", "host":"desktop", "role":"client"}
+//   Hello    both ways, first   {"proto":2, "app":"SlopCap", "version":"9a82bf3", "host":"desktop", "role":"client"}
 //   State    server → client    the camera (cameraStateToJson; {"camera":null} without one). After Hello, and
 //                               whenever the camera, ROI, bit depth or readout mode changes.
 //   Control  both ways          {"name":"Gain", "value":250}: please set (client) / was set (server → other clients)
@@ -38,7 +38,7 @@
 
 namespace slopcap::net {
 
-inline constexpr int kProtocol = 1;
+inline constexpr int kProtocol = 2;   ///< 2: lossless frames (2026-10-20)
 inline constexpr quint16 kStreamPort = 45720;     ///< TCP; a server tries the next 9 if it's taken
 inline constexpr quint16 kDiscoveryPort = 45721;  ///< UDP
 inline constexpr char kProbe[] = "SLOPCAP?1";

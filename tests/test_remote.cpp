@@ -14,6 +14,7 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QHostAddress>
+#include <QJsonArray>
 #include <QSysInfo>
 
 #include <catch2/catch_session.hpp>
@@ -22,6 +23,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <random>
 #include <vector>
 
 using namespace slopcap;
@@ -125,6 +127,73 @@ TEST_CASE("frame codec: 16-bit frames keep their range") {
     CHECK(worst < 0.03);
 }
 
+namespace {
+
+/// Encode losslessly, decode, and require every byte back.
+QJsonObject losslessRoundTrip(const std::vector<std::byte>& px, int w, int h, int bits, Bayer bayer, double* ratio = nullptr) {
+    const auto e = net::encodeFrame(px, frameInfo(w, h, bits), bayer, {net::kLossless, 1});
+    CHECK(e.header["codec"].toString() == "lossless");
+    std::vector<std::byte> out(px.size(), std::byte{0x5a});
+    REQUIRE(net::decodeFrame(e.header, e.data, out));
+    CHECK(out == px);
+    if (ratio) *ratio = static_cast<double>(px.size()) / static_cast<double>(e.data.size());
+    return e.header;
+}
+
+void put16(std::vector<std::byte>& px, std::size_t i, unsigned v) {
+    px[2 * i] = static_cast<std::byte>(v & 0xff);
+    px[2 * i + 1] = static_cast<std::byte>(v >> 8);
+}
+
+}  // namespace
+
+TEST_CASE("lossless: every frame comes back exactly") {
+    std::mt19937 rng(7);
+    std::normal_distribution<double> noise(0, 3);
+
+    SECTION("8-bit Bayer with noise") {
+        auto px = bayerScene(320, 240);
+        for (auto& b : px) b = static_cast<std::byte>(std::clamp(std::to_integer<int>(b) + static_cast<int>(noise(rng)), 0, 255));
+        double ratio = 0;
+        const auto h = losslessRoundTrip(px, 320, 240, 8, Bayer::RGGB, &ratio);
+        CHECK(h["layout"].toString() == "planes");
+        CHECK(ratio > 1.5);   // smooth planes plus a little noise
+    }
+    SECTION("a 12-bit ADC in 16-bit samples: the padding bits are shifted out") {
+        const int w = 256, h = 160;
+        std::vector<std::byte> px(static_cast<std::size_t>(w * h * 2));
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                const double v = 200 + 3000 * std::exp(-(std::pow(x - 128.0, 2) + std::pow(y - 80.0, 2)) / 2000) + noise(rng) * 5;
+                put16(px, static_cast<std::size_t>(y * w + x), static_cast<unsigned>(std::clamp(v, 0.0, 4095.0)) << 4);
+            }
+        double ratio = 0;
+        const auto hd = losslessRoundTrip(px, w, h, 16, Bayer::None, &ratio);
+        CHECK(hd["shift"].toInt() == 4);
+        CHECK(ratio > 2);
+    }
+    SECTION("odd sizes, full-range noise, and the extremes") {
+        const int w = 321, h = 77;   // odd: a Bayer frame goes as one plane
+        std::vector<std::byte> px(static_cast<std::size_t>(w * h * 2));
+        std::uniform_int_distribution<unsigned> any(0, 65535);
+        for (std::size_t i = 0; i < static_cast<std::size_t>(w * h); ++i) put16(px, i, i % 97 == 0 ? (i % 2 ? 65535u : 0u) : any(rng));
+        const auto hd = losslessRoundTrip(px, w, h, 16, Bayer::RGGB);
+        CHECK(hd["layout"].toString() == "mono");
+        CHECK(hd["shift"].toInt() == 0);
+        std::vector<std::byte> px8(static_cast<std::size_t>(w * h));
+        for (auto& b : px8) b = static_cast<std::byte>(any(rng) & 0xff);
+        losslessRoundTrip(px8, w, h, 8, Bayer::None);
+    }
+    SECTION("a big frame is split into chunks") {
+        const int w = 2048, h = 1024;
+        std::vector<std::byte> px(static_cast<std::size_t>(w * h * 2));
+        std::uniform_int_distribution<unsigned> any(0, 4095);
+        for (std::size_t i = 0; i < static_cast<std::size_t>(w * h); ++i) put16(px, i, any(rng));
+        const auto hd = losslessRoundTrip(px, w, h, 16, Bayer::GRBG);
+        CHECK(hd["chunks"].toArray().size() > 1);
+    }
+}
+
 TEST_CASE("messages survive being split anywhere") {
     QByteArray stream = net::packJson(net::Msg::Hello, {{"proto", 1}}) + net::packFrame({{"seq", 7}}, QByteArray(1000, 'x')) +
                         net::packJson(net::Msg::Ack, {{"seq", 7}});
@@ -177,10 +246,13 @@ struct Conditions {
     double encodeMsFull = 5;     ///< full size
 };
 
-/// What the server would see over one second with these settings (a rough JPEG size model).
+/// What the server would see over one second with these settings (a rough size model: lossless frames are 4× the size
+/// of quality 85 and take twice as long to encode).
 net::StreamSecond simulate(const Conditions& c, const net::RateControl& rc) {
-    const double kb = c.fullFrameKB * (0.3 + 0.9 * rc.quality / 100.0) / (0.3 + 0.9 * 0.75) / (rc.scale * rc.scale);
-    const double encMs = c.encodeMsFull / (rc.scale * rc.scale);
+    auto jpeg = [](int q) { return 0.3 + 0.9 * q / 100.0; };
+    const bool lossless = rc.quality >= net::kLossless;
+    const double kb = c.fullFrameKB * (lossless ? 4 * jpeg(85) : jpeg(rc.quality)) / jpeg(75) / (rc.scale * rc.scale);
+    const double encMs = c.encodeMsFull * (lossless ? 2 : 1) / (rc.scale * rc.scale);
     const double target = std::min(30.0, c.cameraFps);
     const double byLink = c.linkMbps * 1e6 / 8 / (kb * 1000);
     const double fps = std::min({target, byLink, c.viewerFps, 1000 / encMs});
@@ -210,23 +282,23 @@ Run run(const Conditions& c, net::RateControl& rc, int seconds) {
 
 }  // namespace
 
-TEST_CASE("rate control: a fast link and viewer get the best picture") {
+TEST_CASE("rate control: a fast link and viewer get every frame lossless") {
     net::RateControl rc;
     const auto r = run({}, rc, 60);
-    CHECK(rc.quality == 85);
-    CHECK(rc.scale == 1);
-    CHECK(r.minFpsLate >= 30);
+    CHECK(rc.quality == net::kLossless);
+    CHECK(r.changes == 0);
+    CHECK(r.minFpsLate >= 28);
 }
 
 TEST_CASE("rate control: a 100 Mbps link keeps full detail and drops frames instead") {
     Conditions c;
-    c.linkMbps = 100;   // the NUC's Ethernet: a full-size 1 MB frame gets through about 11 times a second
+    c.linkMbps = 100;   // the NUC's Ethernet: lossless ~3 fps (too few); quality 85 at full size ~11 fps
     net::RateControl rc;
     const auto r = run(c, rc, 600);
-    INFO("quality " << rc.quality << ", 1/" << rc.scale << ", " << r.changes << " changes, worst " << r.minFpsLate << " fps");
+    INFO(net::qualityName(rc.quality).toStdString() << ", 1/" << rc.scale << ", " << r.changes << " changes, worst " << r.minFpsLate << " fps");
     CHECK(rc.quality == 85);
     CHECK(rc.scale == 1);
-    CHECK(r.changes == 0);
+    CHECK(r.changes == 1);         // lossless → 85 once, and no trying lossless again (the measured ratio says no)
     CHECK(r.minFpsLate >= 10);
 }
 
@@ -235,7 +307,8 @@ TEST_CASE("rate control: a link too slow for the frame-rate floor gives up detai
     c.linkMbps = 10;   // full size: about one frame a second
     net::RateControl rc;
     const auto r = run(c, rc, 600);
-    INFO("quality " << rc.quality << ", 1/" << rc.scale << ", " << r.lateChanges << " changes in the last minute, worst " << r.minFpsLate << " fps");
+    INFO(net::qualityName(rc.quality).toStdString() << ", 1/" << rc.scale << ", " << r.lateChanges << " changes in the last minute, worst "
+                                                    << r.minFpsLate << " fps");
     CHECK(rc.scale == 2);              // the best rung that still makes 0.8 x kMinStreamFps
     CHECK(r.minFpsLate >= 0.8 * net::kMinStreamFps);
     CHECK(r.lateChanges == 0);         // no trying a rung the link's capacity says won't fit
@@ -247,21 +320,21 @@ TEST_CASE("rate control: a slow viewer keeps full detail") {
     c.fullFrameKB = 60;
     net::RateControl rc;
     run(c, rc, 300);
-    CHECK(rc.quality == 85);
-    CHECK(rc.scale == 1);
+    CHECK(rc.quality == net::kLossless);
 }
 
 TEST_CASE("rate control: encoding speed only matters below the floor") {
     Conditions c;
-    c.encodeMsFull = 120;   // a full QHY533M frame on a small CPU: 8 fps is fine
+    c.encodeMsFull = 120;   // a full QHY533M frame on a small CPU: JPEG at 8 fps is fine, lossless (240 ms) isn't
     c.fullFrameKB = 300;
     net::RateControl rc;
     auto r = run(c, rc, 300);
-    CHECK(rc.scale == 1);
     CHECK(rc.quality == 85);
+    CHECK(rc.scale == 1);
     CHECK(r.minFpsLate >= 8);
+    CHECK(r.lateChanges == 0);
 
-    c.encodeMsFull = 400;   // 2.5 fps: shrink (quality wouldn't help)
+    c.encodeMsFull = 400;   // 2.5 fps even as JPEG: shrink (quality wouldn't help)
     net::RateControl slow;
     r = run(c, slow, 300);
     CHECK(slow.scale == 2);
@@ -277,10 +350,9 @@ TEST_CASE("rate control: the link getting better is noticed") {
     run(c, rc, 300);
     const int scaleSlow = rc.scale;
     c.linkMbps = 1000;
-    run(c, rc, 120);
+    run(c, rc, 200);
     CHECK(scaleSlow > 1);
-    CHECK(rc.scale == 1);
-    CHECK(rc.quality == 85);
+    CHECK(rc.quality == net::kLossless);
 }
 
 TEST_CASE("a client watches and steers a server's camera over loopback") {

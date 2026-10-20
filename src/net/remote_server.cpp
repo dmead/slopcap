@@ -328,11 +328,11 @@ void RemoteServer::adapt(Flow& f, double seconds, double availableFps) {
     f.fps = sec.sent / seconds;
     const int q0 = f.rate.quality, s0 = f.rate.scale;
     if (const char* why = f.rate.update(sec, availableFps))
-        qInfo().noquote() << QString("remote: %1 quality %2 → %3, size 1/%4 → 1/%5 (%6: sent %7 of %8 fps, %9 skipped, %10 kB and "
+        qInfo().noquote() << QString("remote: %1 %2 → %3, size 1/%4 → 1/%5 (%6: sent %7 of %8 fps, %9 skipped, %10 kB and "
                                      "%11 ms a frame; next step up after %12 s)")
                                  .arg(f.name)
-                                 .arg(q0)
-                                 .arg(f.rate.quality)
+                                 .arg(qualityName(q0))
+                                 .arg(qualityName(f.rate.quality))
                                  .arg(s0)
                                  .arg(f.rate.scale)
                                  .arg(why)

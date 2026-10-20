@@ -1,5 +1,6 @@
 #include "net/rate_control.hpp"
 
+#include "net/frame_codec.hpp"
 #include "net/protocol.hpp"
 
 #include <algorithm>
@@ -12,26 +13,16 @@ namespace {
 struct Rung {
     int quality, scale;
 };
-constexpr std::array<Rung, 10> kLadder{{{85, 1}, {75, 1}, {65, 1}, {75, 2}, {65, 2}, {75, 4}, {65, 4}, {55, 4}, {45, 4}, {35, 4}}};
+constexpr std::array<Rung, 11> kLadder{
+    {{kLossless, 1}, {85, 1}, {75, 1}, {65, 1}, {75, 2}, {65, 2}, {75, 4}, {65, 4}, {55, 4}, {45, 4}, {35, 4}}};
 constexpr int kLast = static_cast<int>(kLadder.size()) - 1;
 constexpr int kForgetCapacity = 120;   ///< seconds without a full link before its measured capacity is forgotten
-constexpr double kMargin = 1.25;       ///< a step up must be predicted to make the floor by this much
+constexpr double kMargin = 1.25;       ///< a step up by an estimated capacity must make the floor by this much
 
-/// Roughly how a frame's size goes with JPEG quality (relative; only ratios are used).
-double qualityFactor(int q) { return 0.3 + 0.9 * q / 100.0; }
+const Rung& rung(int r) { return kLadder[static_cast<std::size_t>(r)]; }
 
-/// Bytes and encoding time of rung `to` relative to rung `from`.
-double bytesRatio(int from, int to) {
-    const auto& a = kLadder[static_cast<std::size_t>(from)];
-    const auto& b = kLadder[static_cast<std::size_t>(to)];
-    const double area = static_cast<double>(a.scale * a.scale) / (b.scale * b.scale);
-    return area * qualityFactor(b.quality) / qualityFactor(a.quality);
-}
-double encodeRatio(int from, int to) {
-    const auto& a = kLadder[static_cast<std::size_t>(from)];
-    const auto& b = kLadder[static_cast<std::size_t>(to)];
-    return static_cast<double>(a.scale * a.scale) / (b.scale * b.scale);
-}
+/// Roughly how a JPEG's size goes with its quality (relative; only ratios are used).
+double jpegFactor(int q) { return 0.3 + 0.9 * q / 100.0; }
 
 }  // namespace
 
@@ -39,8 +30,25 @@ RateControl::RateControl() { setRung(0); }
 
 void RateControl::setRung(int r) {
     rung_ = std::clamp(r, 0, kLast);
-    quality = kLadder[static_cast<std::size_t>(rung_)].quality;
-    scale = kLadder[static_cast<std::size_t>(rung_)].scale;
+    quality = rung(rung_).quality;
+    scale = rung(rung_).scale;
+}
+
+double RateControl::bytesRatio(int from, int to) const {
+    auto size = [this](int r) {
+        const auto& g = rung(r);
+        const double q = g.quality >= kLossless ? losslessBytes_ * jpegFactor(85) : jpegFactor(g.quality);
+        return q / (g.scale * g.scale);
+    };
+    return size(to) / size(from);
+}
+
+double RateControl::encodeRatio(int from, int to) const {
+    auto cost = [this](int r) {
+        const auto& g = rung(r);
+        return (g.quality >= kLossless ? losslessEncode_ : 1.0) / (g.scale * g.scale);
+    };
+    return cost(to) / cost(from);
 }
 
 const char* RateControl::update(const StreamSecond& s, double availableFps) {
@@ -48,6 +56,17 @@ const char* RateControl::update(const StreamSecond& s, double availableFps) {
     const double fps = s.sent / secs;
     const double perFrameMs = s.sent ? s.encodeMs / s.sent : 0;
     const double frameBytes = s.sent ? s.bytes / s.sent : 0;
+    // Just moved between lossless and quality 85 (either way)? Then the two seconds measure how much bigger and slower
+    // lossless frames really are on this target.
+    if (s.sent && lastSent_ && ((lastRung_ == 0 && rung_ == 1) || (lastRung_ == 1 && rung_ == 0))) {
+        const bool nowLossless = rung_ == 0;
+        const double lb = nowLossless ? frameBytes : lastFrameBytes_, jb = nowLossless ? lastFrameBytes_ : frameBytes;
+        const double le = nowLossless ? perFrameMs : lastFrameMs_, je = nowLossless ? lastFrameMs_ : perFrameMs;
+        if (lb > 0 && jb > 0) losslessBytes_ = std::clamp(lb / jb, 1.0, 50.0);
+        if (le > 0 && je > 0) losslessEncode_ = std::clamp(le / je, 0.2, 20.0);
+    }
+    lastRung_ = rung_, lastSent_ = s.sent, lastFrameBytes_ = frameBytes, lastFrameMs_ = perFrameMs;
+
     ++sinceUpgrade_;
     if (++capacityAge_ > kForgetCapacity) capacity_ = 0;
     if (availableFps < 0.5) return nullptr;   // long exposures: nothing to judge by
@@ -70,8 +89,9 @@ const char* RateControl::update(const StreamSecond& s, double availableFps) {
             sinceUpgrade_ = 100;
         } else if (encodeBound) {
             why = "encoding too slow";
-            int r = rung_;
-            while (r < kLast && kLadder[static_cast<std::size_t>(r)].scale == scale) ++r;   // the next size down
+            int r = rung_ + 1;   // from lossless: JPEG at full size; else the next size down
+            if (rung_ > 0)
+                while (r < kLast && rung(r).scale == scale) ++r;
             setRung(r);
         } else {
             why = "too few frames get through";
@@ -79,11 +99,12 @@ const char* RateControl::update(const StreamSecond& s, double availableFps) {
         }
     } else if (rung_ > 0 && ++goodSeconds_ >= upgradeWait_) {
         goodSeconds_ = 0;
-        // predicted frame rate one rung up: by the link's capacity (if it's been full) and by the encoding time
+        // Predicted frame rate one rung up, by the link and by the encoding time. While the link is full, its capacity
+        // is a measurement and the prediction an estimate (so it needs a margin); when it isn't, it's a lower bound.
         const int to = rung_ - 1;
         const double byLink = capacity_ > 0 && frameBytes > 0 ? capacity_ / (frameBytes * bytesRatio(from, to)) : 1e9;
         const double byEncoder = perFrameMs > 0 ? 1000 / (perFrameMs * encodeRatio(from, to)) : 1e9;
-        if (std::min(byLink, byEncoder) >= kMargin * floor) {
+        if (byLink >= (full ? kMargin : 1.0) * floor && byEncoder >= kMargin * floor) {
             why = "room for more detail";
             setRung(to);
             sinceUpgrade_ = 0;
