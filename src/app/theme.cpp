@@ -115,6 +115,7 @@ QPushButton[variant="option"] { text-align: left; padding: 6px 10px; }
 QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox { background: %4; color: %1; border: 1px solid %5; border-radius: 6px; padding: 5px 8px; selection-background-color: %7; selection-color: #1a1205; }
 QComboBox:focus, QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus { border-color: %9; }
 QComboBox::drop-down { border: none; width: 18px; }
+QComboBox::down-arrow { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid %10; }
 QComboBox QAbstractItemView { background: %4; border: 1px solid %5; selection-background-color: %8; selection-color: %7; }
 QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { width: 0; border: none; }
 QLineEdit[role="mono"], QSpinBox[role="mono"], QDoubleSpinBox[role="mono"] { font-family: "%12"; }

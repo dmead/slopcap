@@ -140,7 +140,17 @@ ReadResult SimCamera::readFrame(std::span<std::byte> dst, FrameInfo& out, std::c
     reader_.readFrame(next_ % n, full_);
     copyRoi(dst);
     out.sequence = sequence_++;
-    out.timestamp = std::chrono::system_clock::now();
+    // When the light was captured, as the recording says: its per-frame timestamp, else its start time plus the
+    // frame's place in it, else now. (The automatic target judges the sky, e.g. the Moon's phase, at this time.)
+    const auto& ts = reader_.timestamps();
+    const int64_t i = next_ % n;
+    if (ts && ts->size() > static_cast<std::size_t>(i) && (*ts)[static_cast<std::size_t>(i)] > 0)
+        out.timestamp = ser::fromTicks((*ts)[static_cast<std::size_t>(i)]);
+    else if (reader_.header().dateTimeUtcTicks > 0)
+        out.timestamp = ser::fromTicks(reader_.header().dateTimeUtcTicks) +
+                        std::chrono::duration_cast<std::chrono::system_clock::duration>(offsetOf(i));
+    else
+        out.timestamp = std::chrono::system_clock::now();
     out.roi = roi_;
     out.bitDepth = outDepth_;
     out.bytes = frameBytes();

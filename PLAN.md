@@ -458,9 +458,18 @@ M2 status (2026-10-16):
   - **Session log** (README, "At the telescope"), one file per run, flushed line by line. It is also where to look
     first if the Gemini EAF won't connect: INDI driver messages, including the `message` attribute on property
     updates (where drivers put "can't open port"), and Alerts are logged.
+  - **Laptop (2026-10-16):** SlopCap is built natively at ~/projects/slopcap/build/linux-release on the
+    laptop. Its user indiserver runs `indi_myfocuserpro2_focus` on the EAF's by-id CH340 port; the EAF path
+    and the session log were checked headless with the EAF unplugged. That check found the connect-retry storm, now
+    10 s backoff.
+  - **Replays use the recording's own time** (per-frame timestamps, else the header's start + offset), so the auto
+    target judges the sky (the Moon's phase) as it was. The Target combo's drop-down arrow is drawn again: the theme had
+    styled `::drop-down` away. Installs from before Auto keep their saved Target (e.g. "Saturn"); choose Auto.
 - **Still to do:**
-  - Auto target on real Mars / Uranus / Neptune captures: check the colour margins, and the image-only Uranus / Neptune
-    case (a tiny learned model only if that case matters and there are captures to train on).
+  - Auto target on real Uranus / Neptune captures (none exist yet): check the blue margin, and the image-only Uranus /
+    Neptune case (a tiny learned model only if that case matters and there are captures to train on).
+  - The laptop's indiserver service has only the EAF driver: add the LX200's (e.g. `indi_lx200classic`) for the Mount
+    panel.
   - Real-camera check of the GUI **on the laptop** (cameras, EAF and LX200 plugged into it), before the Saturn night.
     Check that the LX200 driver takes guide pulses (the classic LX200 has no pulse command; INDI then times moves at
     the guide rate) and which way N / E move the target on screen.
