@@ -13,6 +13,7 @@
 
 #include <QDateTime>
 #include <QElapsedTimer>
+#include <QJsonObject>
 #include <QMainWindow>
 #include <QPoint>
 #include <QTimer>
@@ -30,6 +31,8 @@ class QFormLayout;
 class QFrame;
 class QLabel;
 class QPushButton;
+class QScreen;
+class QShortcut;
 class QSlider;
 class QStackedWidget;
 class QVBoxLayout;
@@ -41,6 +44,11 @@ class PreviewWidget;
 namespace slopcap::devices {
 class Mount;
 }
+namespace slopcap::net {
+class Discovery;
+class RemoteClient;
+class RemoteServer;
+}
 
 namespace slopcap::app {
 
@@ -48,6 +56,7 @@ class CollimationPanel;
 class FocusChartPanel;
 class FocusController;
 class FocusResultsPanel;
+class FullViewBar;
 class MountSection;
 class RawHistogramSection;
 class SweepPanel;
@@ -69,9 +78,20 @@ public:
     void setMode(Mode m);
     /// Connect the focuser; optionally start a sweep around its position once it's ready (0 = default).
     void startFocuser(const QString& hostPort, bool sweep, int range, int step, int frames);
+    void setNamedControl(const QString& name, double value);   ///< as if set in the UI (here, or on the server)
+
+    // remote viewing (src/net): share this camera, or watch and steer another SlopCap's
+    void startSharing(const QString& address = {});   ///< empty: every interface
+    void stopSharing();
+    void connectRemote(const QString& host, quint16 port = 0);
+    void connectFirstRemote();                          ///< the first server discovery finds
+    void disconnectRemote();
+    /// The preview over a whole screen with a reduced control bar (nullptr: the window's current screen).
+    void setFullView(bool on, QScreen* screen = nullptr);
 
 protected:
     void closeEvent(QCloseEvent* e) override;
+    bool eventFilter(QObject* o, QEvent* e) override;
 
 private:
     QWidget* buildHeader();
@@ -105,6 +125,18 @@ private:
     QString cameraKey() const;
     void message(const QString& text);
     void applySettings(const Settings& s);
+    // remote
+    void showRemoteMenu();
+    void ensureDiscovery();
+    void onRemoteState();
+    QJsonObject remoteCameraState() const;   ///< server: the camera as viewers see it, with the UI's current values
+    QJsonObject remoteStatus() const;
+    void updateRemoteUi();
+    void updateClientStats();
+    bool isRemote() const { return remote_ != nullptr; }
+    // full view
+    void showFullViewMenu();
+    void syncFullBar();
 
     // state
     std::unique_ptr<ICamera> cam_;
@@ -130,12 +162,33 @@ private:
     int pendingRange_ = 0, pendingStep_ = 0, pendingFrames_ = 0;
     Mode mode_ = Capture;
 
+    // remote viewing
+    LatestFrame remoteTap_;                 ///< frames for the stream (server)
+    net::RemoteServer* server_ = nullptr;   ///< sharing this camera
+    net::RemoteClient* remote_ = nullptr;   ///< watching another SlopCap's camera (cam_ is then a RemoteCamera)
+    net::Discovery* discovery_ = nullptr;
+    QJsonObject cameraState_;               ///< server: the camera at its last populateCameraUi
+    int controlOrigin_ = 0;                 ///< server: the viewer whose request is being applied (not told again)
+    bool roiCentreDirty_ = false;           ///< client: send the ROI centre with the next format request
+    bool connectFirst_ = false;
+    std::size_t lastViewers_ = 0;
+    int statusTick_ = 0;
+
+    // full view
+    bool fullView_ = false, wasMaximized_ = false;
+    QByteArray normalGeometry_;
+    FullViewBar* fullBar_ = nullptr;
+    QTimer fullIdle_;
+    QShortcut* escape_ = nullptr;
+
     // header
+    QWidget* header_ = nullptr;
     QButtonGroup* modes_ = nullptr;
     QComboBox* target_ = nullptr;
     QComboBox* filter_ = nullptr;
     QPushButton* cameraPill_ = nullptr;
     QLabel* cameraDot_ = nullptr;
+    QPushButton* remotePill_ = nullptr;
     QLabel* headerInfo_ = nullptr;
 
     // columns
@@ -181,15 +234,19 @@ private:
     QLabel* tAuto_ = nullptr;
 
     // preview page
+    QWidget *toolbar_ = nullptr, *strip_ = nullptr, *previewHolder_ = nullptr;
     QButtonGroup* zoom_ = nullptr;
     QButtonGroup* stretch_ = nullptr;
     QCheckBox* targetBox_ = nullptr;
     QLabel* recBadge_ = nullptr;
+    QLabel* remoteBadge_ = nullptr;
     preview::HistogramWidget* histogram_ = nullptr;
     QLabel* histInfo_ = nullptr;
     QLabel *sSharp_ = nullptr, *sDisp_ = nullptr, *sFrame_ = nullptr;
 
     // footer
+    QWidget* footer_ = nullptr;
+    QLabel* fRemote_ = nullptr;
     QLabel *fState_ = nullptr, *fFps_ = nullptr, *fDropped_ = nullptr, *fRing_ = nullptr, *fDisk_ = nullptr, *fFrames_ = nullptr;
     QLabel* fMessage_ = nullptr;
     QLabel* fDisplay_ = nullptr;

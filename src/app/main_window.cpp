@@ -4,16 +4,21 @@
 #include "app/collimation_panel.hpp"
 #include "app/focus_controller.hpp"
 #include "app/focus_views.hpp"
+#include "app/full_view_bar.hpp"
 #include "app/mount_section.hpp"
 #include "app/raw_histogram.hpp"
 #include "app/theme.hpp"
 #include "camera/open_camera.hpp"
+#include "net/discovery.hpp"
+#include "net/remote_client.hpp"
+#include "net/remote_server.hpp"
 #include "preview/histogram_widget.hpp"
 #include "preview/preview_widget.hpp"
 
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QCloseEvent>
+#include <QCursor>
 #include <QComboBox>
 #include <QDir>
 #include <QDoubleSpinBox>
@@ -24,13 +29,19 @@
 #include <QFontMetrics>
 #include <QFrame>
 #include <QGridLayout>
+#include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QInputDialog>
+#include <QLineEdit>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QLabel>
 #include <QLocale>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPainter>
 #include <QPushButton>
+#include <QScreen>
 #include <QScrollArea>
 #include <QSettings>
 #include <QShortcut>
@@ -77,6 +88,16 @@ QString formatExposure(double us) {
     if (us < 1000) return QString("%1 ms").arg(us / 1000.0, 0, 'f', 3);
     if (us < 1e6) return QString("%1 ms").arg(us / 1000.0, 0, 'f', us < 1e4 ? 3 : 1);
     return QString("%1 s").arg(us / 1e6, 0, 'f', 2);
+}
+
+/// The exposure sliders' 0..1000 position <-> microseconds, log scale between the camera's limits.
+double sliderToExposure(int pos, double lo, double hi) { return std::round(lo * std::pow(hi / lo, pos / 1000.0)); }
+int exposureToSlider(double us, double lo, double hi) { return static_cast<int>(std::lround(1000 * std::log(std::max(us, lo) / lo) / std::log(hi / lo))); }
+
+QString badgeStyle(const QColor& border, const QColor& text) {
+    return QString("background: rgba(13,15,18,210); border: 1px solid %1; border-radius: 4px; color: %2; padding: 3px 8px; "
+                   "font-family: '%3'; font-size: 12px; font-weight: 600;")
+        .arg(border.name(), text.name(), theme::monoFont().family());
 }
 
 QString mmss(double seconds) {
@@ -137,7 +158,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     auto* v = new QVBoxLayout(root);
     v->setContentsMargins(0, 0, 0, 0);
     v->setSpacing(0);
-    v->addWidget(buildHeader());
+    header_ = buildHeader();
+    v->addWidget(header_);
 
     // three columns separated by 1 px lines (the body's background shows through the spacing)
     auto* body = new QFrame;
@@ -165,8 +187,33 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     h->addWidget(centre_, 1);
     h->addWidget(right_);
     v->addWidget(body, 1);
-    v->addWidget(buildFooter());
+    footer_ = buildFooter();
+    v->addWidget(footer_);
     setCentralWidget(root);
+
+    // full view: the preview over a whole screen, with a reduced control bar that hides while the mouse rests
+    fullBar_ = new FullViewBar(preview_);
+    connect(fullBar_->gain, &QSlider::valueChanged, this, [this](int g) { setControl("Gain", g); });
+    connect(fullBar_->exposure, &QSlider::valueChanged, this, [this](int pos) { setControl("Exposure", sliderToExposure(pos, expMin_, expMax_)); });
+    connect(fullBar_->stretch, &QButtonGroup::idClicked, this, [this](int id) { stretch_->button(id)->click(); });
+    connect(fullBar_->record, &QPushButton::clicked, this, &MainWindow::toggleRecording);
+    connect(fullBar_->exit, &QPushButton::clicked, this, [this] { setFullView(false); });
+    fullIdle_.setSingleShot(true);
+    connect(&fullIdle_, &QTimer::timeout, this, [this] {
+        if (!fullView_) return;
+        if (fullBar_->underMouse()) {
+            fullIdle_.start(3000);
+            return;
+        }
+        fullBar_->hide();
+        preview_->setCursor(Qt::BlankCursor);
+    });
+    escape_ = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+    escape_->setEnabled(false);
+    connect(escape_, &QShortcut::activated, this, [this] { setFullView(false); });
+    auto* f11 = new QShortcut(QKeySequence(Qt::Key_F11), this);
+    connect(f11, &QShortcut::activated, this, [this] { setFullView(!fullView_); });
+    preview_->installEventFilter(this);
 
     connect(preview_, &preview::PreviewWidget::frameShown, this, [this](const std::array<uint32_t, 256>& hist, const preview::Levels& lv, const FrameInfo&) {
         histogram_->setData(hist, lv);
@@ -217,7 +264,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         focus_->setLiveMetric(m);
         updateFocusMode();
     });
-    connect(&statsTimer_, &QTimer::timeout, this, &MainWindow::updateStats);
+    connect(&statsTimer_, &QTimer::timeout, this, [this] {
+        updateStats();
+        syncFullBar();
+        if (server_ && ++statusTick_ % 2 == 0) server_->sendStatus(remoteStatus());   // twice a second
+    });
     statsTimer_.start(250);
     messageTimer_.setSingleShot(true);
     connect(&messageTimer_, &QTimer::timeout, this, [this] { fMessage_->clear(); });
@@ -252,7 +303,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setMode(Capture);
 }
 
-MainWindow::~MainWindow() { stopSession(); }
+MainWindow::~MainWindow() {
+    stopSession();
+    cam_.reset();
+    delete server_;   // before remoteTap_ goes: its encoder thread reads it
+    server_ = nullptr;
+    delete remote_;
+    remote_ = nullptr;
+}
 
 void MainWindow::applySettings(const Settings& s) {
     settings_ = s;
@@ -335,11 +393,19 @@ QWidget* MainWindow::buildHeader() {
     filter_->setToolTip("Optional: goes into the file name, e.g. 2026-10-17-0315_4-L-Saturn.ser");
     for (auto* c : {target_, filter_}) connect(c, &QComboBox::currentTextChanged, this, &MainWindow::updateStats);
 
+    const QString pillStyle = QString("QPushButton { border: 1px solid %1; border-radius: 13px; padding: 4px 12px 4px %5px; color: %2; font-family: '%3'; "
+                                      "font-size: 12px; background: transparent; } QPushButton:hover { border-color: %4; }")
+                                  .arg(theme::kLine.name(), theme::kMuted.name(), theme::monoFont().family(), theme::kDim.name());
+    remotePill_ = new QPushButton("⇄ Remote");
+    remotePill_->setCursor(Qt::PointingHandCursor);
+    remotePill_->setStyleSheet(pillStyle.arg(12));
+    remotePill_->setToolTip("Share this camera with other SlopCaps on the network, or watch one that shares");
+    connect(remotePill_, &QPushButton::clicked, this, &MainWindow::showRemoteMenu);
+    h->addWidget(remotePill_);
+
     cameraPill_ = new QPushButton;
     cameraPill_->setCursor(Qt::PointingHandCursor);
-    cameraPill_->setStyleSheet(QString("QPushButton { border: 1px solid %1; border-radius: 13px; padding: 4px 12px 4px 24px; color: %2; font-family: '%3'; "
-                                       "font-size: 12px; background: transparent; } QPushButton:hover { border-color: %4; }")
-                                   .arg(theme::kLine.name(), theme::kMuted.name(), theme::monoFont().family(), theme::kDim.name()));
+    cameraPill_->setStyleSheet(pillStyle.arg(24));
     cameraDot_ = new QLabel(cameraPill_);
     cameraDot_->setFixedSize(7, 7);
     cameraDot_->move(11, 10);
@@ -377,6 +443,7 @@ QWidget* MainWindow::buildFooter() {
     mk(fRing_);
     mk(fDisk_);
     mk(fFrames_);
+    mk(fRemote_);
     fMessage_ = theme::label("", "muted");
     h->addWidget(fMessage_, 1);
     mk(fDisplay_);
@@ -441,7 +508,7 @@ QWidget* MainWindow::buildCaptureLeft() {
     hint->addWidget(expRange_);
     expBox->addLayout(hint);
     connect(exposure_, &QSlider::valueChanged, this, [this](int pos) {
-        const double us = std::round(expMin_ * std::pow(expMax_ / expMin_, pos / 1000.0));
+        const double us = sliderToExposure(pos, expMin_, expMax_);
         expValue_->setText(formatExposure(us));
         expMaxFps_->setText(QString("max %1 fps").arg(1e6 / us, 0, 'f', us < 1e5 ? 0 : 2));
         setControl("Exposure", us);
@@ -473,11 +540,13 @@ QWidget* MainWindow::buildCaptureLeft() {
     connect(roiPreset_, &QComboBox::activated, this, [this] { applyFormat(roiPreset_->currentData().toSize()); });
     connect(roiCentreBtn_, &QPushButton::clicked, this, [this] {
         roiCentre_.reset();
+        roiCentreDirty_ = true;
         applyFormat(roiPreset_->currentData().toSize());
     });
     connect(roiMax_, &QPushButton::clicked, this, [this] {
         if (!cam_) return;
         roiCentre_.reset();
+        roiCentreDirty_ = true;
         applyFormat(QSize(cam_->info().sensorWidth, cam_->info().sensorHeight));
     });
 
@@ -607,6 +676,7 @@ QWidget* MainWindow::buildPreviewPage() {
     v->setSpacing(0);
 
     auto* bar = new QFrame;
+    toolbar_ = bar;
     bar->setProperty("role", "toolbar");
     auto* bh = new QHBoxLayout(bar);
     bh->setContentsMargins(12, 8, 12, 8);
@@ -648,21 +718,28 @@ QWidget* MainWindow::buildPreviewPage() {
     });
     connect(reticle, &QCheckBox::toggled, this, [this](bool on) { preview_->setCrosshair(on); });
     bh->addStretch(1);
+    auto* full = theme::button("Full screen");
+    full->setToolTip("The preview over a whole screen, e.g. a projector, with gain, exposure and record in a bar that hides "
+                     "itself (F11; Esc to leave)");
+    connect(full, &QPushButton::clicked, this, &MainWindow::showFullViewMenu);
+    bh->addWidget(full);
     v->addWidget(bar);
 
     auto* holder = new QWidget;
+    previewHolder_ = holder;
     auto* hl = new QVBoxLayout(holder);
     hl->setContentsMargins(20, 20, 20, 20);
     hl->addWidget(preview_);
     v->addWidget(holder, 1);
     recBadge_ = new QLabel(preview_);
-    recBadge_->setStyleSheet(QString("background: rgba(13,15,18,210); border: 1px solid %1; border-radius: 4px; color: %2; padding: 3px 8px; "
-                                     "font-family: '%3'; font-size: 12px; font-weight: 600;")
-                                 .arg(theme::kRec.name(), theme::kRecText.name(), theme::monoFont().family()));
+    recBadge_->setStyleSheet(badgeStyle(theme::kRec, theme::kRecText));
     recBadge_->move(12, 12);
     recBadge_->hide();
+    remoteBadge_ = new QLabel(preview_);   // top right: a remote link is active (placed in eventFilter)
+    remoteBadge_->hide();
 
     auto* strip = new QFrame;
+    strip_ = strip;
     strip->setProperty("role", "strip");
     auto* sh = new QHBoxLayout(strip);
     sh->setContentsMargins(16, 10, 16, 14);
@@ -739,6 +816,11 @@ void MainWindow::updateFocusMode() {
 
 void MainWindow::showCameraMenu() {
     QMenu menu(this);
+    if (remote_) {
+        menu.addAction(QString("Disconnect from %1").arg(remote_->serverName()), this, &MainWindow::disconnectRemote);
+        menu.exec(cameraPill_->mapToGlobal(QPoint(0, cameraPill_->height() + 4)));
+        return;
+    }
     if (cam_) {
         menu.addAction(QString("Disconnect %1").arg(QString::fromStdString(cam_->info().model)), this, &MainWindow::disconnectCamera);
         menu.addSeparator();
@@ -785,6 +867,10 @@ void MainWindow::connectCamera(const QString& spec) {
 }
 
 void MainWindow::disconnectCamera() {
+    if (remote_) {
+        disconnectRemote();
+        return;
+    }
     if (recording_ && QMessageBox::question(this, "SlopCap", "A recording is running. Stop it and disconnect?") != QMessageBox::Yes) return;
     stopSession();
     saveSettings();
@@ -801,13 +887,21 @@ void MainWindow::populateCameraUi() {
     noCamera_->setVisible(!have);
     cameraBox_->setVisible(have);
     record_->setEnabled(have);
+    folder_->setEnabled(!remote_);
+    limit_->setEnabled(!remote_);
     theme::setDot(cameraDot_, have ? theme::kGood : theme::kGrey);
+    // what viewers of this camera are told (read here: the camera isn't streaming while the UI is rebuilt)
+    cameraState_ = have && !remote_ ? net::cameraStateToJson(net::snapshot(*cam_)) : QJsonObject();
+    if (server_) server_->setCameraName(have && !remote_ ? QString::fromStdString(cam_->info().model) : QString());
+    noCamera_->setText(remote_ ? QString("%1 has no camera connected.").arg(remote_->serverName())
+                               : "No camera connected. Click the camera pill at the top right to pick one.");
     if (!have) {
-        cameraPill_->setText("No camera · connect…");
+        cameraPill_->setText(remote_ ? QString("%1 · no camera").arg(remote_->serverName()) : "No camera · connect…");
+        if (server_) server_->setState(remoteCameraState());
         return;
     }
     const auto& info = cam_->info();
-    QString pill = QString::fromStdString(info.model);
+    QString pill = (remote_ ? remote_->serverName() + " · " : QString()) + QString::fromStdString(info.model);
     if (auto t = cam_->control("Temperature")) pill += QString(" · %1 °C").arg(info.vendor == "ZWO" ? *t / 10 : *t, 0, 'f', 1);
     cameraPill_->setText(pill.size() > 34 ? pill.left(32) + "…" : pill);
     cameraPill_->setToolTip(QString::fromStdString(std::format("{} {} · {}×{} · {:.2f} µm · {}", info.vendor, info.model, info.sensorWidth,
@@ -841,6 +935,7 @@ void MainWindow::populateCameraUi() {
     }
     populateControls();
     updateRoiInfo();
+    if (server_) server_->setState(remoteCameraState());   // after populateControls: the values come from its boxes
 }
 
 void MainWindow::populateControls() {
@@ -869,12 +964,17 @@ void MainWindow::populateControls() {
         controlBoxes_[c.name] = box;
     }
     gain_->setEnabled(gainInfo.has_value());
+    fullBar_->gain->setEnabled(gainInfo.has_value());
+    fullBar_->exposure->setEnabled(expInfo.has_value());
     if (gainInfo) {
-        const QSignalBlocker b(gain_);
+        const QSignalBlocker b(gain_), b2(fullBar_->gain);
         gain_->setRange(static_cast<int>(gainInfo->min), static_cast<int>(gainInfo->max));
+        fullBar_->gain->setRange(gain_->minimum(), gain_->maximum());
         const int g = static_cast<int>(cam_->control("Gain").value_or(gainInfo->min));
         gain_->setValue(g);
         gainValue_->setText(QString::number(g));
+        fullBar_->gain->setValue(g);
+        fullBar_->gainValue->setText(QString::number(g));
     }
     exposure_->setEnabled(expInfo.has_value());
     if (expInfo) {
@@ -911,13 +1011,17 @@ void MainWindow::populateControls() {
 /// Keep the slider, its label and the "All controls" box showing the same value.
 void MainWindow::syncControlWidgets(const std::string& name, double value) {
     if (name == "Gain") {
-        const QSignalBlocker b(gain_);
+        const QSignalBlocker b(gain_), b2(fullBar_->gain);
         gain_->setValue(static_cast<int>(value));
         gainValue_->setText(QString::number(static_cast<int>(value)));
+        fullBar_->gain->setValue(static_cast<int>(value));
+        fullBar_->gainValue->setText(gainValue_->text());
     } else if (name == "Exposure") {
-        const QSignalBlocker b(exposure_);
-        exposure_->setValue(static_cast<int>(std::lround(1000 * std::log(std::max(value, expMin_) / expMin_) / std::log(expMax_ / expMin_))));
+        const QSignalBlocker b(exposure_), b2(fullBar_->exposure);
+        exposure_->setValue(exposureToSlider(value, expMin_, expMax_));
+        fullBar_->exposure->setValue(exposure_->value());
         expValue_->setText(formatExposure(value));
+        fullBar_->expValue->setText(expValue_->text());
         expMaxFps_->setText(QString("max %1 fps").arg(1e6 / value, 0, 'f', value < 1e5 ? 0 : 2));
     }
     if (auto it = controlBoxes_.find(name); it != controlBoxes_.end() && it->second->value() != value) {
@@ -928,8 +1032,9 @@ void MainWindow::syncControlWidgets(const std::string& name, double value) {
 
 void MainWindow::setControl(const std::string& name, double value) {
     if (!cam_) return;
-    qInfo().noquote() << "control:" << QString::fromStdString(name) << "=" << value;
+    qInfo().noquote() << "control:" << QString::fromStdString(name) << "=" << value << (controlOrigin_ ? "(from a viewer)" : "");
     syncControlWidgets(name, value);
+    if (server_ && !remote_) server_->broadcastControl(QString::fromStdString(name), value, controlOrigin_);
     if (session_) {
         session_->post([name, value](ICamera& c) { c.setControl(name, value); });
         return;
@@ -943,6 +1048,17 @@ void MainWindow::setControl(const std::string& name, double value) {
 
 void MainWindow::applyFormat(std::optional<QSize> size, std::optional<int> bits, std::optional<int> readout) {
     if (!cam_ || recording_) return;
+    if (remote_) {   // the server applies it and sends the new State
+        QJsonObject req;
+        if (size) req["width"] = size->width(), req["height"] = size->height();
+        if (bits) req["bits"] = *bits;
+        if (readout) req["readout"] = *readout;
+        if (roiCentreDirty_) req["centre"] = roiCentre_ ? QJsonValue(QJsonArray{roiCentre_->x(), roiCentre_->y()}) : QJsonValue(QJsonValue::Null);
+        roiCentreDirty_ = false;
+        qInfo().noquote() << "format: asking" << remote_->serverName() << "for" << QJsonDocument(req).toJson(QJsonDocument::Compact);
+        remote_->sendFormat(req);
+        return;
+    }
     qInfo().noquote() << "format:" << (size ? QString("%1x%2").arg(size->width()).arg(size->height()) : QString("size same")) << "·"
                       << (bits ? QString("%1-bit").arg(*bits) : QString("bits same")) << "·"
                       << (readout ? QString("readout %1").arg(*readout) : QString("readout same"));
@@ -970,6 +1086,7 @@ void MainWindow::centreRoiOn(QPointF img) {
     if (!cam_ || recording_) return;
     const Roi cur = cam_->roi();
     roiCentre_ = QPoint(cur.x + static_cast<int>(img.x()), cur.y + static_cast<int>(img.y()));
+    roiCentreDirty_ = true;
     const auto& info = cam_->info();
     QSize size(cur.width, cur.height);
     if (cur.width >= info.sensorWidth && cur.height >= info.sensorHeight) size = QSize(1040, 560);   // full frame can't move
@@ -1185,7 +1302,7 @@ void MainWindow::saveSettings() const {
         st.remove("site");
     }
     st.setValue("focus/metric", analysis::metricName(focus_->liveMetric()));
-    if (!cam_) return;
+    if (!cam_ || remote_) return;
     st.beginGroup("cameras/" + cameraKey());
     const Roi r = cam_->roi();
     st.setValue("roi", QRect(r.x, r.y, r.width, r.height));
@@ -1236,8 +1353,11 @@ QString MainWindow::fileStem(const QDateTime& utc) const {
 
 void MainWindow::startSession(bool record) {
     if (!cam_) return;
+    if (remote_) record = false;   // raw files stay on the server
     CaptureOptions opt;
     opt.preview = &tap_;
+    if (!remote_) opt.remote = &remoteTap_;   // copies only when a viewer's encoder asks
+    if (server_) server_->setBayer(remote_ ? Bayer::None : cam_->info().bayer);
     if (record) {
         QDir dir(outDir_);
         if (!dir.mkpath(".")) {
@@ -1310,6 +1430,12 @@ void MainWindow::stopSession() {
 
 void MainWindow::toggleRecording() {
     if (!cam_) return;
+    if (remote_) {
+        const bool on = !remote_->status()["recording"].toBool();
+        qInfo().noquote() << "record: asking" << remote_->serverName() << "to" << (on ? "start" : "stop");
+        remote_->sendRecord(on);
+        return;
+    }
     const bool start = !recording_;
     stopSession();
     startSession(start);
@@ -1366,6 +1492,11 @@ void MainWindow::updateStats() {
     headerInfo_->setText(mode_ == Focus ? (focus_->sweeping() ? "Sweep running · scored per colour channel" : "Focus sweep · scored per colour channel")
                          : mode_ == Collimate ? "Defocused-star collimation"
                                               : "");
+    updateRemoteUi();
+    if (remote_) {
+        updateClientStats();
+        return;
+    }
     const QStorageInfo disk(QDir(outDir_).exists() ? outDir_ : QDir::homePath());
     const double freeTB = static_cast<double>(disk.bytesAvailable()) / 1e12;
     const QString freeText = freeTB >= 1 ? QString("%1 TB free").arg(freeTB, 0, 'f', 1) : QString("%1 GB free").arg(freeTB * 1000, 0, 'f', 0);
@@ -1424,10 +1555,458 @@ void MainWindow::updateStats() {
 }
 
 void MainWindow::printSummary() const {
-    std::string line = (fState_->text() + " · " + fFps_->text() + " · " + fDropped_->text() + " · " + fDisk_->text() + " · " + fMessage_->text())
+    QString controls;
+    for (const char* n : {"Gain", "Exposure"})
+        if (auto it = controlBoxes_.find(n); it != controlBoxes_.end()) controls += QString(" · %1=%2").arg(n).arg(it->second->value());
+    std::string line = (fState_->text() + " · " + fFps_->text() + " · " + fDropped_->text() + " · " + fDisk_->text() + controls +
+                        (fRemote_->text().isEmpty() ? QString() : " · " + fRemote_->text()) +
+                        (remoteBadge_->isVisible() ? " · badge: " + remoteBadge_->text() : QString()) + " · " + fMessage_->text())
                            .toStdString();
     std::fputs((line + "\n").c_str(), stdout);
     std::fflush(stdout);
+}
+
+// ================================================================ remote viewing
+
+void MainWindow::setNamedControl(const QString& name, double value) {
+    if (name == "Record") {   // a pseudo-control for tests: 1 starts recording, 0 stops it (on the server, if remote)
+        const bool on = remote_ ? remote_->status()["recording"].toBool() : recording_;
+        if ((value != 0) != on) toggleRecording();
+        return;
+    }
+    if (!cam_) {
+        qWarning().noquote() << "control:" << name << "- no camera";
+        return;
+    }
+    setControl(name.toStdString(), value);
+}
+
+void MainWindow::ensureDiscovery() {
+    if (discovery_) return;
+    discovery_ = new net::Discovery(this);
+    connect(discovery_, &net::Discovery::serversChanged, this, [this] {
+        if (!connectFirst_) return;
+        for (const auto& s : discovery_->servers()) {
+            if (server_ && s.local && s.port == server_->port()) continue;   // ourselves
+            connectFirst_ = false;
+            connectRemote(s.address.toString(), s.port);
+            break;
+        }
+    });
+    discovery_->start();
+}
+
+void MainWindow::startSharing(const QString& address) {
+    if (server_) return;
+    if (remote_) disconnectRemote();
+    server_ = new net::RemoteServer(remoteTap_, this);
+    if (!server_->start(address.isEmpty() ? QHostAddress(QHostAddress::Any) : QHostAddress(address))) {
+        const QString why = server_->error();
+        delete server_;
+        server_ = nullptr;
+        qWarning().noquote() << "remote: can't share:" << why;
+        QMessageBox::warning(this, "SlopCap", "Can't share this camera:\n" + why);
+        return;
+    }
+    connect(server_, &net::RemoteServer::controlRequested, this, [this](int id, const QString& name, double value) {
+        if (!cam_) return;
+        controlOrigin_ = id;
+        setControl(name.toStdString(), value);
+        controlOrigin_ = 0;
+    });
+    connect(server_, &net::RemoteServer::formatRequested, this, [this](int id, const QJsonObject& o) {
+        if (!cam_) return;
+        if (recording_) {
+            server_->sendNotice(id, "it's recording: the ROI and format can't change until the recording stops");
+            return;
+        }
+        if (o.contains("centre")) {
+            const auto c = o["centre"].toArray();
+            if (c.size() == 2) roiCentre_ = QPoint(c[0].toInt(), c[1].toInt());
+            else roiCentre_.reset();
+        }
+        std::optional<QSize> size;
+        std::optional<int> bits, readout;
+        if (o.contains("width")) size = QSize(o["width"].toInt(), o["height"].toInt());
+        if (o.contains("bits")) bits = o["bits"].toInt();
+        if (o.contains("readout")) readout = o["readout"].toInt();
+        qInfo().noquote() << "format: asked by a viewer";
+        applyFormat(size, bits, readout);
+    });
+    connect(server_, &net::RemoteServer::recordRequested, this, [this](int, bool on) {
+        qInfo().noquote() << "record:" << (on ? "start" : "stop") << "asked by a viewer";
+        if (cam_ && on != recording_) toggleRecording();
+    });
+    connect(server_, &net::RemoteServer::viewersChanged, this, [this] {
+        const auto v = server_->viewers();
+        if (v.size() != lastViewers_) {
+            QStringList names;
+            for (const auto& x : v) names << (x.host.isEmpty() ? x.address : x.host);
+            message(v.empty() ? "No one is watching now" : QString("Watching: %1").arg(names.join(", ")));
+            lastViewers_ = v.size();
+        }
+        updateRemoteUi();
+    });
+    if (cam_) {
+        server_->setCameraName(QString::fromStdString(cam_->info().model));
+        server_->setBayer(cam_->info().bayer);
+    }
+    server_->setState(remoteCameraState());
+    message(QString("Sharing on port %1: SlopCaps on this network can watch").arg(server_->port()));
+    updateRemoteUi();
+}
+
+void MainWindow::stopSharing() {
+    if (!server_) return;
+    delete server_;
+    server_ = nullptr;
+    lastViewers_ = 0;
+    message("Stopped sharing");
+    updateRemoteUi();
+}
+
+void MainWindow::connectRemote(const QString& host, quint16 port) {
+    if (server_ && !server_->viewers().empty() &&
+        QMessageBox::question(this, "SlopCap", "Others are watching this camera. Stop sharing it and watch another?") != QMessageBox::Yes)
+        return;
+    stopSharing();
+    if (remote_) disconnectRemote();
+    if (cam_) {
+        disconnectCamera();
+        if (cam_) return;   // a recording is running and stays
+    }
+    remote_ = new net::RemoteClient(host, port, this);
+    connect(remote_, &net::RemoteClient::stateChanged, this, &MainWindow::onRemoteState);
+    connect(remote_, &net::RemoteClient::controlChanged, this, [this](const QString& name, double value) {
+        qInfo().noquote() << "control:" << name << "=" << value << "(set on" << remote_->serverName() + ")";
+        syncControlWidgets(name.toStdString(), value);
+    });
+    connect(remote_, &net::RemoteClient::statusChanged, this, &MainWindow::updateRemoteUi);
+    connect(remote_, &net::RemoteClient::linkChanged, this, [this] {
+        if (remote_->link() == net::RemoteClient::Link::Reconnecting) message(QString("Lost %1: reconnecting…").arg(remote_->serverName()));
+        else if (remote_->link() == net::RemoteClient::Link::Connected) message(QString("Watching %1").arg(remote_->serverName()));
+        populateCameraUi();
+        updateStats();
+    });
+    connect(remote_, &net::RemoteClient::notice, this, [this](const QString& text) { message(remote_->serverName() + ": " + text); });
+    remote_->start();
+    QSettings().setValue("remote/last", port && port != net::kStreamPort ? QString("%1:%2").arg(host).arg(port) : host);
+    populateCameraUi();
+    updateStats();
+}
+
+void MainWindow::connectFirstRemote() {
+    connectFirst_ = true;
+    ensureDiscovery();
+}
+
+void MainWindow::disconnectRemote() {
+    if (!remote_) return;
+    qInfo().noquote() << "remote: disconnected from" << remote_->serverName();
+    stopSession();
+    cam_.reset();
+    remote_->disconnect(this);
+    remote_->deleteLater();
+    remote_ = nullptr;
+    rawHist_->clear();
+    autoName_.clear();
+    autoDetail_.clear();
+    recBadge_->hide();
+    updateAutoTarget();
+    populateCameraUi();
+    updateStats();
+}
+
+void MainWindow::onRemoteState() {
+    stopSession();
+    cam_.reset();
+    if (remote_->hasCamera()) {
+        cam_ = std::make_unique<net::RemoteCamera>(*remote_);
+        const auto& i = cam_->info();
+        const Roi r = cam_->roi();
+        qInfo().noquote() << "camera: remote" << QString::fromStdString(i.vendor + " " + i.model) << "on" << remote_->serverName() << "·" << r.width << "x"
+                          << r.height << "·" << cam_->bitDepth() << "-bit ·" << bayerName(i.bayer);
+    } else {
+        qInfo().noquote() << "camera: none on" << remote_->serverName();
+    }
+    roiCentre_.reset();
+    roiCentreDirty_ = false;
+    populateCameraUi();
+    if (cam_) startSession(false);
+    updateAutoTarget();
+}
+
+QJsonObject MainWindow::remoteCameraState() const {
+    if (cameraState_.isEmpty()) return {{"camera", QJsonValue(QJsonValue::Null)}};
+    QJsonObject cam = cameraState_;
+    auto values = cam["values"].toObject();
+    for (const auto& [name, box] : controlBoxes_) values[QString::fromStdString(name)] = box->value();
+    cam["values"] = values;
+    return {{"camera", cam}};
+}
+
+QJsonObject MainWindow::remoteStatus() const {
+    QJsonObject s{{"recording", recording_}, {"limit", limit_->currentData().toInt()}, {"target", targetName()}};
+    if (session_) {
+        const auto st = session_->stats();
+        s["fps"] = st.captureFps;
+        s["dropped"] = static_cast<double>(st.cameraDropped + st.ringDropped);
+        if (recording_) s["seconds"] = st.seconds, s["frames"] = static_cast<double>(st.written);
+    }
+    s["file"] = recording_ ? QFileInfo(recordingPath_).fileName() : fileStem(QDateTime::currentDateTimeUtc()) + ".ser";
+    const QStorageInfo disk(QDir(outDir_).exists() ? outDir_ : QDir::homePath());
+    const double freeTB = static_cast<double>(disk.bytesAvailable()) / 1e12;
+    s["disk"] = freeTB >= 1 ? QString("%1 TB free").arg(freeTB, 0, 'f', 1) : QString("%1 GB free").arg(freeTB * 1000, 0, 'f', 0);
+    return s;
+}
+
+void MainWindow::showRemoteMenu() {
+    ensureDiscovery();
+    if (discovery_->servers().empty()) {   // the first look: give the answers a moment
+        discovery_->probeNow();
+        QElapsedTimer t;
+        t.start();
+        while (t.elapsed() < 400) QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+    }
+    QMenu menu(this);
+    if (remote_) {
+        menu.addAction(QString("Disconnect from %1").arg(remote_->serverName()), this, &MainWindow::disconnectRemote);
+    } else if (server_) {
+        menu.addAction("Stop sharing this camera", this, &MainWindow::stopSharing);
+        const auto v = server_->viewers();
+        if (v.empty()) menu.addAction(QString("No one is watching yet (port %1)").arg(server_->port()))->setEnabled(false);
+        for (const auto& x : v)
+            menu.addAction(QString("%1 (%2) · %3 Mbps · %4 fps · quality %5%6")
+                               .arg(x.host, x.address)
+                               .arg(x.mbps, 0, 'f', 1)
+                               .arg(x.fps, 0, 'f', 0)
+                               .arg(x.quality)
+                               .arg(x.scale > 1 ? QString(" · 1/%1 size").arg(x.scale) : QString()))
+                ->setEnabled(false);
+    } else {
+        menu.addAction("Share this camera on the network", this, [this] { startSharing(); });
+    }
+    menu.addSeparator();
+    menu.addAction("Watch a SlopCap on this network:")->setEnabled(false);
+    int listed = 0;
+    for (const auto& srv : discovery_->servers()) {
+        if (server_ && srv.local && srv.port == server_->port()) continue;   // ourselves
+        const QString addr = srv.address.toString() + (srv.port != net::kStreamPort ? QString(":%1").arg(srv.port) : QString());
+        QString text = QString("    %1 · %2 (%3)").arg(srv.name, srv.camera.isEmpty() ? "no camera" : srv.camera, addr);
+        if (srv.viewers) text += QString(" · %1 watching").arg(srv.viewers);
+        auto* a = menu.addAction(text);
+        a->setEnabled(!(remote_ && remote_->host() == srv.address.toString() && remote_->port() == srv.port));
+        connect(a, &QAction::triggered, this, [this, host = srv.address.toString(), port = srv.port] { connectRemote(host, port); });
+        ++listed;
+    }
+    if (!listed) menu.addAction(QString("    none found (same subnet; UDP %1 must be open on the server)").arg(net::kDiscoveryPort))->setEnabled(false);
+    menu.addAction("    Watch an address…", this, [this] {
+        bool ok = false;
+        const QString text = QInputDialog::getText(this, "SlopCap", "Watch the SlopCap at (host or host:port):", QLineEdit::Normal,
+                                                   QSettings().value("remote/last").toString(), &ok)
+                                 .trimmed();
+        if (!ok || text.isEmpty()) return;
+        // host, host:port, or [v6]:port
+        QString host = text;
+        quint16 port = 0;
+        const int colon = text.lastIndexOf(':');
+        if (colon > 0 && text.count(':') == 1) host = text.left(colon), port = static_cast<quint16>(text.mid(colon + 1).toUInt());
+        else if (text.startsWith('[') && text.contains("]:")) host = text.mid(1, text.indexOf(']') - 1), port = static_cast<quint16>(text.mid(text.indexOf("]:") + 2).toUInt());
+        connectRemote(host, port);
+    });
+    menu.exec(remotePill_->mapToGlobal(QPoint(0, remotePill_->height() + 4)));
+}
+
+void MainWindow::updateRemoteUi() {
+    if (!remotePill_) return;
+    QString pill = "⇄ Remote", badge, foot;
+    QColor colour = theme::kGood;
+    if (remote_) {
+        const QString name = remote_->serverName();
+        switch (remote_->link()) {
+            case net::RemoteClient::Link::Connected:
+                pill = "⇄ " + name;
+                badge = "⇄ LIVE FROM " + name.toUpper();
+                foot = QString("⇄ %1 Mbps · %2 fps · quality %3%4")
+                           .arg(remote_->mbps(), 0, 'f', 1)
+                           .arg(remote_->fps(), 0, 'f', 0)
+                           .arg(remote_->quality())
+                           .arg(remote_->scale() > 1 ? QString(" · 1/%1 size").arg(remote_->scale()) : QString());
+                break;
+            case net::RemoteClient::Link::Connecting:
+                pill = "⇄ " + name + " · connecting…";
+                badge = "⇄ CONNECTING TO " + name.toUpper() + "…";
+                colour = theme::kAccent;
+                break;
+            case net::RemoteClient::Link::Reconnecting:
+                pill = "⇄ " + name + " · reconnecting…";
+                badge = "⇄ LINK LOST · RECONNECTING TO " + name.toUpper() + "…";
+                foot = "⇄ reconnecting";
+                colour = theme::kRecText;
+                break;
+        }
+    } else if (server_) {
+        const auto v = server_->viewers();
+        if (v.empty()) {
+            pill = "⇄ Sharing";
+            badge = "⇄ SHARING · NO VIEWERS";
+            colour = theme::kMuted;
+            foot = QString("⇄ sharing on port %1").arg(server_->port());
+        } else {
+            QStringList names;
+            for (const auto& x : v) names << (x.host.isEmpty() ? x.address : x.host);
+            pill = QString("⇄ Sharing · %1 watching").arg(v.size());
+            badge = "⇄ SHARED WITH " + names.join(", ").toUpper();
+            foot = QString("⇄ %1 Mbps to %2").arg(server_->mbps(), 0, 'f', 1).arg(v.size() == 1 ? names[0] : QString("%1 viewers").arg(v.size()));
+            if (v.size() == 1)
+                foot += QString(" · %1 fps · quality %2%3").arg(v[0].fps, 0, 'f', 0).arg(v[0].quality).arg(v[0].scale > 1 ? QString(" · 1/%1 size").arg(v[0].scale) : QString());
+        }
+    }
+    remotePill_->setText(pill);
+    fRemote_->setText(foot);
+    fRemote_->setVisible(!foot.isEmpty());
+    remoteBadge_->setVisible(!badge.isEmpty());
+    if (badge.isEmpty()) return;
+    if (remoteBadge_->property("colour").toString() != colour.name()) {
+        remoteBadge_->setStyleSheet(badgeStyle(colour, colour));
+        remoteBadge_->setProperty("colour", colour.name());
+    }
+    remoteBadge_->setText(badge);
+    remoteBadge_->adjustSize();
+    remoteBadge_->move(preview_->width() - remoteBadge_->width() - 12, 12);
+    remoteBadge_->raise();
+}
+
+/// The footer, record button and REC badge of a remote camera: the server's recording, the link.
+void MainWindow::updateClientStats() {
+    const auto& st = remote_->status();
+    const QString name = remote_->serverName();
+    const bool up = remote_->link() == net::RemoteClient::Link::Connected && cam_;
+    const bool rec = up && st["recording"].toBool();
+    fState_->setText(rec ? "● Recording on " + name : up ? "⇄ Watching " + name : "⇄ " + name + "…");
+    fState_->setStyleSheet(rec ? QString("color: %1; font-weight: 600;").arg(theme::kRecText.name()) : "");
+    const double secs = st["seconds"].toDouble();
+    const int lim = st["limit"].toInt();
+    record_->setText(rec ? "■  Stop · " + mmss(secs) : "●  Record on " + name);
+    const char* variant = rec ? "stop" : "record";
+    if (record_->property("variant").toString() != variant) {
+        record_->setProperty("variant", variant);
+        theme::restyle(record_);
+    }
+    if (!up) {
+        for (auto* l : {fFps_, fDropped_, fRing_, fFrames_, fDisplay_, fDisk_}) l->clear();
+        recBadge_->hide();
+        return;
+    }
+    fFps_->setText(QString("<span style='color:%1'>%2</span> fps at the camera").arg(theme::kText.name()).arg(st["fps"].toDouble(), 0, 'f', 1));
+    const auto dropped = static_cast<qint64>(st["dropped"].toDouble());
+    fDropped_->setText(QString("%1 dropped").arg(dropped));
+    fDropped_->setStyleSheet(QString("color: %1").arg((dropped ? theme::kRecText : theme::kGood).name()));
+    fRing_->clear();
+    fDisk_->setText(QString("%1: %2").arg(name, st["disk"].toString()));
+    fFrames_->setText(rec ? QString("%1 frames").arg(thousands(st["frames"].toDouble())) : QString());
+    fDisplay_->setText(QString("preview %1 fps").arg(preview_->displayFps(), 0, 'f', 0));
+    nextFile_->setText(QString("Recordings stay on %1: %2").arg(name, st["file"].toString()));
+    if (rec) {
+        recBadge_->setText(QString("● REC on %1 · %2").arg(name, mmss(secs) + (lim > 0 ? " / " + mmss(lim) : QString())));
+        recBadge_->adjustSize();
+        recBadge_->show();
+        recBadge_->raise();
+    } else {
+        recBadge_->hide();
+    }
+}
+
+// ================================================================ full view
+
+void MainWindow::showFullViewMenu() {
+    if (fullView_) {
+        setFullView(false);
+        return;
+    }
+    const auto screens = QGuiApplication::screens();
+    if (screens.size() < 2) {
+        setFullView(true);
+        return;
+    }
+    QMenu menu(this);
+    for (QScreen* sc : screens) {
+        QString label = (sc->manufacturer() + " " + sc->model()).trimmed();
+        if (label.isEmpty()) label = sc->name();
+        menu.addAction(QString("Full screen on %1 · %2 × %3%4")
+                           .arg(label)
+                           .arg(sc->geometry().width())
+                           .arg(sc->geometry().height())
+                           .arg(sc == screen() ? "  (this window's screen)" : ""),
+                       this, [this, sc] { setFullView(true, sc); });
+    }
+    menu.exec(QCursor::pos());
+}
+
+void MainWindow::setFullView(bool on, QScreen* target) {
+    if (on == fullView_) return;
+    if (on && mode_ == Focus) setMode(Capture);   // the full view is the live preview
+    fullView_ = on;
+    for (QWidget* w : {header_, footer_, toolbar_, strip_, static_cast<QWidget*>(left_), static_cast<QWidget*>(right_)}) w->setVisible(!on);
+    previewHolder_->layout()->setContentsMargins(on ? QMargins() : QMargins(20, 20, 20, 20));
+    escape_->setEnabled(on);
+    preview_->setMouseTracking(on);   // moves without a button wake the control bar
+    if (on) {
+        normalGeometry_ = saveGeometry();
+        wasMaximized_ = isMaximized();
+        if (target && target != screen()) {
+            if (isMaximized() || isFullScreen()) showNormal();
+            setGeometry(target->availableGeometry().adjusted(40, 40, -40, -40));
+        }
+        showFullScreen();
+        fullBar_->show();
+        syncFullBar();
+        fullBar_->place();
+        fullIdle_.start(3000);
+        qApp->installEventFilter(this);
+        qInfo().noquote() << "view: full screen on" << screen()->name();
+    } else {
+        qApp->removeEventFilter(this);
+        fullIdle_.stop();
+        fullBar_->hide();
+        preview_->unsetCursor();
+        showNormal();
+        restoreGeometry(normalGeometry_);
+        if (wasMaximized_) showMaximized();
+        qInfo().noquote() << "view: windowed";
+    }
+}
+
+void MainWindow::syncFullBar() {
+    if (!fullView_) return;
+    auto* r = fullBar_->record;
+    r->setText(record_->text());
+    r->setEnabled(record_->isEnabled());
+    if (r->property("variant") != record_->property("variant")) {
+        r->setProperty("variant", record_->property("variant"));
+        theme::restyle(r);
+    }
+    fullBar_->link->setText(fRemote_->text());
+    fullBar_->link->setVisible(!fRemote_->text().isEmpty());
+    if (auto* b = fullBar_->stretch->button(stretch_->checkedId())) b->setChecked(true);
+    if (fullBar_->isVisible()) fullBar_->place();
+}
+
+bool MainWindow::eventFilter(QObject* o, QEvent* e) {
+    if (o == preview_ && e->type() == QEvent::Resize) {
+        if (remoteBadge_->isVisible()) remoteBadge_->move(preview_->width() - remoteBadge_->width() - 12, 12);
+        if (fullBar_->isVisible()) fullBar_->place();
+    }
+    if (fullView_ && e->type() == QEvent::MouseMove) {
+        if (!fullBar_->isVisible()) {
+            fullBar_->show();
+            syncFullBar();
+            fullBar_->place();
+            preview_->unsetCursor();
+        }
+        fullIdle_.start(3000);
+    }
+    return QMainWindow::eventFilter(o, e);
 }
 
 void MainWindow::closeEvent(QCloseEvent* e) {

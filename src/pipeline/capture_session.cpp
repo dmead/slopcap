@@ -146,6 +146,7 @@ void CaptureSession::captureLoop() {
                 r = cam_.readFrame(slot.pixels, slot.info, std::chrono::milliseconds(250));
                 if (r == ReadResult::Ok) {
                     if (opt_.preview && opt_.preview->wanted()) opt_.preview->publish(slot.pixels.first(slot.info.bytes), slot.info);
+                    if (opt_.remote && opt_.remote->wanted()) opt_.remote->publish(slot.pixels.first(slot.info.bytes), slot.info);
                     ring_->publish(*held);
                     held.reset();
                     delivered_.fetch_add(1, std::memory_order_relaxed);
@@ -155,6 +156,7 @@ void CaptureSession::captureLoop() {
                 r = cam_.readFrame(scratch_, fi, std::chrono::milliseconds(250));
                 if (r == ReadResult::Ok) {
                     if (opt_.preview && opt_.preview->wanted()) opt_.preview->publish(std::span(scratch_).first(fi.bytes), fi);
+                    if (opt_.remote && opt_.remote->wanted()) opt_.remote->publish(std::span(scratch_).first(fi.bytes), fi);
                     delivered_.fetch_add(1, std::memory_order_relaxed);
                     if (recording) ringDropped_.fetch_add(1, std::memory_order_relaxed);
                 }

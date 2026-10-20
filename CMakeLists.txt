@@ -122,6 +122,11 @@ if(SLOPCAP_BUILD_GUI)
     set_target_properties(slopcap_devices PROPERTIES AUTOMOC ON)
     target_include_directories(slopcap_devices PUBLIC src)
     target_link_libraries(slopcap_devices PUBLIC Qt6::Core Qt6::Network PRIVATE slopcap_warnings)
+    # Remote viewing: one SlopCap shares its camera, others watch and steer it (src/net/protocol.hpp).
+    add_library(slopcap_net STATIC src/net/protocol.cpp src/net/frame_codec.cpp src/net/discovery.cpp src/net/remote_server.cpp
+      src/net/remote_client.cpp src/net/rate_control.cpp)
+    set_target_properties(slopcap_net PROPERTIES AUTOMOC ON)
+    target_link_libraries(slopcap_net PUBLIC slopcap_core Qt6::Gui Qt6::Network PRIVATE slopcap_warnings)
     add_library(slopcap_gui STATIC
       src/preview/gl_renderer.cpp
       src/preview/preview_widget.cpp
@@ -134,7 +139,7 @@ if(SLOPCAP_BUILD_GUI)
     # qt_add_executable: with a static Qt it also links the platform plugin (qwindows) into the exe
     qt_add_executable(slopcap WIN32 src/app/main.cpp src/app/main_window.cpp src/app/theme.cpp src/app/focus_controller.cpp
       src/app/focus_views.cpp src/app/collimation_panel.cpp src/app/settings_dialog.cpp src/app/mount_section.cpp
-      src/app/raw_histogram.cpp src/app/session_log.cpp)
+      src/app/raw_histogram.cpp src/app/session_log.cpp src/app/full_view_bar.cpp)
     set_target_properties(slopcap PROPERTIES AUTOMOC ON)
     # The build's git version, for the session log ("unknown" outside a checkout, or when git refuses one it doesn't own).
     execute_process(COMMAND git -c safe.directory=* describe --always --dirty WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -168,7 +173,14 @@ if(SLOPCAP_BUILD_GUI)
       qt_add_resources(slopcap sdk PREFIX /sdk BIG_RESOURCES FILES ${sdk_files})
       target_compile_definitions(slopcap PRIVATE SLOPCAP_EMBEDDED_SDK)
     endif()
-    target_link_libraries(slopcap PRIVATE slopcap_gui slopcap_warnings)
+    target_link_libraries(slopcap PRIVATE slopcap_gui slopcap_net slopcap_warnings)
+    # The remote stream's JPEG codec: make sure a static Qt links the plugin.
+    if(TARGET Qt6::QJpegPlugin)
+      get_target_property(_qt_core_type Qt6::Core TYPE)
+      if(_qt_core_type STREQUAL "STATIC_LIBRARY")
+        qt_import_plugins(slopcap INCLUDE Qt6::QJpegPlugin)
+      endif()
+    endif()
   else()
     message(STATUS "Qt 6 (Widgets, OpenGL, OpenGLWidgets) not found: GUI not built (Linux: apt install qt6-base-dev)")
   endif()
@@ -193,6 +205,9 @@ if(SLOPCAP_BUILD_TESTS)
       add_executable(slopcap-qt-tests tests/test_indi.cpp)
       target_link_libraries(slopcap-qt-tests PRIVATE slopcap_devices slopcap_warnings Catch2::Catch2)
       add_test(NAME indi-devices COMMAND slopcap-qt-tests)
+      add_executable(slopcap-net-tests tests/test_remote.cpp)
+      target_link_libraries(slopcap-net-tests PRIVATE slopcap_net slopcap_warnings Catch2::Catch2)
+      add_test(NAME remote COMMAND slopcap-net-tests)
       set_tests_properties(indi-devices PROPERTIES SKIP_RETURN_CODE 4)   # Catch2's "all skipped" (no INDI installed)
       set_tests_properties(gl-render PROPERTIES ENVIRONMENT
         "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/sanitizers/lsan-gl.supp")

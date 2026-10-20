@@ -15,14 +15,15 @@ Status: **M1 in progress**: capture pipeline + ZWO / QHY backends; ZWO verified 
 | `src/pipeline/frame_ring.*` | `FrameRing`: pre-allocated, page-aligned frame slots passed capture → writer lock-free |
 | `src/pipeline/capture_session.*` | `CaptureSession`: capture thread + SER writer thread; counts camera drops vs ring drops |
 | `src/camera/asi_camera.*`, `qhy_camera.*` | ZWO and QHY backends (built when their SDKs are found) |
-| `src/camera/open_camera.*` | open a camera from a spec: `asi[:N]`, `qhy[:N]`, `sim:FILE.ser` |
+| `src/camera/open_camera.*` | open a camera from a spec: `asi[:N]`, `qhy[:N]`, `sim:FILE.ser`, `sim-loop:FILE.ser` (replays forever) |
 | `src/preview/` | `LatestFrame` tap, CPU reference debayer/stretch/histogram, `GlRenderer` (GPU), preview + histogram widgets |
-| `src/app/` | `slopcap`: the GUI. `slopcap --camera SPEC [--out DIR] [--record] [--quit-after S --screenshot F.png]` |
+| `src/app/` | `slopcap`: the GUI. `slopcap --camera SPEC [--out DIR] [--record] [--serve \| --connect HOST] [--fullscreen] [--quit-after S --screenshot F.png]` |
 | `tools/bench` | `slopcap-bench --camera SPEC …` / `--sim FILE.ser` / `--list`: record through the full pipeline and report fps / drops / ring peak / MB/s |
 | `tools/serinfo` | `slopcap-serinfo FILE.ser…`: header, frames vs header, timestamps, real frame rate, longest gap |
 | `tools/camprobe` | `slopcap-camprobe [--json]`: what each connected ZWO / QHY camera reports (fixtures from real cameras inside) |
 | `src/analysis/` | per-channel focus scoring (4 metrics), focus sweep fits, defocused-star collimation, low-precision ephemerides (Moon, Mars to Neptune) and target identification |
 | `src/devices/` | minimal INDI client (Qt Network), a backlash-aware focuser, and a mount (guide pulses, axis moves, goto, park, tracking) |
+| `src/net/` | remote viewing: one SlopCap shares its camera, others watch and steer it (protocol, JPEG frame codec, discovery, rate control) |
 | `tools/diag` | `slopcap-diag FILE.ser…`: optical diagnostics from planetary recordings |
 | `tools/focusbench` | `slopcap-focusbench FILE.ser [frames] [metric]`: time the focus scorer |
 | `tests/` | Catch2 unit tests; `slopcap-gl-tests` checks the GPU preview against the CPU reference |
@@ -62,6 +63,36 @@ their measurements.
 
 Afterwards: `slopcap-diag --png OUT/ *.ser` stacks the best frames of each recording and reports dispersion, limb
 sharpness per channel and side, halo and jitter.
+
+## Remote viewing (outreach nights)
+
+One SlopCap shares its camera (the **server**: the computer with the USB connection), others watch it (**clients**:
+e.g. a laptop on a projector across the field). Any build (Windows, Linux) can be either.
+
+- **Server:** "⇄ Remote" at the top → *Share this camera on the network* (or `slopcap --camera qhy --serve`).
+- **Client:** "⇄ Remote" → pick the server from the list (same subnet), or *Watch an address…* with `192.168.1.20`
+  (or `slopcap --connect 192.168.1.20`, `--connect auto` for the first one found).
+- Either side can change gain, exposure and every other control; the other side's UI follows. ROI, bit depth and
+  readout changes from a client are applied by the server. **Record** on a client records *on the server*: raw files
+  never leave it, and the client shows the server's file, time and frame count.
+- Both sides show a badge over the video while a link is up (LIVE FROM … / SHARED WITH …) and the stream's Mbps in
+  the bottom bar. A dropped link reconnects by itself.
+- **Full screen** (toolbar button or F11; Esc leaves): the preview over a whole screen; with several screens, pick
+  which. Gain, exposure, stretch and record sit in a bar that hides itself (and the cursor) after 3 s; move the mouse
+  to bring it back.
+- The stream is the raw frame, lossy: each Bayer site as its own JPEG plane, 16-bit through a square-root curve. It
+  runs at up to 30 fps and adapts per viewer: on a slow link the JPEG quality drops, then the frame shrinks to 1/2 or
+  1/4; a slow viewer keeps its quality. Each change and its reason goes to the session log (`remote: … quality`).
+
+Ports: TCP 45720 (the stream; the next free one up to 45729 if taken) and UDP 45721 (discovery). On Windows the server
+needs both allowed in, e.g. as admin:
+
+```powershell
+New-NetFirewallRule -DisplayName "SlopCap remote" -Direction Inbound -Program "C:\Users\<you>\slopcap\slopcap.exe" -Action Allow -Profile Private,Domain
+```
+
+The protocol is described at the top of `src/net/protocol.hpp`. `tools/remote-test.sh FILE.ser` tests it end to end in
+three containers on one Docker network (an observatory server, a desktop client, a projector client in full view).
 
 ## Build in Docker (any machine)
 

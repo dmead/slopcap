@@ -1,11 +1,14 @@
 // slopcap: the capture application.
 //   slopcap [--camera SPEC] [--out DIR] [--record] [--screenshot FILE.png] [--quit-after SECONDS]
+//   slopcap --camera SPEC --serve        share the camera with other SlopCaps on the network
+//   slopcap --connect HOST[:PORT]|auto   watch (and steer) another SlopCap's camera
 #include "app/main_window.hpp"
 #include "app/session_log.hpp"
 #include "app/theme.hpp"
 
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QSettings>
 #include <QSurfaceFormat>
 #include <QSysInfo>
 #include <QTimer>
@@ -63,6 +66,7 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QApplication::setOrganizationName("SlopCap");
     QApplication::setApplicationName("SlopCap");
+    QApplication::setApplicationVersion(SLOPCAP_GIT);
     const QString logFile = slopcap::app::sessionlog::start();
     qInfo().noquote() << "SlopCap" << SLOPCAP_GIT << "· Qt" << qVersion() << "·" << QSysInfo::prettyProductName() << "·"
                       << QSysInfo::machineHostName() << "· args:" << QCoreApplication::arguments().mid(1).join(' ');
@@ -85,9 +89,22 @@ int main(int argc, char** argv) {
     args.addOption({"sweep-range", "Sweep +- STEPS around the current position.", "STEPS"});
     args.addOption({"sweep-step", "Sweep step size.", "STEPS"});
     args.addOption({"sweep-frames", "Frames per sweep position.", "N"});
+    args.addOption({"serve", "Share the camera with other SlopCaps on the network (remote viewing)."});
+    args.addOption({"listen", "Share on this address only (implies --serve), e.g. 127.0.0.1.", "ADDRESS"});
+    args.addOption({"connect", "Watch another SlopCap's camera: HOST[:PORT], or auto for the first one found on the network.", "HOST"});
+    args.addOption({"set", "Set a camera control SECONDS after start (default 3): NAME=VALUE[@SECONDS]; Record=1 / Record=0 "
+                    "starts / stops recording. Repeatable.", "SPEC"});
+    args.addOption({"fullscreen", "Start in full view: the preview over the whole screen."});
     args.addOption({"screenshot", "Save a picture of the window to FILE just before quitting (with --quit-after).", "FILE"});
+    args.addOption({"snapshot", "At SECONDS, save a picture of the window to FILE and print the status line (keeps running). Repeatable.",
+                    "SECONDS:FILE"});
     args.addOption({"quit-after", "Quit after SECONDS (for smoke tests and screenshots).", "SECONDS"});
+    args.addOption({"settings", "Keep settings in an INI file under DIR instead of the user's (tests; a second instance on one machine).", "DIR"});
     args.process(app);
+    if (args.isSet("settings")) {
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, args.value("settings"));
+    }
 
     slopcap::app::MainWindow w;
     if (args.isSet("out")) w.setOutputDir(args.value("out"));
@@ -99,6 +116,29 @@ int main(int argc, char** argv) {
     if (args.isSet("camera")) w.connectCamera(args.value("camera"));
     if (args.isSet("record")) w.toggleRecording();
     if (args.isSet("tab")) w.showTab(args.value("tab"));
+    if (args.isSet("serve") || args.isSet("listen")) w.startSharing(args.value("listen"));
+    if (args.isSet("connect")) {
+        const QString c = args.value("connect");
+        if (c == "auto") w.connectFirstRemote();
+        else if (c.count(':') == 1) w.connectRemote(c.section(':', 0, 0), static_cast<quint16>(c.section(':', 1).toUInt()));
+        else w.connectRemote(c);
+    }
+    for (const QString& spec : args.values("set")) {
+        const QString name = spec.section('=', 0, 0).trimmed();
+        const QString rest = spec.section('=', 1);
+        const double value = rest.section('@', 0, 0).toDouble();
+        const double after = rest.contains('@') ? rest.section('@', 1).toDouble() : 3;
+        QTimer::singleShot(static_cast<int>(after * 1000), &w, [&w, name, value] { w.setNamedControl(name, value); });
+    }
+    if (args.isSet("fullscreen")) w.setFullView(true);
+    for (const QString& spec : args.values("snapshot")) {
+        const double at = spec.section(':', 0, 0).toDouble();
+        const QString file = spec.section(':', 1, -1);   // the rest: a Windows path has its own colon
+        QTimer::singleShot(static_cast<int>(at * 1000), &w, [&w, file] {
+            w.grab().save(file);
+            w.printSummary();
+        });
+    }
     if (args.isSet("focuser"))
         w.startFocuser(args.value("focuser"), args.isSet("sweep"), args.value("sweep-range").toInt(), args.value("sweep-step").toInt(),
                        args.value("sweep-frames").toInt());

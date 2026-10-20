@@ -42,6 +42,7 @@ int indexOf(std::string_view spec, std::string_view prefix) {
 
 std::unique_ptr<ICamera> openCamera(std::string_view spec) {
     if (spec.starts_with("sim:")) return std::make_unique<SimCamera>(std::string(spec.substr(4)));
+    if (spec.starts_with("sim-loop:")) return std::make_unique<SimCamera>(std::string(spec.substr(9)), SimOptions{SimPace::Realtime, true});
     if (spec.starts_with("sim-fast:")) return std::make_unique<SimCamera>(std::string(spec.substr(9)), SimOptions{SimPace::AsFastAsPossible});
     if (spec.starts_with("asi")) {
 #ifdef SLOPCAP_HAVE_ASI

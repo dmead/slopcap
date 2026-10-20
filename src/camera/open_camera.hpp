@@ -1,5 +1,6 @@
 // Open any camera from a short spec, for tools and tests:
 //   "sim:FILE.ser"  replay a recording in real time      "sim-fast:FILE.ser"  as fast as possible
+//   "sim-loop:FILE.ser"  in real time, over and over (demos, long tests)
 //   "asi" / "asi:N" ZWO camera N (default 0)            "qhy" / "qhy:N"       QHY camera N
 #pragma once
 

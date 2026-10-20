@@ -32,6 +32,7 @@ struct CaptureOptions {
     bool directIO = false;                              ///< unbuffered chunked writer (ser::DirectWriter)
     ser::DirectWriterOptions direct;                    ///< its chunk size, in-flight count, preallocation
     LatestFrame* preview = nullptr;                     ///< if set, the capture thread copies a frame in whenever it asks
+    LatestFrame* remote = nullptr;                      ///< the same for the remote stream (net::RemoteServer::tap)
 };
 
 struct CaptureStats {
