@@ -410,7 +410,9 @@ TEST_CASE("a client watches and steers a server's camera over loopback") {
     const auto scene = bayerScene(320, 240);
     CHECK(std::abs(sample8(f->pixels, 320, 101, 51) - sample8(scene, 320, 101, 51)) < 12);   // a B site stays B
     CHECK(server.viewers().size() == 1);
-    CHECK(server.viewers()[0].host == QSysInfo::machineHostName());
+    CHECK(server.viewers()[0].host == net::machineName());
+    CHECK(QSysInfo::machineHostName().startsWith(net::machineName()));
+    CHECK_FALSE(net::machineName().contains('.'));   // no DNS domain (macOS hosts report one)
 
     // the client asks, the server decides
     rcam.setControl("Gain", 123);   // as the GUI does: from the capture thread, through the camera

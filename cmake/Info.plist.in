@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- SlopCap.app's Info.plist (CMake fills the ${...} values). -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleExecutable</key>
+  <string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+  <key>CFBundleIdentifier</key>
+  <string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
+  <key>CFBundleName</key>
+  <string>SlopCap</string>
+  <key>CFBundleDisplayName</key>
+  <string>SlopCap</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
+  <key>CFBundleVersion</key>
+  <string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+  <key>CFBundleGetInfoString</key>
+  <string>${MACOSX_BUNDLE_INFO_STRING}</string>
+  <key>CFBundleIconFile</key>
+  <string>${MACOSX_BUNDLE_ICON_FILE}</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.photography</string>
+  <key>NSPrincipalClass</key>
+  <string>NSApplication</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key>
+  <true/>
+  <!-- App Nap would throttle the capture and the remote stream whenever the window is hidden or in the background. -->
+  <key>NSAppSleepDisabled</key>
+  <true/>
+  <!-- Asked once, the first time SlopCap reaches the local network (remote viewing, an INDI server on another machine). -->
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>SlopCap shares a camera with other SlopCaps (remote viewing) and talks to the focuser and mount through INDI servers on your network.</string>
+</dict>
+</plist>

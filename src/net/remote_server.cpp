@@ -6,7 +6,6 @@
 #include <QCoreApplication>
 #include <QJsonDocument>
 #include <QNetworkDatagram>
-#include <QSysInfo>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QUdpSocket>
@@ -19,7 +18,7 @@ namespace {
 
 QJsonObject hello(const char* role) {
     return {{"proto", kProtocol}, {"app", "SlopCap"}, {"version", QCoreApplication::applicationVersion()},
-            {"host", QSysInfo::machineHostName()}, {"role", role}};
+            {"host", machineName()}, {"role", role}};
 }
 
 QString plainAddress(const QHostAddress& a) {
@@ -118,7 +117,7 @@ void RemoteServer::answerProbes() {
         const QNetworkDatagram d = udp_->receiveDatagram();
         if (!d.data().startsWith("SLOPCAP?")) continue;
         const QJsonObject a{{"slopcap", kProtocol},
-                            {"name", QSysInfo::machineHostName()},
+                            {"name", machineName()},
                             {"port", tcp_ ? tcp_->serverPort() : 0},
                             {"camera", cameraName_},
                             {"viewers", static_cast<int>(viewers().size())}};

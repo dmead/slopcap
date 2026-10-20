@@ -2,6 +2,7 @@
 
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QSysInfo>
 #include <QtEndian>
 
 #include <array>
@@ -44,6 +45,12 @@ void putU32(QByteArray& b, uint32_t v) {
 }
 
 }  // namespace
+
+QString machineName() {
+    const QString full = QSysInfo::machineHostName();
+    const QString shortName = full.section('.', 0, 0);
+    return shortName.isEmpty() ? full : shortName;
+}
 
 QString bayerToString(Bayer b) {
     switch (b) {

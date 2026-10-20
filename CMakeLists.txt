@@ -95,6 +95,9 @@ else()
   endif()
 endif()
 get_target_property(_defs slopcap_core INTERFACE_COMPILE_DEFINITIONS)
+if(NOT _defs)
+  set(_defs "none (no camera SDK found: replays and remote viewing only)")
+endif()
 message(STATUS "SlopCap camera backends: ${_defs}")
 
 # ---------------------------------------------------------------- tools
@@ -137,7 +140,7 @@ if(SLOPCAP_BUILD_GUI)
     add_executable(slopcap-diag tools/diag/main.cpp)
     target_link_libraries(slopcap-diag PRIVATE slopcap_core Qt6::Gui slopcap_warnings)
     # qt_add_executable: with a static Qt it also links the platform plugin (qwindows) into the exe
-    qt_add_executable(slopcap WIN32 src/app/main.cpp src/app/main_window.cpp src/app/theme.cpp src/app/focus_controller.cpp
+    qt_add_executable(slopcap WIN32 MACOSX_BUNDLE src/app/main.cpp src/app/main_window.cpp src/app/theme.cpp src/app/focus_controller.cpp
       src/app/focus_views.cpp src/app/collimation_panel.cpp src/app/settings_dialog.cpp src/app/mount_section.cpp
       src/app/raw_histogram.cpp src/app/session_log.cpp src/app/full_view_bar.cpp)
     set_target_properties(slopcap PROPERTIES AUTOMOC ON)
@@ -148,6 +151,16 @@ if(SLOPCAP_BUILD_GUI)
       set(SLOPCAP_GIT unknown)
     endif()
     target_compile_definitions(slopcap PRIVATE SLOPCAP_GIT="${SLOPCAP_GIT}")
+    # macOS: build/<preset>/SlopCap.app. tools/macos-app.sh makes it self-contained (Qt inside) and signs it.
+    if(APPLE)
+      set_target_properties(slopcap PROPERTIES
+        OUTPUT_NAME SlopCap
+        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Info.plist.in
+        MACOSX_BUNDLE_GUI_IDENTIFIER org.slopcap.SlopCap
+        MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
+        MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+        MACOSX_BUNDLE_INFO_STRING "SlopCap ${SLOPCAP_GIT}")
+    endif()
     # The UI fonts (IBM Plex, OFL), embedded when the build machine has them, so every install looks the same.
     set(SLOPCAP_FONT_DIR /usr/share/fonts/truetype/ibm-plex CACHE PATH "folder with the IBM Plex TTFs to embed")
     set(font_files "")
@@ -209,7 +222,7 @@ if(SLOPCAP_BUILD_TESTS)
       target_link_libraries(slopcap-net-tests PRIVATE slopcap_net slopcap_warnings Catch2::Catch2)
       add_test(NAME remote COMMAND slopcap-net-tests)
       set_tests_properties(indi-devices PROPERTIES SKIP_RETURN_CODE 4)   # Catch2's "all skipped" (no INDI installed)
-      set_tests_properties(gl-render PROPERTIES ENVIRONMENT
+      set_tests_properties(gl-render PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT   # 4: no screen at all (macOS over SSH)
         "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/sanitizers/lsan-gl.supp")
     endif()
   else()

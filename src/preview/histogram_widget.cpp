@@ -20,7 +20,7 @@ void HistogramWidget::setData(const std::array<uint32_t, 256>& histogram, const 
 void HistogramWidget::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
-    const QRectF frame = rect().adjusted(0.5, 0.5, -0.5, -0.5);
+    const QRectF frame = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
     p.setPen(QPen(QColor(0x23, 0x27, 0x2d), 1));
     p.setBrush(QColor(0x15, 0x18, 0x1c));
     p.drawRoundedRect(frame, 6, 6);

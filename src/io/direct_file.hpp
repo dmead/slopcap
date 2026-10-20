@@ -1,5 +1,5 @@
 // A file opened for unbuffered ("direct") I/O: writes bypass the OS page cache.
-// Linux: O_DIRECT. Windows: FILE_FLAG_NO_BUFFERING, opened overlapped so several threads
+// Linux: O_DIRECT. macOS: F_NOCACHE. Windows: FILE_FLAG_NO_BUFFERING, opened overlapped so several threads
 // can have writes in flight on one handle.
 // Every write must have its buffer address, length and file offset aligned to kAlign (4096 covers 512- and
 // 4096-byte-sector disks). writeAt() may be called from several threads at once for different offsets.

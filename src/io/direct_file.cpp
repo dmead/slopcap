@@ -84,7 +84,17 @@ void DirectFile::truncate(uint64_t size) {
 #else
 
 DirectFile::DirectFile(const std::filesystem::path& path) {
+#ifdef __APPLE__
+    // macOS has no O_DIRECT: F_NOCACHE on the open file keeps its writes out of the unified buffer cache.
+    fd_ = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd_ >= 0 && ::fcntl(fd_, F_NOCACHE, 1) != 0) {
+        const int e = errno;
+        ::close(fd_);
+        throw std::system_error(e, std::generic_category(), "direct open (F_NOCACHE) " + path.string());
+    }
+#else
     fd_ = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT | O_CLOEXEC, 0644);
+#endif
     if (fd_ < 0) throw std::system_error(errno, std::generic_category(), "direct open " + path.string());
 }
 
@@ -110,8 +120,14 @@ void DirectFile::writeAt(std::span<const std::byte> data, uint64_t offset) {
 }
 
 bool DirectFile::reserve(uint64_t bytes) {
-#ifdef FALLOC_FL_KEEP_SIZE
+#if defined(FALLOC_FL_KEEP_SIZE)
     return ::fallocate(fd_, FALLOC_FL_KEEP_SIZE, 0, static_cast<off_t>(bytes)) == 0;
+#elif defined(F_PREALLOCATE)
+    // Allocated past the physical end of file; the visible size stays put. Contiguous if the disk can, else any.
+    fstore_t st{F_ALLOCATECONTIG | F_ALLOCATEALL, F_PEOFPOSMODE, 0, static_cast<off_t>(bytes), 0};
+    if (::fcntl(fd_, F_PREALLOCATE, &st) == 0) return true;
+    st.fst_flags = F_ALLOCATEALL;
+    return ::fcntl(fd_, F_PREALLOCATE, &st) == 0;
 #else
     (void)bytes;
     return false;

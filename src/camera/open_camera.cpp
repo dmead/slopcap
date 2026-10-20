@@ -20,7 +20,8 @@ namespace {
 
 /// On Windows the SDK DLLs are delay-loaded (cmake/DelayImport.cmake): calling into one that can't be loaded would
 /// crash, so check first. A DLL the GUI already loaded from its embedded copy is found by name.
-bool sdkLoads([[maybe_unused]] const char* dll) {
+/// (Both helpers go unused in a build with no camera SDK at all, e.g. macOS without the vendor SDKs.)
+[[maybe_unused]] bool sdkLoads([[maybe_unused]] const char* dll) {
 #ifdef _WIN32
     return LoadLibraryA(dll) != nullptr;   // the loader keeps one reference per module; this just bumps it
 #else
@@ -28,7 +29,7 @@ bool sdkLoads([[maybe_unused]] const char* dll) {
 #endif
 }
 
-int indexOf(std::string_view spec, std::string_view prefix) {
+[[maybe_unused]] int indexOf(std::string_view spec, std::string_view prefix) {
     if (spec.size() == prefix.size()) return 0;
     if (spec[prefix.size()] != ':') throw CameraError(std::format("bad camera spec '{}'", spec));
     try {

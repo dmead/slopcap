@@ -3,7 +3,6 @@
 #include "net/frame_codec.hpp"
 
 #include <QCoreApplication>
-#include <QSysInfo>
 #include <QTcpSocket>
 
 namespace slopcap::net {
@@ -98,7 +97,7 @@ void RemoteClient::connectNow() {
 void RemoteClient::onConnected() {
     socket_->setSocketOption(QAbstractSocket::LowDelayOption, 1);
     socket_->write(packJson(Msg::Hello, {{"proto", kProtocol}, {"app", "SlopCap"}, {"version", QCoreApplication::applicationVersion()},
-                                          {"host", QSysInfo::machineHostName()}, {"role", "client"}}));
+                                          {"host", machineName()}, {"role", "client"}}));
 }
 
 void RemoteClient::onDropped() {

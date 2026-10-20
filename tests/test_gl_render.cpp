@@ -1,5 +1,6 @@
 // The GPU preview (pass 1 of GlRenderer) must produce what render_cpu produces, to within float rounding.
-// Needs an OpenGL 3.3 context: a display, or Xvfb + Mesa (docker/build.sh runs these under xvfb-run).
+// Needs an OpenGL 3.3 context: a display, or Xvfb + Mesa (docker/build.sh runs these under xvfb-run). With no screen at
+// all (macOS over SSH: only the user logged in at the Mac reaches the window server) the tests are skipped.
 #include "preview/gl_renderer.hpp"
 #include "preview/render_cpu.hpp"
 
@@ -12,6 +13,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <cstdio>
 #include <cstdlib>
 #include <memory>
 #include <random>
@@ -92,5 +94,9 @@ TEST_CASE("GPU renderer resizes between frames and re-stretches without a new up
 int main(int argc, char** argv) {
     QSurfaceFormat::setDefaultFormat(glFormat());
     QGuiApplication app(argc, argv);
+    if (!QGuiApplication::primaryScreen()) {
+        std::fprintf(stderr, "no screen: the GPU preview tests need a desktop session (or Xvfb)\n");
+        return 4;   // ctest's SKIP_RETURN_CODE
+    }
     return Catch::Session().run(argc, argv);
 }

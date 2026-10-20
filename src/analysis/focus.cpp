@@ -3,6 +3,7 @@
 #include "util/simd.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <complex>
 #include <cstdint>
@@ -135,15 +136,17 @@ void planeLevels(const Plane& p, float& bg, float& peak, double& clipped) {
     std::size_t clip = 0;
     for (int y = 0; y < p.h; ++y) {
         const float* r = p.row(y);
-        float m = 0;
+        int32_t m = 0;
         int c = 0;
-        // Vectorized: max and a select-count over the whole window.
-        SLOPCAP_SIMD_SUM(c)
+        // Vectorized: max and a select-count over the whole window. The max compares bit patterns: a plane holds no
+        // negative values, and non-negative floats order like their bits. An integer max vectorizes on every compiler;
+        // clang won't vectorize a float max (a NaN could make the order of the lanes matter).
+        SLOPCAP_SIMD_SUM_MAX(c, m)
         for (int x = 0; x < p.w; ++x) {
-            m = std::max(m, r[x]);
+            m = std::max(m, std::bit_cast<int32_t>(r[x]));
             c += r[x] >= 0.995f ? 1 : 0;
         }
-        peak = std::max(peak, m);
+        peak = std::max(peak, std::bit_cast<float>(m));
         clip += static_cast<std::size_t>(c);
     }
     clipped = static_cast<double>(clip) / (static_cast<double>(p.w) * p.h);

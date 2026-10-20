@@ -214,6 +214,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(escape_, &QShortcut::activated, this, [this] { setFullView(false); });
     auto* f11 = new QShortcut(QKeySequence(Qt::Key_F11), this);
     connect(f11, &QShortcut::activated, this, [this] { setFullView(!fullView_); });
+#ifdef Q_OS_MACOS
+    // F11 is Show Desktop on a Mac; the platform's full-screen key is Ctrl+Cmd+F.
+    auto* macFull = new QShortcut(QKeySequence::FullScreen, this);
+    connect(macFull, &QShortcut::activated, this, [this] { setFullView(!fullView_); });
+#endif
     preview_->installEventFilter(this);
 
     connect(preview_, &preview::PreviewWidget::frameShown, this, [this](const std::array<uint32_t, 256>& hist, const preview::Levels& lv, const FrameInfo&) {
@@ -1118,7 +1123,7 @@ void MainWindow::logDevices() {
     connect(&indi, &devices::IndiClient::errorOccurred, this, [](const QString& e) { qWarning().noquote() << "indi: error:" << e; });
     // Driver messages carry the reasons things fail ("Failed to connect to port /dev/ttyUSB0", "Error reading ...").
     connect(&indi, &devices::IndiClient::message, this, [](const QString& dev, const QString& m) { qInfo().noquote() << "indi:" << dev << "says:" << m; });
-    connect(&indi, &devices::IndiClient::propertyDefined, this, [&indi, text](const QString& dev, const QString& name) {
+    connect(&indi, &devices::IndiClient::propertyDefined, this, [text](const QString& dev, const QString& name) {
         if (name == "DRIVER_INFO" || name == "DEVICE_PORT" || name == "CONNECTION")
             qInfo().noquote() << "indi:" << dev << name << text(dev, name);
     });

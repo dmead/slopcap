@@ -150,4 +150,23 @@ Windows: `windows-msvc` preset (Visual Studio 2022 Build Tools, Catch2 via vcpkg
 `windows-cross` (MinGW-w64; set `SLOPCAP_WIN_SDK_DLL_DIR` to a folder with the target machine's `ASICamera2.dll` and
 `qhyccd.dll`).
 
+macOS (Apple silicon or Intel): Xcode's command-line tools (`xcode-select --install`), then `brew install qtbase cmake
+ninja catch2`.
+
+```bash
+cmake --preset macos-debug && cmake --build --preset macos-debug && ctest --preset macos-debug
+tools/macos-app.sh          # build/macos-release/SlopCap.app, self-contained (Qt inside) and signed ad hoc
+tools/macos-app.sh --dmg    # ... plus SlopCap.dmg to copy to other Macs
+```
+
+No camera SDK is wired up on macOS yet, so a Mac build replays recordings (`--camera sim:FILE.ser`) and watches
+other SlopCaps (remote viewing); the camera menu says ZWO and QHY support isn't built.
+`-DSLOPCAP_FONT_DIR=<folder>` embeds IBM Plex from wherever its TTFs are (the default is the Linux path). The app keeps
+settings in `~/Library/Preferences/com.slopcap.SlopCap.plist`, logs in `~/Library/Application Support/SlopCap/SlopCap/logs`
+and records to `~/Movies/SlopCap`. Recording uses `F_NOCACHE` where Linux uses `O_DIRECT`. App Nap is off for SlopCap, so
+capture and sharing keep full speed in the background. macOS asks once for Local Network access the first time
+SlopCap shares, watches or reaches an INDI server on another machine. Full view is Ctrl+Cmd+F (F11 also works).
+The app is signed ad hoc, not notarized: on another Mac, the first launch needs right-click → Open (or System Settings →
+Privacy & Security → Open Anyway). It runs on the macOS version Homebrew's Qt was built for, and newer.
+
 Optional test against a real recording: `SLOPCAP_TEST_SER=/path/to/file.ser ctest --preset linux-debug`.

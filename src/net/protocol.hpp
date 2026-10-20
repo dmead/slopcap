@@ -69,6 +69,10 @@ CameraState cameraStateFromJson(const QJsonObject& o);
 QString bayerToString(Bayer b);
 Bayer bayerFromString(const QString& s);
 
+/// This machine's name as other SlopCaps show it: the host name without its DNS domain (a Mac reports e.g.
+/// "Example-Mac.isp.example.net", where Linux and Windows give the short name).
+QString machineName();
+
 QByteArray pack(Msg type, const QByteArray& payload);
 QByteArray packJson(Msg type, const QJsonObject& o);
 /// A Frame message: header JSON + compressed pixels.
