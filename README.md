@@ -1,7 +1,12 @@
 # SlopCap
 
-A planetary / lunar / solar capture program for Linux and Windows: zero-drop video capture from astronomy cameras,
-a live preview that keeps up, built-in focus / drift / guide-overlay tools, and a REST API. C++20, no Python.
+[![ci](https://github.com/dmead/slopcap/actions/workflows/ci.yml/badge.svg)](https://github.com/dmead/slopcap/actions/workflows/ci.yml)
+
+A planetary / lunar / solar capture program for Windows, Linux and macOS: zero-drop video capture from astronomy
+cameras, a live preview that keeps up, built-in focus / drift / guide-overlay tools, and a REST API. C++20, no Python.
+
+**Documentation:** [docs/](docs/README.md): installing, a night at the telescope, remote viewing, files and logs,
+troubleshooting, building and testing. This README is the developer's quick reference.
 
 Status: **M1 in progress**: capture pipeline + ZWO / QHY backends; ZWO verified at 168 fps with 0 drops on Linux and Windows. See [PLAN.md](PLAN.md) for the design and milestones.
 

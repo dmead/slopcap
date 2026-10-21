@@ -12,7 +12,7 @@ VERSION=2.2.5
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 WORK=$REPO/build/indi-src
 
-brew install cmake ninja cfitsio libnova libusb gsl fftw libev erfa jpeg-turbo
+brew install cmake ninja pkgconf cfitsio libnova libusb gsl fftw libev erfa jpeg-turbo
 mkdir -p "$WORK"
 if [ -z "$TARBALL" ]; then
     TARBALL=$WORK/indi-$VERSION.tar.gz

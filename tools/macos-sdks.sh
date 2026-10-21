@@ -14,12 +14,16 @@ case "$(uname -m)" in
     *) ARCH=mac_x64 ;;
 esac
 
+# GitHub's API allows few anonymous requests from a shared address (CI runners); use a token when there is one.
+auth=()
+[ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
+
 fetch() {   # fetch PATH: download one file from the tag and check its git blob hash
     local path=$1 out=$DEST/$1 dir want got
     dir=$(dirname "$path")
     mkdir -p "$(dirname "$out")"
     curl -fsSL -o "$out" "https://raw.githubusercontent.com/indilib/indi-3rdparty/$TAG/$path"
-    want=$(curl -fsSL "https://api.github.com/repos/indilib/indi-3rdparty/contents/$dir?ref=$TAG" |
+    want=$(curl -fsSL ${auth[@]+"${auth[@]}"} "https://api.github.com/repos/indilib/indi-3rdparty/contents/$dir?ref=$TAG" |
            python3 -c "import json,sys; print(next(x['sha'] for x in json.load(sys.stdin) if x['name'] == sys.argv[1]))" "$(basename "$path")")
     got=$(git hash-object --no-filters "$out")
     if [ "$want" != "$got" ]; then

@@ -1,39 +1,151 @@
-# Builds and tests SlopCap on Linux (GCC, plus ASan/UBSan and TSan) and Windows (MSVC).
-# Camera SDKs aren't installed on CI runners, so camprobe is skipped there; core + tests need no hardware.
+# Builds and tests SlopCap on Linux, Windows and macOS on every push and pull request (Markdown-only changes skip it).
+#   linux          docker/build.sh in the project's build image (docker/Dockerfile: Ubuntu 26.04, GCC 15, Qt 6, the
+#                  ZWO / QHY SDKs and INDI from the INDI PPA, Xvfb + Mesa): debug, ASan + UBSan and TSan with tests,
+#                  and release.
+#   windows-exe    the self-contained slopcap.exe (MinGW + static Qt, docker/Dockerfile.mingw). The camera DLLs are
+#                  proprietary and not in the repository, so this exe has no ZWO / QHY support.
+#   windows-smoke  starts that exe on a real Windows runner: replays a generated recording and records it.
+#   macos          Apple silicon: Homebrew Qt, the camera SDKs (tools/macos-sdks.sh), INDI (tools/macos-indi.sh,
+#                  cached), macos-debug with every test, then SlopCap.app and SlopCap.dmg.
+# Docker layers live in the Actions cache, so the images (static Qt for Windows takes about an hour) build once.
+# Minutes: GitHub bills macOS x10 and Windows x2 for private repositories.
 name: ci
+
 on:
   push:
+    paths-ignore: ['**.md', 'docs/**']
   pull_request:
+    paths-ignore: ['**.md', 'docs/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   linux:
     runs-on: ubuntu-24.04
+    concurrency: {group: "linux-${{ github.ref }}-${{ matrix.preset }}", cancel-in-progress: true}
     strategy:
       fail-fast: false
       matrix:
         preset: [linux-debug, linux-asan, linux-tsan, linux-release]
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build catch2 g++-14
-      - name: Configure
-        run: cmake --preset ${{ matrix.preset }} -DSLOPCAP_BUILD_CAMPROBE=OFF -DCMAKE_CXX_COMPILER=g++-14
-      - name: Build
-        run: cmake --build --preset ${{ matrix.preset }}
-      - name: Test
-        if: matrix.preset != 'linux-release'
-        run: ctest --preset ${{ matrix.preset }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (cached)
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          file: docker/Dockerfile
+          tags: slopcap-build:ci
+          load: true
+          cache-from: type=gha,scope=linux
+          cache-to: ${{ matrix.preset == 'linux-debug' && 'type=gha,scope=linux,mode=max' || '' }}
+      - name: Tag the image as docker/build.sh expects
+        run: docker tag slopcap-build:ci "slopcap-build:$(sha256sum < docker/Dockerfile | cut -c1-12)"
+      - name: Sanitizers need fewer ASLR bits than the runner's kernel uses
+        if: contains(matrix.preset, 'san')
+        run: sudo sysctl vm.mmap_rnd_bits=28
+      - name: Build and test
+        run: SLOPCAP_REGISTRY= docker/build.sh ${{ matrix.preset }}
 
-  windows:
-    runs-on: windows-2022
+  windows-exe:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: ilammy/msvc-dev-cmd@v1
-      - name: Install Catch2
-        run: vcpkg install catch2:x64-windows
-      - name: Configure
-        run: cmake --preset windows-msvc -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
-      - name: Build
-        run: cmake --build --preset windows-msvc
+      - name: Free disk space (building static Qt needs room)
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the Windows build image (cached)
+        uses: docker/bake-action@v6
+        with:
+          source: .
+          files: .github/docker-bake.hcl
+          targets: mingw
+          load: true
+      - name: Build slopcap.exe
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:$PWD" -w "$PWD" slopcap-build-mingw:ci \
+            bash -c "cmake --preset windows-static && cmake --build --preset windows-static"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slopcap-windows-x64-no-camera-sdks
+          path: build/windows-static/slopcap.exe
+          if-no-files-found: error
+
+  windows-smoke:
+    needs: windows-exe
+    runs-on: windows-2025
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: slopcap-windows-x64-no-camera-sdks
+      - name: Make a small test recording (a drifting disc, 8-bit mono SER)
+        shell: python
+        run: |
+          import math, struct
+          w, h, n = 160, 120, 120
+          with open("ci.ser", "wb") as f:
+              f.write(struct.pack("<14s7i40s40s40sqq", b"LUCAM-RECORDER", 0, 0, 0, w, h, 8, n,
+                                  b"ci", b"synthetic", b"", 0, 0))
+              for k in range(n):
+                  cx, cy = 80 + 15 * math.sin(k / 15), 60
+                  f.write(bytes(220 if (x - cx) ** 2 + (y - cy) ** 2 < 400 else 12 for y in range(h) for x in range(w)))
+      - name: Start slopcap.exe, replay and record, quit
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "rec"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $p = Start-Process -FilePath .\slopcap.exe -PassThru -Wait -ArgumentList @(
+            "--settings", (Join-Path $env:RUNNER_TEMP "settings"), "--camera", "sim:ci.ser",
+            "--record", "--out", $out, "--quit-after", "8")
+          $log = Get-ChildItem "$env:LOCALAPPDATA\SlopCap\SlopCap\logs" -Filter *.log | Sort-Object LastWriteTime | Select-Object -Last 1
+          Get-Content $log.FullName
+          if ($p.ExitCode -ne 0) { throw "slopcap.exe exited with $($p.ExitCode)" }
+          if (-not (Select-String -Path $log.FullName -Pattern "record: start" -Quiet)) { throw "recording didn't start" }
+          $ser = Get-ChildItem $out -Filter *.ser
+          if (-not $ser) { throw "no recording written" }
+          $ser | Format-Table Name, Length
+
+  macos:
+    runs-on: macos-15
+    concurrency: {group: "macos-${{ github.ref }}", cancel-in-progress: true}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Homebrew packages (SlopCap, and what INDI links against)
+        run: brew install qtbase ninja pkgconf catch2 libusb cfitsio libnova gsl fftw libev erfa jpeg-turbo
+      - name: INDI cache key
+        id: indi-key
+        run: |
+          deps=$(brew list --versions cfitsio libnova gsl fftw libev erfa jpeg-turbo libusb | shasum | cut -c1-10)
+          echo "key=indi-2.2.5-$(uname -m)-macos$(sw_vers -productVersion | cut -d. -f1)-$deps-${{ hashFiles('tools/macos-indi.sh') }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: indi
+        with:
+          path: ~/indi
+          key: ${{ steps.indi-key.outputs.key }}
+      - name: Build INDI (cache miss only)
+        if: steps.indi.outputs.cache-hit != 'true'
+        run: tools/macos-indi.sh ~/indi
+      - name: Camera SDKs
+        run: tools/macos-sdks.sh
+      - name: Build (macos-debug)
+        run: cmake --preset macos-debug && cmake --build --preset macos-debug
       - name: Test
-        run: ctest --preset windows-msvc
+        run: PATH=~/indi/bin:$PATH ctest --preset macos-debug
+      - name: Camera probe (no cameras here; must not crash)
+        run: build/macos-debug/tools/camprobe/slopcap-camprobe
+      - name: SlopCap.app and SlopCap.dmg
+        run: |
+          tools/macos-app.sh --dmg
+          ls build/macos-release/SlopCap.app/Contents/Frameworks | grep -E 'ASICamera2|qhyccd|libusb'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SlopCap-macos-arm64
+          path: build/macos-release/SlopCap.dmg
+          if-no-files-found: error

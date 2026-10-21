@@ -77,8 +77,11 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     prepareCameraSdks();
 #endif
-    // Joined when main returns (before QApplication goes away), so the SDK is never mid-call at exit.
-    std::jthread cameraPrep([] { slopcap::prepareCameras(); });
+    // Joined however main ends, so the SDK is never mid-call at exit. (Not std::jthread: Xcode 16's libc++ lacks it.)
+    struct JoinOnExit {
+        std::thread t;
+        ~JoinOnExit() { t.join(); }
+    } cameraPrep{std::thread([] { slopcap::prepareCameras(); })};
     slopcap::app::theme::apply(app);
 
     QCommandLineParser args;
