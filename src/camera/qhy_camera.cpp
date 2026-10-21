@@ -3,6 +3,7 @@
 #include <qhyccd.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <format>
@@ -80,7 +81,20 @@ const QhyParam* QhyCamera::param(std::string_view name) const {
     return nullptr;
 }
 
+void QhyCamera::prepare() {
+#ifdef __APPLE__
+    // As PHD2 does: upload, then rescan until the camera is back (or give up after 5 s: none needed firmware).
+    static std::once_flag once;
+    std::call_once(once, [] {
+        SdkUser sdk;
+        if (OSXInitQHYCCDFirmwareArray() != OK) return;
+        for (int i = 0; i < 20 && ScanQHYCCD() == 0; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    });
+#endif
+}
+
 std::vector<QhyCameraEntry> QhyCamera::list() {
+    prepare();
     SdkUser sdk;
     std::vector<QhyCameraEntry> out;
     const uint32_t n = ScanQHYCCD();
@@ -94,6 +108,7 @@ std::vector<QhyCameraEntry> QhyCamera::list() {
 }
 
 QhyCamera::QhyCamera(int index) {
+    prepare();
     sdkAcquire();
     try {
         const uint32_t n = ScanQHYCCD();

@@ -18,4 +18,8 @@ std::unique_ptr<ICamera> openCamera(std::string_view spec);   ///< throws Camera
 /// Every connected real camera as "spec  model" lines (backends that weren't built are noted).
 std::vector<std::string> listCameras();
 
+/// Slow one-time camera set-up, best started off the GUI thread at launch (macOS: QHY firmware upload, a few
+/// seconds). listCameras() and openCamera() wait for it if it is still running. Does nothing on other platforms.
+void prepareCameras();
+
 }  // namespace slopcap

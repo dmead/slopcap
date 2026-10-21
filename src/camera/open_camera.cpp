@@ -83,4 +83,10 @@ std::vector<std::string> listCameras() {
     return out;
 }
 
+void prepareCameras() {
+#ifdef SLOPCAP_HAVE_QHY
+    if (sdkLoads("qhyccd.dll")) QhyCamera::prepare();
+#endif
+}
+
 }  // namespace slopcap

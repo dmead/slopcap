@@ -72,6 +72,59 @@ if(WIN32)
     target_link_libraries(slopcap_core PUBLIC ${QHY_DELAYLIB})
     target_compile_definitions(slopcap_core PUBLIC SLOPCAP_HAVE_QHY)
   endif()
+elseif(APPLE)
+  # macOS: the vendor SDKs as INDI's indi-3rdparty repository ships them, so a checkout of it (or a copy of its libasi/
+  # and libqhy/ folders) is all it takes: libasi/ASICamera2.h + libasi/mac_arm64/libASICamera2.bin, libqhy/*.h +
+  # libqhy/mac_arm64/libqhyccd.bin. The .bin files are dylibs whose install name is @rpath/lib<name>.dylib; they are
+  # copied here under that name, linked, and copied into SlopCap.app/Contents/Frameworks (SLOPCAP_MAC_SDK_DYLIBS).
+  set(SLOPCAP_MAC_SDK_DIR "" CACHE PATH "indi-3rdparty checkout (or a copy of its libasi/ and libqhy/) with the macOS SDKs")
+  if(CMAKE_OSX_ARCHITECTURES MATCHES "x86_64" OR (NOT CMAKE_OSX_ARCHITECTURES AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64"))
+    set(_mac_sdk_arch mac_x64)
+  else()
+    set(_mac_sdk_arch mac_arm64)
+  endif()
+  set(SDK_LIB_DIR ${CMAKE_CURRENT_BINARY_DIR}/sdk)
+  set(SLOPCAP_MAC_SDK_DYLIBS "")
+  set(_asi ${SLOPCAP_MAC_SDK_DIR}/libasi)
+  if(SLOPCAP_MAC_SDK_DIR AND EXISTS ${_asi}/ASICamera2.h AND EXISTS ${_asi}/${_mac_sdk_arch}/libASICamera2.bin)
+    configure_file(${_asi}/${_mac_sdk_arch}/libASICamera2.bin ${SDK_LIB_DIR}/libASICamera2.dylib COPYONLY)
+    target_sources(slopcap_core PRIVATE src/camera/asi_camera.cpp)
+    target_include_directories(slopcap_core PRIVATE ${SLOPCAP_MAC_SDK_DIR})   # for <libasi/ASICamera2.h>
+    target_link_libraries(slopcap_core PUBLIC ${SDK_LIB_DIR}/libASICamera2.dylib)
+    target_compile_definitions(slopcap_core PUBLIC SLOPCAP_HAVE_ASI)
+    list(APPEND SLOPCAP_MAC_SDK_DYLIBS ${SDK_LIB_DIR}/libASICamera2.dylib)
+  endif()
+  set(_qhy ${SLOPCAP_MAC_SDK_DIR}/libqhy)
+  if(SLOPCAP_MAC_SDK_DIR AND EXISTS ${_qhy}/qhyccd.h AND EXISTS ${_qhy}/${_mac_sdk_arch}/libqhyccd.bin)
+    configure_file(${_qhy}/${_mac_sdk_arch}/libqhyccd.bin ${SDK_LIB_DIR}/libqhyccd.dylib COPYONLY)
+    target_sources(slopcap_core PRIVATE src/camera/qhy_camera.cpp)
+    target_include_directories(slopcap_core PRIVATE ${QHY_COMPAT} ${_qhy})
+    target_link_libraries(slopcap_core PUBLIC ${SDK_LIB_DIR}/libqhyccd.dylib)
+    target_compile_definitions(slopcap_core PUBLIC SLOPCAP_HAVE_QHY)
+    list(APPEND SLOPCAP_MAC_SDK_DYLIBS ${SDK_LIB_DIR}/libqhyccd.dylib)
+  endif()
+  if(SLOPCAP_MAC_SDK_DYLIBS)
+    # Both SDKs load @rpath/libusb-1.0.0.dylib. Homebrew's goes next to them, given that install name and re-signed
+    # (Apple silicon won't load a dylib whose signature no longer matches).
+    find_library(SLOPCAP_LIBUSB NAMES usb-1.0 PATHS /opt/homebrew/opt/libusb/lib /usr/local/opt/libusb/lib)
+    if(NOT SLOPCAP_LIBUSB)
+      message(FATAL_ERROR "the macOS camera SDKs need libusb: brew install libusb")
+    endif()
+    get_filename_component(_usb_real ${SLOPCAP_LIBUSB} REALPATH)
+    set(_usb ${SDK_LIB_DIR}/libusb-1.0.0.dylib)
+    execute_process(COMMAND cp -f ${_usb_real} ${_usb}
+                    COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND chmod u+w ${_usb} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND install_name_tool -id @rpath/libusb-1.0.0.dylib ${_usb} COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND codesign --force --sign - ${_usb} OUTPUT_QUIET ERROR_QUIET COMMAND_ERROR_IS_FATAL ANY)
+    list(APPEND SLOPCAP_MAC_SDK_DYLIBS ${_usb})
+    set(CMAKE_BUILD_RPATH ${SDK_LIB_DIR})   # tools and tests run from the build folder
+  elseif(SLOPCAP_MAC_SDK_DIR AND EXISTS ${SLOPCAP_MAC_SDK_DIR})
+    message(WARNING "SLOPCAP_MAC_SDK_DIR=${SLOPCAP_MAC_SDK_DIR} has neither libasi/${_mac_sdk_arch}/libASICamera2.bin "
+                    "nor libqhy/${_mac_sdk_arch}/libqhyccd.bin")
+  else()
+    message(STATUS "macOS camera SDKs: none (tools/macos-sdks.sh fetches them into build/mac-sdk)")
+  endif()
 else()
   find_path(SLOPCAP_ASI_INCLUDE libasi/ASICamera2.h)
   find_library(SLOPCAP_ASI_LIB ASICamera2)
@@ -160,6 +213,12 @@ if(SLOPCAP_BUILD_GUI)
         MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
         MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
         MACOSX_BUNDLE_INFO_STRING "SlopCap ${SLOPCAP_GIT}")
+      # The camera SDKs ride inside the bundle, found through @rpath.
+      if(SLOPCAP_MAC_SDK_DYLIBS)
+        target_sources(slopcap PRIVATE ${SLOPCAP_MAC_SDK_DYLIBS})
+        set_source_files_properties(${SLOPCAP_MAC_SDK_DYLIBS} PROPERTIES MACOSX_PACKAGE_LOCATION Frameworks)
+        set_property(TARGET slopcap APPEND PROPERTY BUILD_RPATH "@executable_path/../Frameworks")
+      endif()
     endif()
     # The UI fonts (IBM Plex, OFL), embedded when the build machine has them, so every install looks the same.
     set(SLOPCAP_FONT_DIR /usr/share/fonts/truetype/ibm-plex CACHE PATH "folder with the IBM Plex TTFs to embed")

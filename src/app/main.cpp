@@ -5,6 +5,7 @@
 #include "app/main_window.hpp"
 #include "app/session_log.hpp"
 #include "app/theme.hpp"
+#include "camera/open_camera.hpp"
 
 #include <QApplication>
 #include <QCommandLineParser>
@@ -12,6 +13,8 @@
 #include <QSurfaceFormat>
 #include <QSysInfo>
 #include <QTimer>
+
+#include <thread>
 
 #ifdef _WIN32
 #include <QCryptographicHash>
@@ -74,6 +77,8 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     prepareCameraSdks();
 #endif
+    // Joined when main returns (before QApplication goes away), so the SDK is never mid-call at exit.
+    std::jthread cameraPrep([] { slopcap::prepareCameras(); });
     slopcap::app::theme::apply(app);
 
     QCommandLineParser args;

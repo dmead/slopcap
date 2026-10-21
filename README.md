@@ -151,16 +151,32 @@ Windows: `windows-msvc` preset (Visual Studio 2022 Build Tools, Catch2 via vcpkg
 `qhyccd.dll`).
 
 macOS (Apple silicon or Intel): Xcode's command-line tools (`xcode-select --install`), then `brew install qtbase cmake
-ninja catch2`.
+ninja catch2 libusb`.
 
 ```bash
-cmake --preset macos-debug && cmake --build --preset macos-debug && ctest --preset macos-debug
-tools/macos-app.sh          # build/macos-release/SlopCap.app, self-contained (Qt inside) and signed ad hoc
+tools/macos-sdks.sh         # ZWO + QHY SDKs into build/mac-sdk (once; optional: without them, no cameras)
+tools/macos-indi.sh         # INDI into ~/indi, for the focuser and mount (once; optional)
+cmake --preset macos-debug && cmake --build --preset macos-debug && PATH=~/indi/bin:$PATH ctest --preset macos-debug
+tools/macos-app.sh          # build/macos-release/SlopCap.app, self-contained (Qt, SDKs inside) and signed ad hoc
 tools/macos-app.sh --dmg    # ... plus SlopCap.dmg to copy to other Macs
 ```
 
-No camera SDK is wired up on macOS yet, so a Mac build replays recordings (`--camera sim:FILE.ser`) and watches
-other SlopCaps (remote viewing); the camera menu says ZWO and QHY support isn't built.
+**Cameras:** `tools/macos-sdks.sh` takes the SDKs from INDI's indi-3rdparty repository (the same source as the Linux
+packages; ZWO 1.41, QHY 26.7.21; every file hash-checked against GitHub), and the build copies them into SlopCap.app
+with libusb. On a Mac, QHY cameras start without firmware: SlopCap uploads it from the SDK when it starts (in the
+background; the camera reappears on USB a few seconds later), so give a QHY camera a moment before opening the camera menu.
+
+**Focuser and mount:** INDI, as on Linux. Homebrew has no INDI, so `tools/macos-indi.sh` builds indiserver and the
+drivers into `~/indi`. For the Gemini EAF (macOS has the CH340 driver built in; the port is `/dev/cu.usbserial-…`):
+
+```bash
+PATH=~/indi/bin:$PATH indiserver indi_myfocuserpro2_focus     # add indi_lx200classic for the mount
+indi_setprop 'MyFocuserPro2.DEVICE_PORT.PORT=/dev/cu.usbserial-1420'   # once, with the port `ls /dev/cu.*` shows
+indi_setprop 'MyFocuserPro2.CONFIG_PROCESS.CONFIG_SAVE=On'
+```
+
+then Focus → Connect (localhost:7624) in SlopCap.
+
 `-DSLOPCAP_FONT_DIR=<folder>` embeds IBM Plex from wherever its TTFs are (the default is the Linux path). The app keeps
 settings in `~/Library/Preferences/com.slopcap.SlopCap.plist`, logs in `~/Library/Application Support/SlopCap/SlopCap/logs`
 and records to `~/Movies/SlopCap`. Recording uses `F_NOCACHE` where Linux uses `O_DIRECT`. App Nap is off for SlopCap, so

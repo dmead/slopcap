@@ -2,9 +2,11 @@
 // from the SDK's per-gain curves (read noise, e-/ADU, full well) when the camera provides them, then closes it.
 #include "report.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <format>
 #include <qhyccd.h>
+#include <thread>
 
 namespace camprobe {
 
@@ -100,7 +102,14 @@ ProbeResult probeQhy() {
     r.sdkVersion = std::format("{}.{}.{}.{}", y, m, d, s);
     if (InitQHYCCDResource() != OK) { r.errors.push_back("InitQHYCCDResource failed"); return r; }
 
-    uint32_t n = ScanQHYCCD();
+    uint32_t n = 0;
+#ifdef __APPLE__
+    // macOS: upload firmware (built into libqhyccd), then wait for the camera to come back on USB (as PHD2 does).
+    if (OSXInitQHYCCDFirmwareArray() != OK) r.errors.push_back("OSXInitQHYCCDFirmwareArray failed");
+    for (int i = 0; i < 20 && (n = ScanQHYCCD()) == 0; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(250));
+#else
+    n = ScanQHYCCD();
+#endif
     for (uint32_t i = 0; i < n; ++i) {
         char id[64] = {}, model[64] = {};
         if (GetQHYCCDId(i, id) != OK) { r.errors.push_back(std::format("camera {}: id read failed", i)); continue; }

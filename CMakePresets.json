@@ -47,7 +47,7 @@
       "hidden": true,
       "inherits": "base",
       "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin"},
-      "cacheVariables": {"CMAKE_PREFIX_PATH": "/opt/homebrew;/usr/local"}
+      "cacheVariables": {"CMAKE_PREFIX_PATH": "/opt/homebrew;/usr/local", "SLOPCAP_MAC_SDK_DIR": "${sourceDir}/build/mac-sdk"}
     },
     {
       "name": "macos-debug",

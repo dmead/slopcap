@@ -23,6 +23,10 @@ struct QhyCameraEntry {
 
 class QhyCamera final : public ICamera {
 public:
+    /// macOS: most QHY cameras power up without firmware. The SDK uploads it (it is built into libqhyccd there) and
+    /// the camera then reappears on USB, which takes a few seconds. Done once per process, here; list() and opening
+    /// wait for it. Elsewhere (udev / the Windows driver load the firmware) it does nothing.
+    static void prepare();
     static std::vector<QhyCameraEntry> list();
     explicit QhyCamera(int index = 0);   ///< opens, selects live mode, initialises; throws CameraError
     ~QhyCamera() override;

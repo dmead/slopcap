@@ -25,9 +25,9 @@ Status: plan only (2026-10-15). Nothing built yet.
 ## 2. Non-goals (for now)
 
 - Deep-sky / long-exposure imaging, plate solving, guiding (PHD2, Ekos and NINA cover these).
-- macOS as a capture machine. It builds since 2026-10-20 (`macos-*` presets, `tools/macos-app.sh` → SlopCap.app,
-  Apple silicon) for replays and remote viewing; camera SDKs there are a to-do. Raspberry Pi (aarch64) after the two
-  desktop platforms.
+- macOS as the main capture machine. It builds since 2026-10-20 (`macos-*` presets, `tools/macos-app.sh` → SlopCap.app,
+  Apple silicon), with the ZWO / QHY SDKs from indi-3rdparty and INDI built from source (`tools/macos-sdks.sh`,
+  `tools/macos-indi.sh`), but it isn't tested with hardware. Raspberry Pi (aarch64) after the two desktop platforms.
 - Every camera brand on day one. Two SDKs first, ZWO and QHY (we have both to test with), behind one interface
   that later brands plug into.
 
@@ -504,7 +504,8 @@ M2 status (2026-10-16):
   - More camera brands: specced in §5b, **parked**.
   - macOS: the GUI on a real screen (only checked over SSH so far: tests, a replay recorded through `F_NOCACHE`, a
     server and viewer on loopback, an offscreen screenshot; the GL preview needs the Mac's OpenGL 4.1 core profile);
-    the ZWO and QHY macOS SDKs (dylibs inside the .app); an app icon.
+    a real ZWO / QHY camera and the Gemini EAF on a Mac (SDKs and INDI build and load, but no hardware has been
+    plugged into one; watch the QHY firmware upload and CloseQHYCCD, which PHD2 once found crashing on macOS); an app icon.
 
 **Saturn night checklist (laptop):**
 1. Plug the camera and the Gemini EAF into the laptop. `systemctl --user status indiserver` should show
