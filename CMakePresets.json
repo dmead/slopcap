@@ -43,6 +43,15 @@
       }
     },
     {
+      "name": "linux-coverage",
+      "inherits": "linux-debug",
+      "displayName": "Linux line coverage (gcov; tools/coverage.sh)",
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "--coverage -fprofile-update=atomic",
+        "CMAKE_EXE_LINKER_FLAGS": "--coverage"
+      }
+    },
+    {
       "name": "macos-base",
       "hidden": true,
       "inherits": "base",
@@ -111,6 +120,7 @@
     {"name": "linux-release", "configurePreset": "linux-release"},
     {"name": "linux-asan", "configurePreset": "linux-asan"},
     {"name": "linux-tsan", "configurePreset": "linux-tsan"},
+    {"name": "linux-coverage", "configurePreset": "linux-coverage"},
     {"name": "macos-debug", "configurePreset": "macos-debug"},
     {"name": "macos-release", "configurePreset": "macos-release"},
     {"name": "macos-asan", "configurePreset": "macos-asan"},
@@ -122,6 +132,7 @@
     {"name": "linux-debug", "configurePreset": "linux-debug", "output": {"outputOnFailure": true}},
     {"name": "linux-asan", "configurePreset": "linux-asan", "output": {"outputOnFailure": true}},
     {"name": "linux-tsan", "configurePreset": "linux-tsan", "output": {"outputOnFailure": true}},
+    {"name": "linux-coverage", "configurePreset": "linux-coverage", "output": {"outputOnFailure": true}},
     {"name": "macos-debug", "configurePreset": "macos-debug", "output": {"outputOnFailure": true}},
     {"name": "macos-asan", "configurePreset": "macos-asan", "output": {"outputOnFailure": true}},
     {"name": "windows-msvc", "configurePreset": "windows-msvc", "configuration": "Release", "output": {"outputOnFailure": true}}

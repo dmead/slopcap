@@ -1,3 +1,5 @@
+#include "analysis/focus.hpp"
+#include "analysis/sweep.hpp"
 #include "camera/sim_camera.hpp"
 #include "io/ser.hpp"
 #include "test_util.hpp"
@@ -168,4 +170,35 @@ TEST_CASE("SimCamera replays a real recording", "[real-data]") {
     FrameInfo fi;
     for (int i = 0; i < 50; ++i) REQUIRE(cam.readFrame(buf, fi, 1s) == ReadResult::Ok);
     CHECK(fi.sequence == 49);
+}
+
+TEST_CASE("A camera without readout modes, auto controls or landmarks: ICamera's defaults") {
+    TempDir dir;
+    SimCamera cam(makeSer(dir, 32, 16, 3, 59'500));
+    CHECK(cam.readoutModes().empty());
+    CHECK(cam.readoutMode() == 0);
+    cam.setReadoutMode(0);
+    CHECK_THROWS_AS(cam.setReadoutMode(1), CameraError);
+    CHECK_FALSE(cam.controlAuto("Gain"));
+    CHECK_THROWS_AS(cam.setControlAuto("Gain", true), CameraError);
+    CHECK(cam.gainLandmarks().empty());
+}
+
+TEST_CASE("Names for colour patterns, metrics and focus targets") {
+    CHECK(std::string(bayerName(Bayer::GBRG)) == "GBRG");
+    CHECK(std::string(bayerName(static_cast<Bayer>(42))) == "?");
+    for (auto id : {ser::ColorId::Mono, ser::ColorId::BayerRGGB, ser::ColorId::BayerGRBG, ser::ColorId::BayerGBRG, ser::ColorId::BayerBGGR,
+                    ser::ColorId::BayerCYYM, ser::ColorId::BayerYCMY, ser::ColorId::BayerYMCY, ser::ColorId::BayerMYYC, ser::ColorId::RGB,
+                    ser::ColorId::BGR})
+        CHECK(std::string(ser::colorName(id)) != "?");
+    CHECK(std::string(ser::colorName(static_cast<ser::ColorId>(7))) == "?");
+    CHECK(ser::planes(ser::ColorId::BGR) == 3);
+    for (auto m : {analysis::Metric::Gradient, analysis::Metric::Laplacian, analysis::Metric::Variance, analysis::Metric::Fourier})
+        CHECK(analysis::metricFromName(analysis::metricName(m)) == m);
+    CHECK(std::string(analysis::metricName(static_cast<analysis::Metric>(9))) == "?");
+    CHECK_THROWS_AS(analysis::metricFromName("sharpness"), std::invalid_argument);
+    for (auto t : {analysis::FocusTarget::Green, analysis::FocusTarget::Luminance, analysis::FocusTarget::Balanced, analysis::FocusTarget::Red,
+                   analysis::FocusTarget::Blue})
+        CHECK(std::string(analysis::focusTargetName(t)) != "?");
+    CHECK(std::string(analysis::focusTargetName(static_cast<analysis::FocusTarget>(9))) == "?");
 }
