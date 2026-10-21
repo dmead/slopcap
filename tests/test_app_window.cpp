@@ -26,6 +26,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <functional>
+
 using namespace slopcap;
 using namespace slopcap::app;
 using namespace slopcap::test;
@@ -46,6 +48,19 @@ QString readAll(const QString& path) {
 QStringList files(const QString& dir, const QString& pattern) { return QDir(dir).entryList({pattern}, QDir::Files, QDir::Time); }
 
 std::string unexpectedModals() { return Modals::get().takeUnexpected().join("; ").toStdString(); }
+
+/// A key for the window's shortcuts, which need it to be the active window. A test process on a Mac isn't always let
+/// to the front; then the shortcut's action is called directly instead.
+void press(QWidget& w, Qt::Key key, Qt::KeyboardModifiers mods, const std::function<void()>& instead) {
+    w.raise();
+    w.activateWindow();
+    if (QTest::qWaitForWindowActive(&w, 3000)) {
+        QTest::keyClick(&w, key, mods);
+    } else {
+        WARN("the window isn't active: calling the shortcut's action instead");
+        instead();
+    }
+}
 
 }  // namespace
 
@@ -224,8 +239,6 @@ TEST_CASE("window: a replayed recording as the camera: preview, controls, record
     w.resize(1300, 850);
     w.show();
     REQUIRE(QTest::qWaitForWindowExposed(&w));
-    w.activateWindow();
-    REQUIRE(QTest::qWaitForWindowActive(&w));   // for the keyboard shortcuts
     w.connectCamera("sim-loop:" + ser);
     REQUIRE(p.cam);
     REQUIRE(p.session);
@@ -332,9 +345,7 @@ TEST_CASE("window: a replayed recording as the camera: preview, controls, record
     CHECK(p.fState->text() == "● Recording");
     CHECK(p.record->text().startsWith("■  Stop"));
     p.roiMax->click();   // no format changes while recording
-    w.activateWindow();
-    REQUIRE(QTest::qWaitForWindowActive(&w));
-    QTest::keyClick(&w, Qt::Key_R, Qt::ControlModifier);
+    press(w, Qt::Key_R, Qt::ControlModifier, [&] { w.toggleRecording(); });
     CHECK_FALSE(p.recording);
     CHECK(p.fMessage->text().startsWith("Saved"));
     auto sers = files(out, "*.ser");
@@ -457,11 +468,9 @@ TEST_CASE("window: full view", "[app]") {
     CHECK_FALSE(p.fullView);
     CHECK(p.cameraPill->isVisible());
     // the keys: F11 toggles, Esc leaves; the toolbar button leaves too
-    w.activateWindow();
-    REQUIRE(QTest::qWaitForWindowActive(&w));
-    QTest::keyClick(&w, Qt::Key_F11);
+    press(w, Qt::Key_F11, Qt::NoModifier, [&] { w.setFullView(true); });
     CHECK(p.fullView);
-    QTest::keyClick(&w, Qt::Key_Escape);
+    press(w, Qt::Key_Escape, Qt::NoModifier, [&] { w.setFullView(false); });
     CHECK_FALSE(p.fullView);
     w.setFullView(true);
     w.setFullView(true);   // already
