@@ -175,7 +175,9 @@ TEST_CASE("CaptureSession stops at a frame limit and at a duration") {
         REQUIRE(session.wait(10s));
         const auto s = session.stats();
         CHECK(s.written == s.delivered);
-        CHECK(s.delivered >= 30);    // generous bounds: sanitizer builds are slow
+        // Generous bounds (~50 expected): sanitizer builds and busy CI machines are slow (a GitHub macOS runner
+        // delivered 29). The upper bound is the point: capture stopped near 300 ms.
+        CHECK(s.delivered >= 20);
         CHECK(s.delivered <= 60);
     }
 }
