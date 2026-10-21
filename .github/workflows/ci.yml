@@ -141,7 +141,12 @@ jobs:
       - name: Test
         run: PATH=~/indi/bin:$PATH ctest --preset macos-debug
       - name: Camera probe (no cameras here; must not crash)
-        run: build/macos-debug/tools/camprobe/slopcap-camprobe
+        run: |
+          set +e
+          build/macos-debug/tools/camprobe/slopcap-camprobe 2>&1 | grep -v '^QHYCCD|\|^\[QHYDEMO'
+          rc=${PIPESTATUS[0]}
+          echo "exit $rc (1 = no cameras found, as expected here)"
+          [ "$rc" -le 1 ]
       - name: SlopCap.app and SlopCap.dmg
         run: |
           tools/macos-app.sh --dmg

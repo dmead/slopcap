@@ -105,8 +105,11 @@ ProbeResult probeQhy() {
     uint32_t n = 0;
 #ifdef __APPLE__
     // macOS: upload firmware (built into libqhyccd), then wait for the camera to come back on USB (as PHD2 does).
-    if (OSXInitQHYCCDFirmwareArray() != OK) r.errors.push_back("OSXInitQHYCCDFirmwareArray failed");
-    for (int i = 0; i < 20 && (n = ScanQHYCCD()) == 0; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    // With no camera that needs it the upload "fails", which is no error: scan once and move on.
+    if (OSXInitQHYCCDFirmwareArray() == OK)
+        for (int i = 0; i < 20 && (n = ScanQHYCCD()) == 0; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    else
+        n = ScanQHYCCD();
 #else
     n = ScanQHYCCD();
 #endif
