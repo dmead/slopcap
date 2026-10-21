@@ -1,10 +1,14 @@
 #include "preview/gl_renderer.hpp"
 
+#include <QOpenGLContext>
+#include <QOpenGLFunctions>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLVertexArrayObject>
+#include <QSurfaceFormat>
 
 #include <algorithm>
 #include <cmath>
+#include <format>
 #include <stdexcept>
 
 namespace slopcap::preview {
@@ -114,6 +118,17 @@ GlRenderer::GlRenderer() = default;
 GlRenderer::~GlRenderer() = default;
 
 void GlRenderer::initialize() {
+    // Check the context first. Without a GPU driver (Windows' own OpenGL 1.1, some Remote Desktop sessions) Qt still
+    // creates a context, just an old one, and the GL 2/3 calls below then jump through null function pointers: an
+    // access violation rather than an error the preview can show.
+    const QOpenGLContext* ctx = QOpenGLContext::currentContext();
+    if (!ctx) throw std::runtime_error("no OpenGL context");
+    const QSurfaceFormat f = ctx->format();
+    if (ctx->isOpenGLES() || f.majorVersion() * 10 + f.minorVersion() < 33 || !QOpenGLShaderProgram::hasOpenGLShaderPrograms()) {
+        const auto* name = reinterpret_cast<const char*>(ctx->functions()->glGetString(GL_RENDERER));
+        throw std::runtime_error(std::format("{} {}.{}{}{}", ctx->isOpenGLES() ? "OpenGL ES" : "OpenGL", f.majorVersion(), f.minorVersion(),
+                                             name ? ", " : "", name ? name : ""));
+    }
     initializeOpenGLFunctions();
     debayer_ = program(kDebayerFs);
     blit_ = program(kBlitFs);

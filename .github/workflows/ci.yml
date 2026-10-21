@@ -97,6 +97,8 @@ jobs:
         timeout-minutes: 5
         shell: pwsh
         run: |
+          # The runner has no GPU, so no OpenGL 3.3: the preview must say so and capture must carry on.
+          $env:QT_LOGGING_RULES = "qt.qpa.gl=true"   # Qt's GL context choice into the session log
           $out = Join-Path $env:RUNNER_TEMP "rec"
           New-Item -ItemType Directory -Force $out | Out-Null
           $p = Start-Process -FilePath .\slopcap.exe -PassThru -Wait -ArgumentList @(
@@ -109,6 +111,15 @@ jobs:
           $ser = Get-ChildItem $out -Filter *.ser
           if (-not $ser) { throw "no recording written" }
           $ser | Format-Table Name, Length
+          if (-not (Select-String -Path $log.FullName -Pattern "preview: The preview needs OpenGL 3.3" -Quiet)) {
+            Write-Warning "no 'preview needs OpenGL 3.3' line: this runner has a GL 3.3 context after all?"
+          }
+      - name: If it crashed, where (Windows Error Reporting)
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-WinEvent -FilterHashtable @{LogName = 'Application'; ProviderName = 'Application Error'} -MaxEvents 3 -ErrorAction SilentlyContinue |
+            Format-List TimeCreated, Message
 
   macos:
     runs-on: macos-15

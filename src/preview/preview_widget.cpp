@@ -1,6 +1,7 @@
 #include "preview/preview_widget.hpp"
 
 #include <QContextMenuEvent>
+#include <QDebug>
 #include <QKeyEvent>
 #include <QMenu>
 #include <QMouseEvent>
@@ -118,6 +119,7 @@ void PreviewWidget::initializeGL() {
         // e.g. Remote Desktop or an old driver without OpenGL 3.3: capture still works, the preview can't
         glError_ = QString("The preview needs OpenGL 3.3, which isn't available here (%1). Capture and recording still work.")
                        .arg(QString::fromLocal8Bit(e.what()).left(300));
+        qWarning().noquote() << "preview:" << glError_;
     }
 }
 
