@@ -101,6 +101,15 @@ QString badgeStyle(const QColor& border, const QColor& text) {
         .arg(border.name(), text.name(), theme::monoFont().family());
 }
 
+/// `path`, or with -2, -3, ... before the extension when that file exists already: two recordings started within the
+/// same tenth of a minute, of the same target, would otherwise get the same name. `mine` is the caller's own file.
+QString unusedPath(const QString& path, const QString& mine = {}) {
+    const QFileInfo fi(path);
+    QString p = path;
+    for (int n = 2; p != mine && QFileInfo::exists(p); ++n) p = fi.path() + "/" + fi.completeBaseName() + QString("-%1.").arg(n) + fi.suffix();
+    return p;
+}
+
 QString mmss(double seconds) {
     const int s = static_cast<int>(seconds);
     return QString("%1:%2").arg(s / 60, 2, 10, QChar('0')).arg(s % 60, 2, 10, QChar('0'));
@@ -1095,7 +1104,8 @@ void MainWindow::centreRoiOn(QPointF img) {
     roiCentreDirty_ = true;
     const auto& info = cam_->info();
     QSize size(cur.width, cur.height);
-    if (cur.width >= info.sensorWidth && cur.height >= info.sensorHeight) size = QSize(1040, 560);   // full frame can't move
+    if (cur.width >= info.sensorWidth && cur.height >= info.sensorHeight)   // full frame can't move: a crop that can
+        size = QSize(std::min(1040, info.sensorWidth / 2 / 8 * 8), std::min(560, info.sensorHeight / 2 / 2 * 2));
     applyFormat(size);
 }
 
@@ -1371,7 +1381,7 @@ void MainWindow::startSession(bool record) {
             record = false;
         } else {
             recStartUtc_ = QDateTime::currentDateTimeUtc();
-            recordingPath_ = dir.filePath(fileStem(recStartUtc_) + ".ser");
+            recordingPath_ = unusedPath(dir.filePath(fileStem(recStartUtc_) + ".ser"));
             recControls_.clear();
             for (const auto& [name, box] : controlBoxes_) recControls_[name] = box->value();
             opt.output = recordingPath_.toStdString();
@@ -1419,8 +1429,8 @@ void MainWindow::stopSession() {
     if (recording_ && s.written > 0) {
         // WinJUPOS wants the mid-capture time in the name: rename now that the length is known.
         const QDateTime mid = recStartUtc_.addMSecs(static_cast<qint64>(s.seconds * 500));
-        const QString named = QFileInfo(recordingPath_).path() + "/" + fileStem(mid) + ".ser";
-        if (named != recordingPath_ && !QFileInfo::exists(named) && QFile::rename(recordingPath_, named)) recordingPath_ = named;
+        const QString named = unusedPath(QFileInfo(recordingPath_).path() + "/" + fileStem(mid) + ".ser", recordingPath_);
+        if (named != recordingPath_ && QFile::rename(recordingPath_, named)) recordingPath_ = named;
         writeSidecar(recordingPath_, s, mid);
         message(QString::fromStdString(std::format("Saved {} frames ({:.1f} s), dropped {} / {}{} → ", s.written, s.seconds, s.cameraDropped,
                                                    s.ringDropped, s.error.empty() ? "" : " — " + s.error)) +
@@ -1590,17 +1600,19 @@ void MainWindow::setNamedControl(const QString& name, double value) {
 void MainWindow::ensureDiscovery() {
     if (discovery_) return;
     discovery_ = new net::Discovery(this);
-    connect(discovery_, &net::Discovery::serversChanged, this, [this] {
-        if (!connectFirst_) return;
-        for (const auto& s : discovery_->servers()) {
-            if (server_ && s.local && s.port == server_->port()) continue;   // ourselves
-            if (s.protocol != net::kProtocol) continue;
-            connectFirst_ = false;
-            connectRemote(s.address.toString(), s.port);
-            break;
-        }
-    });
+    connect(discovery_, &net::Discovery::serversChanged, this, &MainWindow::connectToFirstFound);
     discovery_->start();
+}
+
+void MainWindow::connectToFirstFound() {
+    if (!connectFirst_) return;
+    for (const auto& s : discovery_->servers()) {
+        if (server_ && s.local && s.port == server_->port()) continue;   // ourselves
+        if (s.protocol != net::kProtocol) continue;
+        connectFirst_ = false;
+        connectRemote(s.address.toString(), s.port);
+        break;
+    }
 }
 
 void MainWindow::startSharing(const QString& address) {
@@ -1705,6 +1717,7 @@ void MainWindow::connectRemote(const QString& host, quint16 port) {
 void MainWindow::connectFirstRemote() {
     connectFirst_ = true;
     ensureDiscovery();
+    connectToFirstFound();   // one it already knows (else the next one that answers)
 }
 
 void MainWindow::disconnectRemote() {

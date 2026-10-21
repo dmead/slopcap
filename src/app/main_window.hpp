@@ -94,6 +94,8 @@ protected:
     bool eventFilter(QObject* o, QEvent* e) override;
 
 private:
+    friend struct MainWindowProbe;   // tests/test_app*.cpp: reach the widgets and steps a user would
+
     QWidget* buildHeader();
     QWidget* buildFooter();
     QWidget* buildCaptureLeft();
@@ -128,6 +130,7 @@ private:
     // remote
     void showRemoteMenu();
     void ensureDiscovery();
+    void connectToFirstFound();               ///< connectFirstRemote(): the first compatible server discovery knows
     void onRemoteState();
     QJsonObject remoteCameraState() const;   ///< server: the camera as viewers see it, with the UI's current values
     QJsonObject remoteStatus() const;

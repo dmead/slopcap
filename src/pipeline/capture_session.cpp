@@ -125,7 +125,14 @@ void CaptureSession::start() {
     }
 
     started_ = std::chrono::steady_clock::now();
-    cam_.startStream();
+    try {
+        cam_.startStream();
+    } catch (...) {
+        captureDone_.store(true, std::memory_order_release);   // no capture coming: let the writer finish
+        ring_->close();
+        writerThread_.join();
+        throw;
+    }
     captureThread_ = std::thread([this] { captureLoop(); });
 }
 

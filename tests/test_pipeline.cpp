@@ -5,6 +5,7 @@
 #include "test_util.hpp"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <cstring>
 #include <thread>
@@ -86,10 +87,10 @@ TEST_CASE("FrameRing passes 200k frames between threads without loss or reorderi
 
 namespace {
 
-std::filesystem::path makeSer(const TempDir& dir, int w, int h, int frames, int64_t tickStep) {
+std::filesystem::path makeSer(const TempDir& dir, int w, int h, int frames, int64_t tickStep, ser::ColorId colour = ser::ColorId::BayerRGGB) {
     const auto path = dir / "src.ser";
     ser::Header hd;
-    hd.colorId = ser::ColorId::BayerRGGB;
+    hd.colorId = colour;
     hd.width = w;
     hd.height = h;
     ser::Writer wr(path, hd);
@@ -101,7 +102,116 @@ std::filesystem::path makeSer(const TempDir& dir, int w, int h, int frames, int6
     return path;
 }
 
+/// A replayed recording that fails on cue.
+class Faulty final : public ICamera {
+public:
+    explicit Faulty(const std::filesystem::path& ser) : sim_(ser, {SimPace::AsFastAsPossible, true}) {}
+    bool failStart = false, failStop = false;
+    int failReadAt = -1;    ///< throw on this read
+    int shortFrameAt = -1;  ///< report this frame two bytes short (the writer refuses it)
+
+    const CameraInfo& info() const override { return sim_.info(); }
+    std::vector<ControlInfo> controls() const override { return sim_.controls(); }
+    std::optional<double> control(std::string_view n) const override { return sim_.control(n); }
+    void setControl(std::string_view n, double v) override { sim_.setControl(n, v); }
+    Roi roi() const override { return sim_.roi(); }
+    void setRoi(const Roi& r) override { sim_.setRoi(r); }
+    int bitDepth() const override { return sim_.bitDepth(); }
+    void setBitDepth(int b) override { sim_.setBitDepth(b); }
+    void startStream() override {
+        if (failStart) throw CameraError("start failed");
+        sim_.startStream();
+    }
+    void stopStream() override {
+        sim_.stopStream();
+        if (failStop) throw CameraError("stop failed");
+    }
+    bool streaming() const override { return sim_.streaming(); }
+    ReadResult readFrame(std::span<std::byte> dst, FrameInfo& fi, std::chrono::milliseconds t) override {
+        if (reads_ == failReadAt) throw CameraError("camera unplugged");
+        const auto r = sim_.readFrame(dst, fi, t);
+        if (reads_++ == shortFrameAt) fi.bytes -= 2;
+        return r;
+    }
+
+private:
+    SimCamera sim_;
+    int reads_ = 0;
+};
+
 }  // namespace
+
+TEST_CASE("CaptureSession: a camera that won't start fails start() and leaves nothing running") {
+    TempDir dir;
+    Faulty cam(makeSer(dir, 16, 8, 5, 59'500));
+    cam.failStart = true;
+    for (bool record : {true, false}) {
+        CaptureOptions opt;
+        if (record) opt.output = dir / "out.ser";
+        CaptureSession session(cam, opt);
+        CHECK_THROWS_WITH(session.start(), "start failed");
+        CHECK_FALSE(session.stats().running);
+    }   // and is destroyed without waiting on anything
+}
+
+TEST_CASE("CaptureSession: camera and writer errors end the session with the error") {
+    TempDir dir;
+    const auto src = makeSer(dir, 16, 8, 20, 59'500);
+    {
+        Faulty cam(src);
+        cam.failReadAt = 5;
+        CaptureOptions opt;
+        opt.output = dir / "a.ser";
+        CaptureSession session(cam, opt);
+        session.start();
+        REQUIRE(session.wait(5s));
+        CHECK(session.stats().error == "camera unplugged");
+        CHECK(session.stats().written == 5);
+    }
+    {
+        Faulty cam(src);
+        cam.failStop = true;
+        CaptureOptions opt;
+        opt.frameLimit = 3;
+        CaptureSession session(cam, opt);
+        session.start();
+        REQUIRE(session.wait(5s));
+        CHECK(session.stats().error == "stop failed");
+    }
+    {
+        Faulty cam(src);
+        cam.shortFrameAt = 2;
+        CaptureOptions opt;
+        opt.output = dir / "b.ser";
+        opt.ringBytes = 64 * 4096;
+        CaptureSession session(cam, opt);
+        session.start();
+        REQUIRE(session.wait(5s));
+        CHECK_FALSE(session.stats().error.empty());
+        CHECK(session.stats().written == 2);
+    }
+}
+
+TEST_CASE("CaptureSession writes each sensor's colour pattern into the SER header, also with direct I/O") {
+    const std::pair<ser::ColorId, Bayer> kinds[] = {{ser::ColorId::Mono, Bayer::None}, {ser::ColorId::BayerGRBG, Bayer::GRBG},
+                                                    {ser::ColorId::BayerGBRG, Bayer::GBRG}, {ser::ColorId::BayerBGGR, Bayer::BGGR}};
+    for (auto [colour, bayer] : kinds) {
+        TempDir dir;
+        SimCamera cam(makeSer(dir, 64, 32, 400, 59'500, colour), {SimPace::Realtime, true});
+        REQUIRE(cam.info().bayer == bayer);
+        CaptureOptions opt;
+        opt.output = dir / "out.ser";
+        opt.directIO = true;
+        opt.frameLimit = 30;
+        CaptureSession session(cam, opt);
+        session.start();
+        std::this_thread::sleep_for(100ms);
+        const auto live = session.stats();   // while the direct writer is still there
+        CHECK(live.running);
+        REQUIRE(session.wait(10s));
+        CHECK(ser::Reader(dir / "out.ser").header().colorId == colour);
+    }
+}
 
 TEST_CASE("CaptureSession records every frame of a simulated camera to SER") {
     TempDir dir;

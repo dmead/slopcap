@@ -109,7 +109,12 @@ AsiCamera::AsiCamera(int index) {
 
     roi_ = {0, 0, info_.sensorWidth, info_.sensorHeight, 1};
     bits_ = 8;
-    applyFormat();
+    try {
+        applyFormat();
+    } catch (...) {
+        ASICloseCamera(id_);   // the destructor won't run
+        throw;
+    }
 }
 
 AsiCamera::~AsiCamera() {
