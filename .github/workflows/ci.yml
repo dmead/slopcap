@@ -30,7 +30,7 @@ jobs:
       matrix:
         preset: [linux-debug, linux-asan, linux-tsan, linux-release]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
       - name: Build image (cached)
         uses: docker/build-push-action@v6
@@ -51,8 +51,10 @@ jobs:
 
   windows-exe:
     runs-on: ubuntu-24.04
+    # A newer push waits rather than cancelling: an uncached static Qt build (about an hour) should get to finish.
+    concurrency: {group: "windows-exe-${{ github.ref }}", cancel-in-progress: false}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Free disk space (building static Qt needs room)
         run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
       - uses: docker/setup-buildx-action@v3
@@ -116,7 +118,7 @@ jobs:
       HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
       GITHUB_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Homebrew packages (SlopCap, and what INDI links against)
         run: brew install qtbase ninja pkgconf catch2 libusb cfitsio libnova gsl fftw libev erfa jpeg-turbo
       - name: INDI cache key

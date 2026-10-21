@@ -129,8 +129,9 @@ TEST_CASE("SimCamera loops when asked") {
 
 TEST_CASE("SimCamera paces in real time and counts frames a slow reader misses") {
     TempDir dir;
-    // 10 frames, 20 ms apart: 180 ms of recording
-    SimCamera cam(makeSer(dir, 8, 4, 10, 200'000));
+    // 60 frames, 20 ms apart: 1.2 s of recording, so a slow machine's late wake-ups can't run past its end (with 10
+    // frames, a sleep that overslept by 100 ms on a busy CI Mac made the short read below return EndOfStream)
+    SimCamera cam(makeSer(dir, 8, 4, 60, 200'000));
     cam.startStream();
     std::vector<std::byte> buf(cam.frameBytes());
     FrameInfo fi;

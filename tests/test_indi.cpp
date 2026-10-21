@@ -42,7 +42,12 @@ struct SimServer {
         std::random_device rd;
         port = static_cast<quint16>(20000 + rd() % 20000);
         const QString sock = QString("/tmp/slopcap-indi-test-%1").arg(port);
-        QStringList args{"-u", sock, "-p", QString::number(port)};
+        QStringList args{"-p", QString::number(port)};
+#ifdef __linux__
+        // Linux indiserver also listens on a local socket; a private one keeps clear of a running server's. Elsewhere
+        // (macOS) indiserver has no -u and quits with its usage text.
+        args = QStringList{"-u", sock} + args;
+#endif
         if (!later.isEmpty()) {   // a control FIFO, so drivers can be started in a known order
             fifo = sock + ".fifo";
             if (QProcess::execute("mkfifo", {fifo}) != 0) return;
