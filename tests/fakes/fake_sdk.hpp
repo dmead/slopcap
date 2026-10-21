@@ -84,7 +84,6 @@ struct Qhy {
     bool wrongSize = false;              ///< deliver a frame of the wrong size
     bool openFails = false;              ///< OpenQHYCCD returns null
     int frameMs = 0;                     ///< time each frame takes
-    int firmwareUploads = 0;             ///< OSXInitQHYCCDFirmwareArray calls
     // what the backend did
     bool open = false, live = false, initialised = false;
     uint32_t bits = 0, bin = 0, x = 0, y = 0, w = 0, h = 0, streamMode = 9, readMode = 0;
@@ -93,5 +92,6 @@ struct Qhy {
     QhyCam& cam() { return cams.front(); }
 };
 Qhy& qhy();
+int qhyFirmwareUploads();                ///< OSXInitQHYCCDFirmwareArray calls in this process (macOS)
 
 }  // namespace fake

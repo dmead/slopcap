@@ -117,7 +117,7 @@ QhyCamera::QhyCamera(int index) {
         if (GetQHYCCDId(static_cast<uint32_t>(index), id) != OK) throw CameraError("QHY: cannot read camera id");
         GetQHYCCDModel(id, model);
         h_ = OpenQHYCCD(id);
-        if (!h_) throw CameraError(std::format("QHY open {} failed (in use by another program?)", id));
+        if (!h_) throw CameraError(std::format("QHY open {} failed (in use by another program?)", std::string_view(id)));
 
         info_.vendor = "QHY";
         info_.model = model[0] ? model : id;

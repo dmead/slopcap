@@ -53,8 +53,8 @@ ProbeResult probeAsi() {
         ASI_CAMERA_INFO info{};
         if (ASIGetCameraProperty(&info, i) != ASI_SUCCESS) { r.errors.push_back(std::format("camera {}: property read failed", i)); continue; }
         int id = info.CameraID;
-        if (ASIOpenCamera(id) != ASI_SUCCESS) { r.errors.push_back(std::format("{}: open failed (in use by another program?)", info.Name)); continue; }
-        if (ASIInitCamera(id) != ASI_SUCCESS) { r.errors.push_back(std::format("{}: init failed", info.Name)); ASICloseCamera(id); continue; }
+        if (ASIOpenCamera(id) != ASI_SUCCESS) { r.errors.push_back(std::format("{}: open failed (in use by another program?)", std::string_view(info.Name))); continue; }
+        if (ASIInitCamera(id) != ASI_SUCCESS) { r.errors.push_back(std::format("{}: init failed", std::string_view(info.Name))); ASICloseCamera(id); continue; }
 
         CameraReport c;
         c.vendor = r.vendor;

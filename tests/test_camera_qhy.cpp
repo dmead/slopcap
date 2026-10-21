@@ -42,7 +42,7 @@ TEST_CASE("QHY: listing and opening", "[qhy]") {
     CHECK(std::ranges::find(names, std::string("qhy:0  QHY533M  [QHY533M-0123456789abcdef]")) != names.end());
     prepareCameras();
 #ifdef __APPLE__
-    CHECK(f.firmwareUploads >= 1);   // once per process
+    CHECK(fake::qhyFirmwareUploads() == 1);   // once per process, however often asked
 #endif
 
     {

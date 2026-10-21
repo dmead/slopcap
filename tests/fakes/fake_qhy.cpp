@@ -23,6 +23,12 @@ void Qhy::reset() {
     cams = {c};
 }
 
+namespace {
+int g_firmwareUploads = 0;
+}
+
+int qhyFirmwareUploads() { return g_firmwareUploads; }
+
 Qhy& qhy() {
     static Qhy q = [] {
         Qhy x;
@@ -71,7 +77,7 @@ uint32_t ReleaseQHYCCDResource() {
 
 #ifdef __APPLE__
 uint32_t OSXInitQHYCCDFirmwareArray() {
-    ++fake::qhy().firmwareUploads;
+    ++fake::g_firmwareUploads;
     return failed("OSXInitQHYCCDFirmwareArray");
 }
 #endif

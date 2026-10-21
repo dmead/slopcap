@@ -73,7 +73,7 @@ AsiCamera::AsiCamera(int index) {
     if (ASIGetSerialNumber(id_, &sn) == ASI_SUCCESS) {
         for (unsigned char b : sn.id) info_.serial += std::format("{:02x}", b);
     } else {
-        info_.serial = std::format("{}#{}", ci.Name, id_);
+        info_.serial = std::format("{}#{}", std::string_view(ci.Name), id_);   // (a char array would print all 64 chars with libc++)
     }
     info_.sensorWidth = static_cast<int>(ci.MaxWidth);
     info_.sensorHeight = static_cast<int>(ci.MaxHeight);
