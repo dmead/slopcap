@@ -136,8 +136,9 @@ TEST_CASE("INDI mount: tracking, guide pulses, axis moves, park") {
     client.connectToServer("127.0.0.1", server.port);
     REQUIRE(waitFor([&] { return m.ready(); }, 8000));
     CHECK(m.device() == "Telescope Simulator");
-    CHECK(m.canPulse());
-    REQUIRE(m.parked().has_value());
+    // Guide and park properties come after the coordinates (ready); on a slow machine, in a later read.
+    CHECK(waitFor([&] { return m.canPulse(); }, 5000));
+    REQUIRE(waitFor([&] { return m.parked().has_value(); }, 5000));
     if (*m.parked()) {
         m.unpark();
         REQUIRE(waitFor([&] { return m.parked() == false; }, 10000));

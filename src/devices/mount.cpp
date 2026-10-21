@@ -80,7 +80,8 @@ void Mount::onDefined(const QString& dev, const QString& name) {
         readCoords();
         emit readyChanged(true);
     }
-    if (name == kTrack || name == kPark || name == kSlewRate || name == kGuideNS) emit stateChanged();
+    // canPulse() needs both guide properties, which drivers define one after the other: say so after either.
+    if (name == kTrack || name == kPark || name == kSlewRate || name == kGuideNS || name == kGuideWE) emit stateChanged();
 }
 
 void Mount::ensureConnected() {
