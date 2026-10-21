@@ -37,12 +37,17 @@ if [ "${1:-}" = "--dmg" ]; then
     mkdir -p "$STAGE"
     ditto "$APP" "$STAGE/SlopCap.app"
     ln -s /Applications "$STAGE/Applications"
-    if diskutil image create from --help >/dev/null 2>&1; then   # macOS 26+, where hdiutil create is deprecated
-        diskutil image create from --format UDZO --volumeName SlopCap "$STAGE" "$DMG" >/dev/null 2>&1 ||
-            { echo "diskutil image create failed" >&2; exit 1; }
-    else
-        hdiutil create -volname SlopCap -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+    # diskutil image (macOS 26+, where hdiutil create is deprecated) where it works, else hdiutil (on macOS 15 the
+    # diskutil command exists but refuses).
+    made=
+    if diskutil image create from --help >/dev/null 2>&1; then
+        if out=$(diskutil image create from --format UDZO --volumeName SlopCap "$STAGE" "$DMG" 2>&1); then
+            made=1
+        else
+            echo "diskutil image create failed, using hdiutil: $(echo "$out" | tr '\r' '\n' | grep -v completed | tail -2)" >&2
+        fi
     fi
+    [ -n "$made" ] || hdiutil create -volname SlopCap -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
     rm -rf "$STAGE"
     echo "$DMG: $(du -sh "$DMG" | cut -f1)"
 fi
