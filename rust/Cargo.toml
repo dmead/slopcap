@@ -1,0 +1,20 @@
+[package]
+name = "slopcap-kernels"
+version = "0.1.0"
+edition = "2021"
+description = "Rust ports of SlopCap's per-frame kernels (debayer + stretch, focus scoring, lossless prediction), for benchmarking against the C++"
+publish = false
+
+# No dependencies: the standard library only, like the C++ side's kernels (which use the C++ standard library only).
+
+[features]
+# The focus scorer's float sums through AVX2 intrinsics (std::arch) when the target has AVX2; without this feature
+# they're plain safe Rust ([f32; 8] lanes), which LLVM vectorizes only partly. See lanes in src/lib.rs.
+default = ["simd"]
+simd = []
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+debug = false

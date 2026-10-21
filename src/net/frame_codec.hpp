@@ -19,6 +19,7 @@
 #include <QJsonObject>
 #include <QString>
 
+#include <cstdint>
 #include <span>
 
 namespace slopcap::net {
@@ -36,6 +37,10 @@ struct EncodedFrame {
 };
 
 EncodedFrame encodeFrame(std::span<const std::byte> pixels, const FrameInfo& info, Bayer bayer, EncodeParams params);
+
+/// The lossless codec's prediction stage on its own (its deflate step aside): zigzagged residual bytes into `out`
+/// (width * height bytes, twice that for 16-bit). Returns the padding shift. For tools/kernelbench.
+int losslessResiduals(std::span<const std::byte> pixels, int width, int height, int bitDepth, Bayer bayer, uint8_t* out);
 
 /// The frame's metadata from a header (roi, bit depth, sequence, timestamp, bytes).
 FrameInfo frameInfoFrom(const QJsonObject& header);

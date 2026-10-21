@@ -183,6 +183,9 @@ if(SLOPCAP_BUILD_GUI)
       src/net/remote_client.cpp src/net/rate_control.cpp)
     set_target_properties(slopcap_net PROPERTIES AUTOMOC ON)
     target_link_libraries(slopcap_net PUBLIC slopcap_core Qt6::Gui Qt6::Network PRIVATE slopcap_warnings)
+    # The per-frame kernels timed against their Rust ports (rust/, tools/rust-vs-cpp.sh).
+    add_executable(slopcap-kernelbench tools/kernelbench/main.cpp)
+    target_link_libraries(slopcap-kernelbench PRIVATE slopcap_core slopcap_net slopcap_warnings)
     add_library(slopcap_gui STATIC
       src/preview/gl_renderer.cpp
       src/preview/preview_widget.cpp

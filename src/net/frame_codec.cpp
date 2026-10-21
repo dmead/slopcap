@@ -51,9 +51,10 @@ int predict(int a, int b, int c) {
 
 constexpr std::size_t kChunkTarget = 1 << 20;   ///< bytes of residuals per deflate chunk (at least)
 
-EncodedFrame encodeLossless(std::span<const std::byte> pixels, const FrameInfo& info, Bayer bayer) {
-    const int w = info.roi.width, h = info.roi.height;
-    const bool wide = info.bitDepth > 8;
+}  // namespace
+
+int losslessResiduals(std::span<const std::byte> pixels, int w, int h, int bitDepth, Bayer bayer, uint8_t* lo) {
+    const bool wide = bitDepth > 8;
     const int bps = wide ? 2 : 1;
     const bool planes = bayer != Bayer::None && w % 2 == 0 && h % 2 == 0;
     const int step = planes ? 2 : 1, sites = planes ? 2 : 1;
@@ -69,8 +70,6 @@ EncodedFrame encodeLossless(std::span<const std::byte> pixels, const FrameInfo& 
         for (std::size_t i = 0; i < n; ++i) used |= load16(pixels.data() + 2 * i);
     const int shift = wide && used ? std::countr_zero(used) : 0;
 
-    QByteArray residuals(static_cast<qsizetype>(n * bps), Qt::Uninitialized);
-    auto* lo = reinterpret_cast<uint8_t*>(residuals.data());
     uint8_t* hi = wide ? lo + n : nullptr;
     std::size_t k = 0;
     std::vector<int> prev(static_cast<std::size_t>(pw)), cur(static_cast<std::size_t>(pw));
@@ -97,6 +96,17 @@ EncodedFrame encodeLossless(std::span<const std::byte> pixels, const FrameInfo& 
                 }
                 std::swap(prev, cur);
             }
+    return shift;
+}
+
+namespace {
+
+EncodedFrame encodeLossless(std::span<const std::byte> pixels, const FrameInfo& info, Bayer bayer) {
+    const int w = info.roi.width, h = info.roi.height;
+    const bool planes = bayer != Bayer::None && w % 2 == 0 && h % 2 == 0;
+    const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
+    QByteArray residuals(static_cast<qsizetype>(n * (info.bitDepth > 8 ? 2 : 1)), Qt::Uninitialized);
+    const int shift = losslessResiduals(pixels, w, h, info.bitDepth, bayer, reinterpret_cast<uint8_t*>(residuals.data()));
 
     // deflate in chunks, in parallel
     const std::size_t total = static_cast<std::size_t>(residuals.size());

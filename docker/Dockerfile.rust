@@ -1,0 +1,8 @@
+# The C++ vs Rust benchmark's environment (tools/rust-vs-cpp.sh): the SlopCap build image plus Ubuntu's Rust toolchain,
+# and clang, so the C++ can also be built with LLVM (Rust's code generator) as well as GCC.
+#   docker build -t slopcap-rust --build-arg BASE=slopcap-build:<tag> -f docker/Dockerfile.rust docker
+ARG BASE=slopcap-build:latest
+FROM ${BASE}
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends rustc cargo clang \
+ && rm -rf /var/lib/apt/lists/*
