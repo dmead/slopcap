@@ -43,7 +43,9 @@ jobs:
           tags: slopcap-build:ci
           load: true
           cache-from: type=gha,scope=linux
-          cache-to: ${{ matrix.preset == 'linux-debug' && 'type=gha,scope=linux,mode=max' || '' }}
+          # every job that builds the image saves it: one getting through rebuilds it for all (the INDI PPA on
+          # Launchpad has outages, and an expired cache otherwise waits for all of them to get through at once)
+          cache-to: type=gha,scope=linux,mode=max
       - name: Tag the image as docker/build.sh expects
         run: docker tag slopcap-build:ci "slopcap-build:$(sha256sum < docker/Dockerfile | cut -c1-12)"
       - name: Sanitizers need fewer ASLR bits than the runner's kernel uses
@@ -85,6 +87,7 @@ jobs:
           tags: slopcap-build:ci
           load: true
           cache-from: type=gha,scope=linux
+          cache-to: type=gha,scope=linux,mode=max
       - name: Tag the image as docker/build.sh expects
         run: docker tag slopcap-build:ci "slopcap-build:$(sha256sum < docker/Dockerfile | cut -c1-12)"
       - name: Test with coverage (at least 90 % of src/)
