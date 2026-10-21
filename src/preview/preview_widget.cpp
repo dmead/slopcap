@@ -5,13 +5,64 @@
 #include <QKeyEvent>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QOffscreenSurface>
+#include <QOpenGLContext>
+#include <QOpenGLFunctions>
+#include <QOpenGLWidget>
 #include <QPainter>
+#include <QSurfaceFormat>
 #include <QWheelEvent>
 
 #include <algorithm>
 #include <cmath>
 
 namespace slopcap::preview {
+
+namespace {
+
+QString needsGl(const QString& why) {
+    return QString("The preview needs OpenGL 3.3, which isn't available here (%1). Capture and recording still work.").arg(why.left(300));
+}
+
+/// Can this machine run the GPU view? Asked once, on a throwaway context, before any QOpenGLWidget exists. Empty when
+/// it can, else what it has instead ("OpenGL 1.1, GDI Generic").
+QString glMissing() {
+    static const QString why = [] {
+        const QSurfaceFormat fmt = QSurfaceFormat::defaultFormat();
+        QOffscreenSurface surface;
+        surface.setFormat(fmt);
+        surface.create();
+        QOpenGLContext ctx;
+        ctx.setFormat(fmt);
+        if (!ctx.create() || !ctx.makeCurrent(&surface)) return QString("no OpenGL context");
+        const QSurfaceFormat f = ctx.format();
+        QString r;
+        if (ctx.isOpenGLES() || f.majorVersion() * 10 + f.minorVersion() < 33) {
+            const auto* name = reinterpret_cast<const char*>(ctx.functions()->glGetString(GL_RENDERER));
+            r = QString("%1 %2.%3%4").arg(ctx.isOpenGLES() ? "OpenGL ES" : "OpenGL").arg(f.majorVersion()).arg(f.minorVersion())
+                    .arg(name ? QString(", ") + name : QString());
+        }
+        ctx.doneCurrent();
+        return r;
+    }();
+    return why;
+}
+
+}  // namespace
+
+/// The GPU view: a QOpenGLWidget covering the preview, there only when OpenGL 3.3 is. Input goes through to the
+/// PreviewWidget (transparent for mouse events); the GL hooks call back into it.
+class GlView : public QOpenGLWidget {
+public:
+    explicit GlView(PreviewWidget* owner) : QOpenGLWidget(owner), owner_(owner) { setAttribute(Qt::WA_TransparentForMouseEvents); }
+
+protected:
+    void initializeGL() override { owner_->initializeGL(); }
+    void paintGL() override { owner_->paintGL(); }
+
+private:
+    PreviewWidget* owner_;
+};
 
 /// Transparent child covering the preview; paints the overlays with the raster engine (QPainter straight onto a
 /// core-profile GL widget doesn't reliably show).
@@ -33,8 +84,14 @@ private:
     PreviewWidget* owner_;
 };
 
-PreviewWidget::PreviewWidget(QWidget* parent) : QOpenGLWidget(parent) {
-    overlayLayer_ = new OverlayLayer(this);
+PreviewWidget::PreviewWidget(QWidget* parent) : QWidget(parent) {
+    if (const QString why = glMissing(); why.isEmpty()) {
+        gl_ = new GlView(this);
+    } else {
+        glError_ = needsGl(why);
+        qWarning().noquote() << "preview:" << glError_;
+    }
+    overlayLayer_ = new OverlayLayer(this);   // after the GPU view, so it stacks on top
     setMinimumSize(320, 240);
     setFocusPolicy(Qt::StrongFocus);
     timer_.setTimerType(Qt::PreciseTimer);
@@ -44,10 +101,15 @@ PreviewWidget::PreviewWidget(QWidget* parent) : QOpenGLWidget(parent) {
 
 PreviewWidget::~PreviewWidget() {
     if (glReady_) {
-        makeCurrent();
+        gl_->makeCurrent();
         renderer_.destroy();
-        doneCurrent();
+        gl_->doneCurrent();
     }
+}
+
+void PreviewWidget::refresh() {
+    if (gl_) gl_->update();   // paintGL also repaints the overlays
+    else overlayLayer_->update();
 }
 
 void PreviewWidget::setSource(LatestFrame* source, Bayer bayer) {
@@ -75,28 +137,28 @@ void PreviewWidget::setLevels(const Levels& lv) {
     levels_ = lv;
     levels_.wb = wb;
     if (glReady_ && !timer_.isActive()) {   // paused: re-stretch the frame on screen
-        makeCurrent();
+        gl_->makeCurrent();
         renderer_.reprocess(levels_);
-        doneCurrent();
-        update();
+        gl_->doneCurrent();
+        refresh();
     }
 }
 
 void PreviewWidget::setOverlay(const QString& key, Overlay overlay) {
     if (overlay) overlays_[key] = std::move(overlay);
     else overlays_.erase(key);
-    update();
+    refresh();
 }
 
 void PreviewWidget::setCrosshair(bool on) {
     crosshair_ = on;
-    update();
+    refresh();
 }
 
 void PreviewWidget::fitToWindow() {
     zoom_ = 1;
     centre_ = {-1, -1};
-    update();
+    refresh();
     emit zoomChanged();
 }
 
@@ -105,7 +167,7 @@ void PreviewWidget::zoomOneToOne() { zoomTo(1.0); }
 void PreviewWidget::zoomTo(double k) {
     const double fs = fitScale();
     zoom_ = fs > 0 ? k / fs : 1;
-    update();
+    refresh();
     emit zoomChanged();
 }
 
@@ -116,9 +178,8 @@ void PreviewWidget::initializeGL() {
         renderer_.initialize();
         glReady_ = true;
     } catch (const std::exception& e) {
-        // e.g. Remote Desktop or an old driver without OpenGL 3.3: capture still works, the preview can't
-        glError_ = QString("The preview needs OpenGL 3.3, which isn't available here (%1). Capture and recording still work.")
-                       .arg(QString::fromLocal8Bit(e.what()).left(300));
+        // The probe said 3.3, but the renderer can't start (shaders, framebuffers): capture still works
+        glError_ = needsGl(QString::fromLocal8Bit(e.what()));
         qWarning().noquote() << "preview:" << glError_;
     }
 }
@@ -145,14 +206,14 @@ void PreviewWidget::poll() {
     }
     if (glReady_) {
         const QSize before = imageSize();
-        makeCurrent();
+        gl_->makeCurrent();
         auto lv = levels_;
         if (!debayer_) lv.wb = {1, 1, 1};
         renderer_.process(f->pixels.data(), fi.roi.width, fi.roi.height, fi.bitDepth, debayer_ ? bayer_ : Bayer::None, lv);
-        doneCurrent();
+        gl_->doneCurrent();
         if (imageSize() != before) centre_ = {-1, -1};   // new ROI: recentre
     }
-    update();
+    refresh();
 
     ++fpsFrames_;
     if (fpsClock_.elapsed() >= 1000) {
@@ -185,13 +246,14 @@ void PreviewWidget::paintGL() {
     const QTransform t = imageToWidget();
     const QSize s = imageSize();
     const QRectF r = t.mapRect(QRectF(0, 0, s.width(), s.height()));
-    renderer_.draw(defaultFramebufferObject(), static_cast<int>(width() * dpr), static_cast<int>(height() * dpr), r.x() * dpr,
+    renderer_.draw(gl_->defaultFramebufferObject(), static_cast<int>(width() * dpr), static_cast<int>(height() * dpr), r.x() * dpr,
                    r.y() * dpr, r.width() * dpr, r.height() * dpr);
     overlayLayer_->update();
 }
 
 void PreviewWidget::resizeEvent(QResizeEvent* e) {
-    QOpenGLWidget::resizeEvent(e);
+    QWidget::resizeEvent(e);
+    if (gl_) gl_->setGeometry(rect());
     overlayLayer_->setGeometry(rect());
 }
 
@@ -229,7 +291,7 @@ void PreviewWidget::wheelEvent(QWheelEvent* e) {
     zoom_ = std::clamp(zoom_ * factor, 0.5, 64.0);
     const double k = scale();
     centre_ = QPointF(img.x() - (at.x() - width() / 2.0) / k, img.y() - (at.y() - height() / 2.0) / k);
-    update();
+    refresh();
     emit zoomChanged();
 }
 
@@ -245,7 +307,7 @@ void PreviewWidget::mousePressEvent(QMouseEvent* e) {
 void PreviewWidget::mouseMoveEvent(QMouseEvent* e) {
     if (!dragging_) return;
     centre_ = dragCentre_ - (e->position() - dragStart_) / scale();
-    update();
+    refresh();
 }
 
 void PreviewWidget::mouseReleaseEvent(QMouseEvent*) {
@@ -259,7 +321,7 @@ void PreviewWidget::keyPressEvent(QKeyEvent* e) {
     if (e->key() == Qt::Key_F) fitToWindow();
     else if (e->key() == Qt::Key_1) zoomOneToOne();
     else if (e->key() == Qt::Key_C) setCrosshair(!crosshair_);
-    else QOpenGLWidget::keyPressEvent(e);
+    else QWidget::keyPressEvent(e);
 }
 
 void PreviewWidget::contextMenuEvent(QContextMenuEvent* e) {

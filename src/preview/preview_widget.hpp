@@ -9,22 +9,27 @@
 #include "preview/render_cpu.hpp"
 
 #include <QElapsedTimer>
-#include <QOpenGLWidget>
 #include <QPointF>
 #include <QTimer>
 #include <QTransform>
+#include <QWidget>
 
 #include <array>
 #include <functional>
 #include <map>
 
+class QOpenGLWidget;
 class QPainter;
 
 namespace slopcap::preview {
 
-class PreviewWidget : public QOpenGLWidget {
+/// A plain widget holding the GPU view (a QOpenGLWidget child) only when the machine has OpenGL 3.3: on an older
+/// context (Windows' own OpenGL 1.1 without a GPU driver, some Remote Desktop sessions) Qt can't even composite a
+/// QOpenGLWidget into the window and crashes, so then there is none, and the view says why instead.
+class PreviewWidget : public QWidget {
     Q_OBJECT
     friend class OverlayLayer;
+    friend class GlView;
 public:
     /// Paints in image pixel coordinates (the painter's transform maps them to the widget); `scale` is widget px per
     /// image px, for line widths and text that should stay a constant size.
@@ -61,8 +66,6 @@ signals:
     void centreRequested(QPointF imagePixel);
 
 protected:
-    void initializeGL() override;
-    void paintGL() override;
     void resizeEvent(QResizeEvent* e) override;
     void wheelEvent(QWheelEvent* e) override;
     void mousePressEvent(QMouseEvent* e) override;
@@ -73,12 +76,16 @@ protected:
     void contextMenuEvent(QContextMenuEvent* e) override;
 
 private:
+    void initializeGL();   ///< from GlView
+    void paintGL();        ///< from GlView
+    void refresh();        ///< repaint: the GPU view if there is one, else the overlays (the message)
     void poll();
     double fitScale() const;          ///< widget px per image px at "fit"
     double scale() const { return fitScale() * zoom_; }
     QTransform imageToWidget() const;
     void paintOverlays(QPainter& p) const;
     QWidget* overlayLayer_ = nullptr;   ///< transparent child on top: overlays are raster-painted there
+    QOpenGLWidget* gl_ = nullptr;       ///< the GPU view (GlView), or none without OpenGL 3.3
 
     GlRenderer renderer_;
     LatestFrame* source_ = nullptr;
