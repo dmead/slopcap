@@ -26,7 +26,11 @@ server running on another computer (Settings → INDI server). ASCOM support is 
 
 ## Linux (Ubuntu)
 
-SlopCap is built from source on Linux (see [Building and testing](developing.md) for the details):
+**From the zip:** `slopcap-linux-x64.zip` runs as it is, with Qt and the camera drivers inside, on Ubuntu 26.04 or
+newer (or another Linux with glibc 2.43 or newer). Unzip it and run `slopcap-linux-x64/slopcap`. The INDI packages below
+still bring the cameras' USB permission rules and QHY's firmware (the zip's `udev/` folder has the rules alone).
+
+**From source** (see [Building and testing](developing.md) for the details):
 
 ```bash
 sudo apt install build-essential cmake ninja-build catch2 qt6-base-dev fonts-ibm-plex

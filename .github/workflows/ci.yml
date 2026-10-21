@@ -1,12 +1,15 @@
 # Builds and tests SlopCap on Linux, Windows and macOS on every push and pull request (Markdown-only changes skip it).
 #   linux          docker/build.sh in the project's build image (docker/Dockerfile: Ubuntu 26.04, GCC 15, Qt 6, the
 #                  ZWO / QHY SDKs and INDI from the INDI PPA, Xvfb + Mesa): debug, ASan + UBSan and TSan with tests,
-#                  and release.
-#   windows-exe    the self-contained slopcap.exe (MinGW + static Qt, docker/Dockerfile.mingw). The camera DLLs are
-#                  proprietary and not in the repository, so this exe has no ZWO / QHY support.
+#                  and release, packed as slopcap-linux-x64.zip (tools/package.sh) and started in a bare Ubuntu.
+#   coverage       every test on a gcov build; fails below 90 % of src/ lines (tools/coverage.sh), report attached.
+#   windows-exe    the self-contained slopcap.exe (MinGW + static Qt, docker/Dockerfile.mingw), and
+#                  slopcap-windows-x64.zip. The camera DLLs are proprietary and not in the repository, so this exe has
+#                  no ZWO / QHY support.
 #   windows-smoke  starts that exe on a real Windows runner: replays a generated recording and records it.
 #   macos          Apple silicon: Homebrew Qt, the camera SDKs (tools/macos-sdks.sh), INDI (tools/macos-indi.sh,
-#                  cached), macos-debug with every test, then SlopCap.app and SlopCap.dmg.
+#                  cached), macos-debug with every test, then SlopCap.app, SlopCap.dmg and slopcap-macos-arm64.zip,
+#                  and a run of the app.
 # Docker layers live in the Actions cache, so the images (static Qt for Windows takes about an hour) build once.
 # Minutes: GitHub bills macOS x10 and Windows x2 for private repositories.
 name: ci
@@ -48,6 +51,55 @@ jobs:
         run: sudo sysctl vm.mmap_rnd_bits=28
       - name: Build and test
         run: SLOPCAP_REGISTRY= docker/build.sh ${{ matrix.preset }}
+      - name: Package (slopcap-linux-x64.zip)
+        if: matrix.preset == 'linux-release'
+        run: tools/package.sh linux
+      - name: Start the package in a bare Ubuntu (no Qt, only what a desktop has)
+        if: matrix.preset == 'linux-release'
+        run: |
+          docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 bash -euc '
+            apt-get update -qq
+            apt-get install -y -qq --no-install-recommends python3 libgl1 libegl1 libopengl0 libfontconfig1 libharfbuzz0b               libdbus-1-3 libglib2.0-0t64 libx11-xcb1 libxcb1 libudev1 >/dev/null
+            cd /tmp && python3 -m zipfile -e /src/build/package/slopcap-linux-x64.zip . && chmod +x slopcap-linux-x64/slopcap slopcap-linux-x64/bin/slopcap
+            python3 /src/tools/package/make-test-ser.py test.ser
+            QT_QPA_PLATFORM=offscreen slopcap-linux-x64/slopcap --settings /tmp/settings --camera sim:test.ser --record --out /tmp/rec               --quit-after 4 --screenshot /tmp/shot.png
+            ls -l /tmp/rec/*.ser /tmp/shot.png'
+      - uses: actions/upload-artifact@v4
+        if: matrix.preset == 'linux-release'
+        with:
+          name: slopcap-linux-x64
+          path: build/package/slopcap-linux-x64.zip
+          if-no-files-found: error
+
+  coverage:
+    runs-on: ubuntu-24.04
+    concurrency: {group: "coverage-${{ github.ref }}", cancel-in-progress: true}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (cached)
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          file: docker/Dockerfile
+          tags: slopcap-build:ci
+          load: true
+          cache-from: type=gha,scope=linux
+      - name: Tag the image as docker/build.sh expects
+        run: docker tag slopcap-build:ci "slopcap-build:$(sha256sum < docker/Dockerfile | cut -c1-12)"
+      - name: Test with coverage (at least 90 % of src/)
+        run: SLOPCAP_REGISTRY= tools/coverage.sh 90
+      - name: Report
+        if: always()
+        run: |
+          { echo '```'; tail -n 12 build/linux-coverage/coverage.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: |
+            build/linux-coverage/coverage.txt
+            build/linux-coverage/coverage.json
 
   windows-exe:
     runs-on: ubuntu-24.04
@@ -73,6 +125,13 @@ jobs:
         with:
           name: slopcap-windows-x64-no-camera-sdks
           path: build/windows-static/slopcap.exe
+          if-no-files-found: error
+      - name: Package (slopcap-windows-x64.zip)
+        run: tools/package.sh windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slopcap-windows-x64-zip-no-camera-sdks
+          path: build/package/slopcap-windows-x64.zip
           if-no-files-found: error
 
   windows-smoke:
@@ -162,8 +221,22 @@ jobs:
         run: |
           tools/macos-app.sh --dmg
           ls build/macos-release/SlopCap.app/Contents/Frameworks | grep -E 'ASICamera2|qhyccd|libusb'
+      - name: Package (slopcap-macos-arm64.zip)
+        run: tools/package.sh macos
+      - name: Start the packaged app (replay a recording, record it, quit)
+        timeout-minutes: 5
+        run: |
+          cd "$RUNNER_TEMP" && ditto -x -k "$GITHUB_WORKSPACE/build/package/slopcap-macos-arm64.zip" .
+          python3 "$GITHUB_WORKSPACE/tools/package/make-test-ser.py" test.ser
+          slopcap-macos-arm64/SlopCap.app/Contents/MacOS/SlopCap --settings "$RUNNER_TEMP/settings" --camera sim:test.ser --record             --out "$RUNNER_TEMP/rec" --quit-after 6 --screenshot "$RUNNER_TEMP/shot.png"
+          ls -l "$RUNNER_TEMP"/rec/*.ser "$RUNNER_TEMP/shot.png"
       - uses: actions/upload-artifact@v4
         with:
           name: SlopCap-macos-arm64
           path: build/macos-release/SlopCap.dmg
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slopcap-macos-arm64
+          path: build/package/slopcap-macos-arm64.zip
           if-no-files-found: error
