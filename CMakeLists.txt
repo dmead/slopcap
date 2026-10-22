@@ -120,6 +120,12 @@ elseif(APPLE)
     execute_process(COMMAND chmod u+w ${_usb} COMMAND_ERROR_IS_FATAL ANY)
     execute_process(COMMAND install_name_tool -id @rpath/libusb-1.0.0.dylib ${_usb} COMMAND_ERROR_IS_FATAL ANY)
     execute_process(COMMAND codesign --force --sign - ${_usb} OUTPUT_QUIET ERROR_QUIET COMMAND_ERROR_IS_FATAL ANY)
+    # The SDKs' own dylibs too: their ad-hoc signatures don't match their contents, and macOS 27 kills any process
+    # that loads them (configure_file puts the originals back whenever they differ, so this runs on every configure).
+    foreach(_lib ${SLOPCAP_MAC_SDK_DYLIBS})
+      execute_process(COMMAND chmod u+w ${_lib} COMMAND_ERROR_IS_FATAL ANY)
+      execute_process(COMMAND codesign --force --sign - ${_lib} OUTPUT_QUIET ERROR_QUIET COMMAND_ERROR_IS_FATAL ANY)
+    endforeach()
     list(APPEND SLOPCAP_MAC_SDK_DYLIBS ${_usb})
     set(CMAKE_BUILD_RPATH ${SDK_LIB_DIR})   # tools and tests run from the build folder
   elseif(SLOPCAP_MAC_SDK_DIR AND EXISTS ${SLOPCAP_MAC_SDK_DIR})
