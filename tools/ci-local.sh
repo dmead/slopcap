@@ -9,8 +9,9 @@
 #     --upload DEST        when every job passed, copy the zips and summary.txt to DEST/<time>-<commit>/ with rclone
 #                          (DEST is an rclone remote and folder, e.g. drive:slopcap-builds; no share links are made)
 # Machine-local settings, not in git, go in build/ci/settings.sh (read first): SLOPCAP_CI_UPLOAD (the default for
-# --upload), RCLONE (the rclone program when it isn't on PATH) and an exported RCLONE_CONFIG (rclone's own setting).
+# --upload in full runs, those without --jobs), RCLONE (the rclone program when it isn't on PATH) and an exported RCLONE_CONFIG (rclone's own setting).
 # On Windows run it from Git Bash with MSYS_NO_PATHCONV=1. Logs and summary.txt: build/ci/runs/<time>-<commit>/.
+# When Docker doesn't answer, before the run or between jobs, Docker Desktop is started (docker desktop start).
 # Exits 1 when a job or the upload failed. Not here: the macos job (it needs a Mac: the "Natively" steps in
 # docs/developing.md). The Linux zip is started in a bare Ubuntu, as CI does, when an ubuntu:26.04 image is present
 # (docker pull ubuntu:26.04).
@@ -24,20 +25,29 @@ WT=$CI/src
 JOBS="linux-debug linux-asan linux-tsan linux-release coverage windows-exe"
 SMOKE=0
 UPLOAD=${SLOPCAP_CI_UPLOAD:-}
+partial=0
+upload_given=0
 REF=HEAD
 while [ $# -gt 0 ]; do
     case $1 in
-        --jobs) JOBS=$2; shift 2 ;;
+        --jobs) JOBS=$2; partial=1; shift 2 ;;
         --windows-smoke) SMOKE=1; shift ;;
-        --upload) UPLOAD=$2; shift 2 ;;
+        --upload) UPLOAD=$2; upload_given=1; shift 2 ;;
         -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
         *) REF=$1; shift ;;
     esac
 done
+[ $partial = 1 ] && [ $upload_given = 0 ] && UPLOAD=   # the default destination is for full runs
 # Git for Windows wants D:/… paths, and with MSYS_NO_PATHCONV=1 (which docker/build.sh needs) nothing converts them
 native() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else echo "$1"; fi; }
 SHA=$(git -C "$(native "$REPO")" rev-parse --verify --quiet "$REF^{commit}") || { echo "not a commit: $REF" >&2; exit 2; }
-docker info >/dev/null 2>&1 || { echo "Docker isn't answering (is Docker Desktop running?)" >&2; exit 2; }
+docker_up() {   # Docker answers; if it doesn't, Docker Desktop is started (its CLI plugin waits until it's ready)
+    docker info >/dev/null 2>&1 && return 0
+    docker desktop version >/dev/null 2>&1 || return 1
+    echo "Docker isn't answering: starting Docker Desktop" >&2
+    docker desktop start --timeout 300 >/dev/null 2>&1 && docker info >/dev/null 2>&1
+}
+docker_up || { echo "Docker isn't answering, and Docker Desktop couldn't be started" >&2; exit 2; }
 
 # the worktree: made once, then moved to the commit; untracked files go, the build folders stay
 if [ ! -e "$WT/.git" ]; then
@@ -58,6 +68,7 @@ failed=0
 job() {   # job NAME COMMAND...: run in the worktree, log to RUN/NAME.log, one line in the summary
     local name=$1 t0=$SECONDS rc result
     shift
+    docker_up   # Docker Desktop can stop during a long run (a failing start leaves the error to the job's own log)
     (cd "$WT" && "$@") > "$RUN/$name.log" 2>&1
     rc=$?
     result=pass
