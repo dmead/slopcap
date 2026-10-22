@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <mutex>
 #include <thread>
 
 namespace fake {
@@ -46,6 +47,15 @@ AsiControl* Asi::control(const std::string& name) {
     for (auto& c : cam().controls)
         if (c.name == name) return &c;
     return nullptr;
+}
+
+namespace {
+std::mutex g_drawMutex;
+}
+
+void setAsiDraw(std::function<void(uint8_t*, int, int, int, int)> draw) {
+    std::lock_guard lock(g_drawMutex);
+    asi().draw = std::move(draw);
 }
 
 Asi& asi() {
@@ -216,7 +226,12 @@ ASI_ERROR_CODE ASIGetVideoData(int, unsigned char* buf, long size, int waitMs) {
     // a real camera paces itself by the exposure; ~100 fps keeps the GUI tests' preview busy but not swamped
     (void)waitMs;
     std::this_thread::sleep_for(std::chrono::milliseconds(a.frameMs));
-    if (a.draw) a.draw(buf, a.width, a.height, bps, a.frames++);
+    std::function<void(uint8_t*, int, int, int, int)> draw;
+    {
+        std::lock_guard lock(fake::g_drawMutex);
+        draw = a.draw;
+    }
+    if (draw) draw(buf, a.width, a.height, bps, a.frames++);
     else fake::drawDisc(buf, a.width, a.height, bps, a.frames++);
     return ASI_SUCCESS;
 }

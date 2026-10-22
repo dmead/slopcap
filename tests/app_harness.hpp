@@ -112,6 +112,11 @@ bool useFakeAsi(int width = 640, int height = 480);
 void drawFocusFrames(const std::atomic<int>* position, std::array<int, 3> best);
 /// A defocused star: a ring with the secondary's shadow `offset` px off centre (collimation).
 void drawDonut(double offset);
+/// A planet whose red image sits (dx, dy) px from its blue one (atmospheric dispersion); change them any time.
+struct Dispersed {
+    std::atomic<double> dx{0}, dy{0};
+};
+void drawDispersed(const Dispersed* d);
 
 /// The child of `root` with this text (else the first whose text contains it).
 QPushButton* button(QWidget* root, const QString& text);
@@ -156,6 +161,7 @@ struct MainWindowProbe {
     FocusChartPanel*& chartPanel{w.chartPanel_};
     FocusResultsPanel*& resultsPanel{w.resultsPanel_};
     CollimationPanel*& collim{w.collim_};
+    AdcPanel*& adc{w.adc_};
     MountSection*& mountSection{w.mountSection_};
     QStackedWidget*& left{w.left_};
 

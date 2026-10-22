@@ -1,5 +1,6 @@
 // Focus, mount and collimation in the window, against INDI's focuser and telescope simulators and the fake ZWO camera
 // drawing frames whose sharpness follows the focuser (each colour sharpest at its own position).
+#include "app/adc_panel.hpp"
 #include "app/collimation_panel.hpp"
 #include "app/focus_controller.hpp"
 #include "app/focus_views.hpp"
@@ -55,6 +56,8 @@ TEST_CASE("focus: INDI focuser and mount simulators, sweeps, results, collimatio
         st.setValue("focuser/server", server.address());
         st.setValue("focuser/autoConnect", true);
         st.setValue("focuser/backlash", 20);
+        st.setValue("site/latitude", 51.5);   // (for ADC mode's altitude, from the mount)
+        st.setValue("site/longitude", -0.1);
     }
     TempDir dir;
     std::atomic<int> position{0};
@@ -215,6 +218,12 @@ TEST_CASE("focus: INDI focuser and mount simulators, sweeps, results, collimatio
     CHECK_FALSE(labelWith(right, "Analysis off"));
     checkBox(p.collim->left(), "Analyse")->setChecked(false);
     CHECK(labelWith(right, "Analysis off"));
+
+    // ADC mode with a target that isn't a planet: the altitude is where the mount points
+    p.target->setCurrentText("Star");
+    w.showTab("adc");
+    p.updateStats();
+    CHECK(labelWith(p.adc->right(), "The telescope"));
 
     // back in Capture: no target box over the preview when it's turned off
     w.showTab("capture");

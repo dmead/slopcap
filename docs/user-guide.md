@@ -8,7 +8,7 @@ focuser and a mount that INDI can drive.
 
 ![SlopCap's main window](images/main-window.png)
 
-- **Top bar:** the mode tabs (**Capture**, **Focus**, **Collimate**; *Align* and *Sequence* aren't finished yet), the
+- **Top bar:** the mode tabs (**Capture**, **Focus**, **Collimate**, **ADC**; *Align* and *Sequence* aren't finished yet), the
   **Target** and **Filter** for naming recordings, **⇄ Remote** for [remote viewing](remote-viewing.md), the
   **camera pill** (which camera is connected; click it to connect or disconnect), and the gear for Settings.
 - **Left: the camera.** Gain and exposure, region of interest (ROI), 8 or 16 bit, readout mode, and the capture
@@ -81,7 +81,31 @@ With the focal ratio and the focuser's microns per step entered in Settings → 
 critical focus zone: how far you can be from perfect focus before it shows. Each sweep's numbers are saved as a CSV
 file in the recording folder.
 
-## 5. Name the target
+## 5. Line up the colours (ADC tab)
+
+Low in the sky the air acts like a weak prism: it lifts a planet's blue image a little above its red one, so the
+planet has a blue fringe on top and a red one underneath, and the detail smears. An **ADC** (atmospheric dispersion
+corrector: two prisms with levers, between the telescope and the camera) pushes the colours back together. The ADC
+tab measures how far the red image sits from the blue one, live, with a colour camera.
+
+![The ADC tab before correcting: red sits 4 px below blue](images/adc.png)
+
+1. Centre the planet and set both ADC levers to **zero**.
+2. Press **Remember uncorrected.** The dashed line on the plot is now the direction the ADC has to correct along.
+3. Rotate the whole ADC in its holder so the levers are **level with the horizon**.
+4. Spread the levers evenly, a little at a time, until the arrow over the planet (red minus blue, drawn ten times
+   longer than it is) shrinks to nothing and the reading turns green.
+
+The status line says what to do next. **Under-corrected** means spread the levers further. **Over-corrected** means
+red and blue have crossed, so close them a little. **The ADC is turned** means what's left points across the dashed
+line, so rotate the ADC itself, not the levers. Correct again every half hour or so as the planet climbs or sinks.
+
+With **Settings → Site** and a planet in **Target** (or a connected mount), the tab also shows how much dispersion the
+air causes at the planet's altitude right now. With **Settings → Optics → Focal length**, it shows the readings in
+arcseconds as well as pixels. Uncorrected, the measured dispersion should come close to that figure; well over it
+usually means the focal length in Settings is wrong.
+
+## 6. Name the target
 
 The **Target** list names your recordings. Leave it on **Auto** and SlopCap works out what it's looking at from the
 image and the clock: Saturn by its rings, the Moon by its shape at tonight's phase, Mars, Jupiter, Uranus and Neptune
@@ -95,7 +119,7 @@ what's above the horizon). South and west are negative.
 Pick the target yourself when you know better; the name can't change during a recording either way. **Filter** adds
 the filter to the file name (L, R, G, B, IR, CH4, UV): `2026-10-17-0315_4-L-Saturn.ser`.
 
-## 6. Record
+## 7. Record
 
 Press **Record** (Ctrl+R, Cmd+R on a Mac). Press again to stop, or set a **Limit** (30 s to 10 min) and SlopCap stops
 by itself. Use **Folder…** to choose where recordings go.
@@ -107,7 +131,7 @@ the mount's coordinates. Every frame carries its own timestamp.
 Keep an eye on **dropped** in the bottom bar. Frames dropped by the camera usually mean the USB link is busy (lower USB
 traffic, or a smaller ROI); frames dropped by the disk mean the disk can't keep up (a faster disk or a smaller ROI).
 
-## 7. The mount (optional)
+## 8. The mount (optional)
 
 With a mount driver running on the same INDI server as the focuser (for a Meade LX200, `indi_lx200classic`), the
 **Mount** panel on the right shows where the telescope points. **N**, **E**, **W** and **S** send guide pulses of the
@@ -142,7 +166,7 @@ Everything is in the window, but SlopCap can also be started ready to go, which 
 | `--out DIR` | recording folder |
 | `--record` | start recording as soon as the camera is connected |
 | `--focuser HOST:PORT` | connect the focuser through this INDI server |
-| `--tab capture` / `focus` / `collimate` | open on this tab |
+| `--tab capture` / `focus` / `collimate` / `adc` | open on this tab |
 | `--serve`, `--connect HOST` / `auto` | share the camera, or watch another SlopCap ([remote viewing](remote-viewing.md)) |
 | `--fullscreen` | start in full view |
 | `--window WxH` | window size |

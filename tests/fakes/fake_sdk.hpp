@@ -45,7 +45,7 @@ struct Asi {
     int dropped = 0;                     ///< what ASIGetDroppedFrames reports
     int frameMs = 10;                    ///< time each frame takes
     /// Draws the frames instead of drawDisc (pixels, width, height, bytes per sample, frame number). Runs on the
-    /// capture thread.
+    /// capture thread: change it while a camera streams with setAsiDraw().
     std::function<void(uint8_t*, int, int, int, int)> draw;
     // what the backend did
     int openId = -1;
@@ -56,6 +56,8 @@ struct Asi {
     AsiControl* control(const std::string& name);
 };
 Asi& asi();
+/// Replace Asi::draw safely while the capture thread may be calling it.
+void setAsiDraw(std::function<void(uint8_t*, int, int, int, int)> draw);
 
 struct QhyMode {
     std::string name;

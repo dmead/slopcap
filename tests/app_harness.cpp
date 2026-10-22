@@ -240,7 +240,7 @@ bool useFakeAsi([[maybe_unused]] int width, [[maybe_unused]] int height) {
 
 void drawFocusFrames([[maybe_unused]] const std::atomic<int>* position, [[maybe_unused]] std::array<int, 3> best) {
 #ifdef SLOPCAP_FAKE_ASI
-    fake::asi().draw = [position, best](uint8_t* px, int w, int h, int bps, int) {
+    fake::setAsiDraw([position, best](uint8_t* px, int w, int h, int bps, int) {
         const double r = std::min(w, h) / 6.0, cx = w / 2.0, cy = h / 2.0;
         const int pos = position->load();
         std::array<double, 3> edge{};
@@ -261,13 +261,13 @@ void drawFocusFrames([[maybe_unused]] const std::atomic<int>* position, [[maybe_
                     px[i] = static_cast<uint8_t>(out * 250);
                 }
             }
-    };
+    });
 #endif
 }
 
 void drawDonut([[maybe_unused]] double offset) {
 #ifdef SLOPCAP_FAKE_ASI
-    fake::asi().draw = [offset](uint8_t* px, int w, int h, int bps, int) {
+    fake::setAsiDraw([offset](uint8_t* px, int w, int h, int bps, int) {
         const double cx = w / 2.0, cy = h / 2.0, outer = 45, inner = 18;
         for (int y = 0; y < h; ++y)
             for (int x = 0; x < w; ++x) {
@@ -281,7 +281,31 @@ void drawDonut([[maybe_unused]] double offset) {
                     px[i] = static_cast<uint8_t>(v * 250);
                 }
             }
-    };
+    });
+#endif
+}
+
+void drawDispersed([[maybe_unused]] const Dispersed* d) {
+#ifdef SLOPCAP_FAKE_ASI
+    fake::setAsiDraw([d](uint8_t* px, int w, int h, int bps, int) {
+        // a planet on an RGGB sensor whose red image sits (dx, dy) px from the blue one, green between them
+        const double dx = d->dx.load(), dy = d->dy.load(), r = std::min(w, h) / 6.0, cx = w / 2.0, cy = h / 2.0;
+        const double sx[3] = {dx / 2, 0, -dx / 2}, sy[3] = {dy / 2, 0, -dy / 2};
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                const int site = (y & 1) * 2 + (x & 1);
+                const int c = site == 0 ? 0 : site == 3 ? 2 : 1;
+                const double dist = std::hypot(x - cx - sx[c], y - cy - sy[c]);
+                const double v = 0.04 + 0.7 * std::clamp(r - dist + 0.5, 0.0, 1.0);   // a one-pixel soft edge
+                const auto i = static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x);
+                if (bps == 2) {
+                    const auto q = static_cast<uint16_t>(v * 60000);
+                    px[2 * i] = static_cast<uint8_t>(q & 0xff), px[2 * i + 1] = static_cast<uint8_t>(q >> 8);
+                } else {
+                    px[i] = static_cast<uint8_t>(v * 250);
+                }
+            }
+    });
 #endif
 }
 

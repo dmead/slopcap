@@ -91,7 +91,7 @@ int main(int argc, char** argv) {
     args.addOption({"out", "Recording folder.", "DIR"});
     args.addOption({"record", "Start recording as soon as the camera is connected."});
     args.addOption({"window", "Window size WIDTHxHEIGHT.", "WxH"});
-    args.addOption({"tab", "Open this sidebar tab: capture, focus or collimate.", "NAME"});
+    args.addOption({"tab", "Open this sidebar tab: capture, focus, collimate or adc.", "NAME"});
     args.addOption({"focuser", "Connect to the INDI server at HOST:PORT for the focuser.", "HOST:PORT"});
     args.addOption({"sweep", "Start a focus sweep once the focuser is ready (with --focuser)."});
     args.addOption({"sweep-range", "Sweep +- STEPS around the current position.", "STEPS"});

@@ -3,6 +3,7 @@
 //   Capture    camera + capture settings | live preview with toolbar and histogram | target, focuser, mount, raw histogram
 //   Focus      sweep settings | per-channel focus curves | best focus per channel, strategy, go to
 //   Collimate  method | live preview with ring/shadow overlay | offset readouts
+//   ADC        steps | live preview with the colour channels' offset | residual, guidance, what the air does
 //   Align, Sequence: in the design, not built yet (shown disabled)
 #pragma once
 
@@ -52,6 +53,7 @@ class RemoteServer;
 
 namespace slopcap::app {
 
+class AdcPanel;
 class CollimationPanel;
 class FocusChartPanel;
 class FocusController;
@@ -64,7 +66,7 @@ class SweepPanel;
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
-    enum Mode { Capture = 0, Focus = 1, Collimate = 2, Align = 3, Sequence = 4 };
+    enum Mode { Capture = 0, Focus = 1, Collimate = 2, Adc = 3, Align = 4, Sequence = 5 };
 
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
@@ -74,7 +76,7 @@ public:
     void toggleRecording();
     void stopCapture() { stopSession(); }
     void printSummary() const;                   ///< status to stdout (smoke tests)
-    void showTab(const QString& name);           ///< capture / focus / collimate
+    void showTab(const QString& name);           ///< capture / focus / collimate / adc
     void setMode(Mode m);
     /// Connect the focuser; optionally start a sweep around its position once it's ready (0 = default).
     void startFocuser(const QString& hostPort, bool sweep, int range, int step, int frames);
@@ -122,6 +124,7 @@ private:
     void runAutoTarget(const LatestFrame::Frame& f);
     void updateAutoTarget();
     void updateFocusMode();
+    void updateAdcContext();                     ///< the image scale and the target's altitude, for the ADC tool
     void writeSidecar(const QString& serPath, const CaptureStats& s, const QDateTime& mid) const;
     QString fileStem(const QDateTime& utc) const;
     QString cameraKey() const;
@@ -203,6 +206,7 @@ private:
     FocusChartPanel* chartPanel_ = nullptr;
     FocusResultsPanel* resultsPanel_ = nullptr;
     CollimationPanel* collim_ = nullptr;
+    AdcPanel* adc_ = nullptr;
 
     // capture left
     QWidget* cameraBox_ = nullptr;

@@ -1,6 +1,7 @@
 #include "app/main_window.hpp"
 
 #include "analysis/identify.hpp"
+#include "app/adc_panel.hpp"
 #include "app/collimation_panel.hpp"
 #include "app/focus_controller.hpp"
 #include "app/focus_views.hpp"
@@ -162,6 +163,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     logDevices();
     preview_ = new preview::PreviewWidget;
     collim_ = new CollimationPanel(preview_, this);
+    adc_ = new AdcPanel(preview_, this);
 
     auto* root = new QWidget;
     root->setObjectName("ground");
@@ -187,11 +189,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     left_->addWidget(sideColumn(buildCaptureLeft(), 280, 320));   // Capture
     left_->addWidget(sideColumn(sweepPanel_, 250, 300));          // Focus
     left_->addWidget(sideColumn(collim_->left(), 260, 300));      // Collimate
+    left_->addWidget(sideColumn(adc_->left(), 260, 300));         // ADC
     centre_->addWidget(buildPreviewPage());
     centre_->addWidget(chartPanel_);
     right_->addWidget(sideColumn(buildCaptureRight(), 280, 320));
     right_->addWidget(sideColumn(resultsPanel_, 280, 330));
     right_->addWidget(sideColumn(collim_->right(), 280, 320));
+    right_->addWidget(sideColumn(adc_->right(), 280, 320));
     for (auto* s : {left_, right_}) s->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     h->addWidget(left_);
     h->addWidget(centre_, 1);
@@ -244,6 +248,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         if (!cam_) return;
         focus_->onFrame(f, cam_->info().bayer);
         if (mode_ == Collimate) collim_->onFrame(f, cam_->info().bayer);
+        if (mode_ == Adc) adc_->onFrame(f, cam_->info().bayer);
         // the readout histogram: up to 10 times a second, while the Capture sidebar shows it
         if (mode_ == Capture && (!rawHistClock_.isValid() || rawHistClock_.elapsed() >= 100)) {
             rawHistClock_.start();
@@ -368,10 +373,11 @@ QWidget* MainWindow::buildHeader() {
     nl->setContentsMargins(3, 3, 3, 3);
     nl->setSpacing(4);
     modes_ = new QButtonGroup(this);
-    const char* names[] = {"Capture", "Focus", "Collimate", "Align", "Sequence"};
-    for (int i = 0; i < 5; ++i) {
+    const char* names[] = {"Capture", "Focus", "Collimate", "ADC", "Align", "Sequence"};
+    for (int i = 0; i < 6; ++i) {
         auto* b = theme::button(names[i], "nav");
         b->setCheckable(true);
+        if (i == Adc) b->setToolTip("Atmospheric dispersion corrector: line up the planet's red and blue images");
         if (i >= Align) {
             b->setEnabled(false);
             b->setToolTip(i == Align ? "Drift alignment with the target outline: designed, not built yet" : "Timed WinJUPOS sets: designed, not built yet");
@@ -801,6 +807,7 @@ void MainWindow::setMode(Mode m) {
     }
     centre_->setCurrentIndex(m == Focus ? 1 : 0);
     if (m != Collimate) collim_->setAnalysing(false);
+    adc_->setActive(m == Adc);
     updateFocusMode();
     updateStats();
 }
@@ -810,7 +817,8 @@ void MainWindow::showTab(const QString& name) {
     else if (name.compare("collimate", Qt::CaseInsensitive) == 0) {
         setMode(Collimate);
         collim_->setAnalysing(true);
-    } else setMode(Capture);
+    } else if (name.compare("adc", Qt::CaseInsensitive) == 0) setMode(Adc);
+    else setMode(Capture);
 }
 
 void MainWindow::startFocuser(const QString& hostPort, bool sweep, int range, int step, int frames) {
@@ -818,6 +826,28 @@ void MainWindow::startFocuser(const QString& hostPort, bool sweep, int range, in
     pendingRange_ = range, pendingStep_ = step, pendingFrames_ = frames;
     settings_.indiServer = hostPort;
     focus_->connectFocuser(hostPort);
+}
+
+void MainWindow::updateAdcContext() {
+    // the image scale, for arcseconds
+    std::optional<double> scale;
+    if (cam_ && settings_.focalLengthMm > 0 && cam_->info().pixelUm > 0)
+        scale = 206.265 * cam_->info().pixelUm * std::max(1, cam_->roi().bin) / settings_.focalLengthMm;
+    // the target's altitude, for what the air does: the planet named (or identified) from the ephemeris, else where
+    // the mount points
+    std::optional<AdcPanel::Altitude> altitude;
+    if (settings_.latitude && settings_.longitude) {
+        const double jd = analysis::julianDate(std::chrono::system_clock::now());
+        for (auto b : analysis::kBodies)
+            if (targetName().compare(analysis::bodyName(b), Qt::CaseInsensitive) == 0) {
+                const auto p = analysis::bodyPosition(b, jd);
+                altitude = AdcPanel::Altitude{analysis::altitudeDeg(p.ra, p.dec, jd, *settings_.latitude, *settings_.longitude), analysis::bodyName(b)};
+            }
+        if (!altitude && mount_->ready())
+            altitude = AdcPanel::Altitude{analysis::altitudeDeg(mount_->ra(), mount_->dec(), jd, *settings_.latitude, *settings_.longitude),
+                                          "The telescope"};
+    }
+    adc_->setContext(scale, altitude);
 }
 
 void MainWindow::updateFocusMode() {
@@ -891,6 +921,7 @@ void MainWindow::disconnectCamera() {
     saveSettings();
     cam_.reset();
     rawHist_->clear();
+    adc_->reset();
     autoName_.clear();
     autoDetail_.clear();
     updateAutoTarget();
@@ -1255,7 +1286,7 @@ void MainWindow::updateTargetInfo() {
     tDisp_->setText(disp);
     sDisp_->setText(disp);
     sSharp_->setText(QString("%1").arg(l.fraction[static_cast<std::size_t>(c)], 0, 'f', 2));
-    if (mode_ == Collimate || !targetBox_->isChecked()) {
+    if (mode_ == Collimate || mode_ == Adc || !targetBox_->isChecked()) {
         preview_->setOverlay("target", {});
     } else {
         const QRectF box(s.targetX0, s.targetY0, s.targetX1 - s.targetX0, s.targetY1 - s.targetY0);
@@ -1507,7 +1538,9 @@ void MainWindow::updateStats() {
     if (folder_) folder_->setText(QFileInfo(outDir_).fileName().isEmpty() ? "Folder…" : QFileInfo(outDir_).fileName());
     headerInfo_->setText(mode_ == Focus ? (focus_->sweeping() ? "Sweep running · scored per colour channel" : "Focus sweep · scored per colour channel")
                          : mode_ == Collimate ? "Defocused-star collimation"
+                         : mode_ == Adc       ? "Atmospheric dispersion: line up red and blue"
                                               : "");
+    if (mode_ == Adc) updateAdcContext();
     updateRemoteUi();
     if (remote_) {
         updateClientStats();
@@ -1729,6 +1762,7 @@ void MainWindow::disconnectRemote() {
     remote_->deleteLater();
     remote_ = nullptr;
     rawHist_->clear();
+    adc_->reset();
     autoName_.clear();
     autoDetail_.clear();
     recBadge_->hide();

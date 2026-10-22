@@ -353,7 +353,7 @@ FocusScores scoreFrame(std::span<const std::byte> pixels, int width, int height,
         sc.background = pbg;
         sc.peak = ppeak;
         double signal2 = 0, pcx = 0, pcy = 0;
-        signalAndCentroid(p, pbg, pbg + 0.15f * (ppeak - pbg), signal2, pcx, pcy);
+        signalAndCentroid(p, pbg, pbg + static_cast<float>(opt.centroidLevel) * (ppeak - pbg), signal2, pcx, pcy);
         double offX = 0, offY = 0;   // centroid back to full-frame pixels (centre of this channel's site(s))
         for (int k = 0; k < l.sites[c]; ++k) offX += l.sx[c][k], offY += l.sy[c][k];
         sc.cx = (x0 + pcx) * l.cell + offX / l.sites[c];

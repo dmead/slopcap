@@ -300,7 +300,11 @@ SlopCap scores each colour channel separately and shows all three.
   filter change can apply them. With a mono camera and a filter wheel, the same chart shows one curve per filter.
 
 **Related, but a different problem:** atmospheric dispersion shifts the colour channels sideways, not in focus. SlopCap
-reports per-channel centroid offsets as a separate readout (useful with an ADC); it isn't part of the focus curves.
+reports per-channel centroid offsets as a separate readout; it isn't part of the focus curves. The **ADC** tab
+(2026-10-22, `src/app/adc_panel.*`, `src/analysis/dispersion.*`) builds on it to set up a dispersion corrector: the
+red − blue offset as the median of the last ~15 readings, guidance from a remembered uncorrected reading (along it:
+under- or over-corrected; across it: the ADC is rotated), and the dispersion the air should cause at the target's
+altitude (Edlén / Filippenko refractivity × tan z, from the ephemeris or the mount and Settings → Site).
 
 **API:** `POST /v1/focus/sweep` returns `{channels: {R: {best, err, curve[]}, G: …, B: …}, spread, recommended: {mode,
 position}}`. `GET /v1/focus/live` returns per-channel live scores. `PUT /v1/focus/target {mode}` picks the strategy.

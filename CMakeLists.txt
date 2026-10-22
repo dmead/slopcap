@@ -37,6 +37,7 @@ add_library(slopcap_core STATIC
   src/analysis/collimation.cpp
   src/analysis/ephemeris.cpp
   src/analysis/identify.cpp
+  src/analysis/dispersion.cpp
 )
 target_sources(slopcap_core PRIVATE src/camera/open_camera.cpp)
 target_include_directories(slopcap_core PUBLIC src)
@@ -199,7 +200,7 @@ if(SLOPCAP_BUILD_GUI)
     # The application's windows and panels: a library, so the tests drive the same code the program runs.
     add_library(slopcap_app STATIC src/app/main_window.cpp src/app/theme.cpp src/app/focus_controller.cpp
       src/app/focus_views.cpp src/app/collimation_panel.cpp src/app/settings_dialog.cpp src/app/mount_section.cpp
-      src/app/raw_histogram.cpp src/app/session_log.cpp src/app/full_view_bar.cpp)
+      src/app/raw_histogram.cpp src/app/session_log.cpp src/app/full_view_bar.cpp src/app/adc_panel.cpp)
     set_target_properties(slopcap_app PROPERTIES AUTOMOC ON)
     target_link_libraries(slopcap_app PUBLIC slopcap_gui slopcap_net PRIVATE slopcap_warnings)
     # qt_add_executable: with a static Qt it also links the platform plugin (qwindows) into the exe
@@ -272,7 +273,7 @@ if(SLOPCAP_BUILD_TESTS)
   if(Catch2_FOUND)
     enable_testing()
     add_executable(slopcap-tests tests/test_ser.cpp tests/test_sim_camera.cpp tests/test_pipeline.cpp tests/test_direct_writer.cpp tests/test_preview.cpp tests/test_focus.cpp tests/test_sweep.cpp tests/test_collimation.cpp
-      tests/test_identify.cpp)
+      tests/test_identify.cpp tests/test_dispersion.cpp)
     target_link_libraries(slopcap-tests PRIVATE slopcap_core slopcap_warnings Catch2::Catch2WithMain)
     include(Catch)
     catch_discover_tests(slopcap-tests)
@@ -293,7 +294,7 @@ if(SLOPCAP_BUILD_TESTS)
       # executable), all under a real QApplication; needs a screen (Xvfb in docker/build.sh).
       if(TARGET Qt6::Test)
         add_executable(slopcap-app-tests tests/app_main.cpp tests/app_harness.cpp tests/test_app_window.cpp tests/test_app_focus.cpp
-          tests/test_app_panels.cpp tests/test_app_remote.cpp tests/test_app_program.cpp)
+          tests/test_app_panels.cpp tests/test_app_remote.cpp tests/test_app_program.cpp tests/test_app_adc.cpp)
         target_link_libraries(slopcap-app-tests PRIVATE slopcap_app slopcap_warnings Catch2::Catch2 Qt6::Test)
         target_compile_definitions(slopcap-app-tests PRIVATE SLOPCAP_PROGRAM="$<TARGET_FILE:slopcap>")
         add_dependencies(slopcap-app-tests slopcap)

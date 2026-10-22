@@ -52,6 +52,9 @@ build/linux-release/slopcap --camera asi --focuser localhost:7624
    position". The table shows each channel's best focus ± error for every metric and the spread; pick a strategy
    (Green, Luminance-weighted, Balanced, Red, Blue) and "Go to". Each sweep's per-frame scores are saved as a CSV
    in the recording folder.
+   **ADC tab** (colour camera, planet low in the sky): levers at zero, "Remember uncorrected", level the ADC, spread
+   the levers until the red − blue arrow is gone; it says under-, over-corrected or rotated, and what the air causes
+   at the target's altitude (Settings → Site).
 4. **Record** (Ctrl+R): files are named WinJUPOS-style from the mid-capture time and the Target field
    (`2026-10-17-0315_4-Saturn.ser`), with a `.txt` of the settings and focuser position next to each. With Target
    **Auto**, SlopCap identifies the Moon, Mars or an outer planet from the image and the clock: Saturn's rings, the

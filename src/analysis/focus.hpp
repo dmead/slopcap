@@ -31,6 +31,7 @@ struct FocusOptions {
                                 ///< the largest power of two that fits
     double bandLow = 0.10;      ///< fourier band, as fractions of the Nyquist frequency
     double bandHigh = 0.50;
+    double centroidLevel = 0.15;   ///< the centroids weigh pixels above this share of the channel's range over the sky
 };
 
 struct ChannelScore {
