@@ -203,6 +203,12 @@ void PreviewWidget::poll() {
         // smoothed so seeing and noise don't make the colour flicker
         const auto g = autoWhiteBalance(std::span(f->pixels).first(fi.bytes), fi.roi.width, fi.roi.height, fi.bitDepth, bayer_);
         for (std::size_t c = 0; c < 3; ++c) levels_.wb[c] = levels_.wb[c] == 1.0 && c != 1 ? g[c] : 0.85 * levels_.wb[c] + 0.15 * g[c];
+        // the gains apply before the levels: keep the white point above the balanced planet, so the gains don't paint its
+        // bright zones white (the raw histogram that set it doesn't know about them)
+        if (auto_)
+            levels_.white = std::clamp(balancedPeak(std::span(f->pixels).first(fi.bytes), fi.roi.width, fi.roi.height, fi.bitDepth, bayer_,
+                                                    levels_.wb) * 1.02,
+                                       levels_.white, 1.0);
     }
     if (glReady_) {
         const QSize before = imageSize();

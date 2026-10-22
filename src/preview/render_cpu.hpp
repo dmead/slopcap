@@ -24,6 +24,12 @@ struct Levels {
 /// Display only; recordings stay raw.
 std::array<double, 3> autoWhiteBalance(std::span<const std::byte> pixels, int width, int height, int bitDepth, Bayer bayer);
 
+/// How bright the target gets once `gains` are applied (its brightest channel, 99.9th percentile of the 2x2 cells), 0..1
+/// of full scale; 0 for mono or nothing there. The auto stretch's white point must not sit below it, or the white
+/// balance pushes the planet's bright zones to white while the data aren't clipped.
+double balancedPeak(std::span<const std::byte> pixels, int width, int height, int bitDepth, Bayer bayer,
+                    const std::array<double, 3>& gains);
+
 /// 256-bin histogram of one frame (8-bit samples directly, 16-bit by their high byte), optionally on every Nth pixel.
 std::array<uint32_t, 256> histogram(std::span<const std::byte> pixels, int bitDepth, int stride = 1);
 

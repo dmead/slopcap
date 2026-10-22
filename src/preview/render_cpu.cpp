@@ -202,4 +202,31 @@ std::array<double, 3> autoWhiteBalance(std::span<const std::byte> pixels, int wi
     return {std::clamp(sum[1] / sum[0], 0.25, 4.0), 1.0, std::clamp(sum[1] / sum[2], 0.25, 4.0)};
 }
 
+double balancedPeak(std::span<const std::byte> pixels, int width, int height, int bitDepth, Bayer bayer,
+                    const std::array<double, 3>& gains) {
+    if (bayer == Bayer::None || width < 4 || height < 4) return 0;
+    const Raw raw{pixels.data(), width, height, bitDepth};
+    const int step = std::max(1, static_cast<int>(std::sqrt(static_cast<double>(width) * height / 4 / 20000.0)));
+    std::vector<double> bright;   // each cell's brightest channel after the gains
+    double gmax = 0;
+    std::vector<std::array<double, 3>> cells;
+    for (int y = 0; y + 1 < height; y += 2 * step)
+        for (int x = 0; x + 1 < width; x += 2 * step) {
+            std::array<double, 3> c{0, 0, 0};
+            for (int dy = 0; dy < 2; ++dy)
+                for (int dx = 0; dx < 2; ++dx) {
+                    const int s = siteColor(bayer, x + dx, y + dy);
+                    c[static_cast<std::size_t>(s)] += raw.at(x + dx, y + dy) * (s == 1 ? 0.5 : 1.0);
+                }
+            gmax = std::max(gmax, c[1]);
+            cells.push_back(c);
+        }
+    for (const auto& c : cells)
+        if (c[1] > 0.3 * gmax) bright.push_back(std::max({c[0] * gains[0], c[1] * gains[1], c[2] * gains[2]}));
+    if (bright.empty()) return 0;
+    const auto k = static_cast<std::ptrdiff_t>(0.999 * static_cast<double>(bright.size() - 1));
+    std::nth_element(bright.begin(), bright.begin() + k, bright.end());
+    return bright[static_cast<std::size_t>(k)];
+}
+
 }  // namespace slopcap::preview

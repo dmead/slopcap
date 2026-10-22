@@ -142,6 +142,25 @@ TEST_CASE("autoLevels puts black at the background and white at the bright tail"
     CHECK(autoLevels({}).white == 1.0);   // empty histogram: identity
 }
 
+TEST_CASE("balancedPeak: where white must be once the white balance is applied") {
+    // an RGGB field, R=60, G=120, B=40 of 255 everywhere: gray world wants R x2, B x3, and every channel is then 120
+    const int w = 64, h = 48;
+    std::vector<std::byte> raw(w * h);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            const bool ry = (y & 1) == 0, rx = (x & 1) == 0;
+            raw[static_cast<std::size_t>(y * w + x)] = static_cast<std::byte>(ry && rx ? 60 : (!ry && !rx ? 40 : 120));
+        }
+    const auto gains = autoWhiteBalance(raw, w, h, 8, Bayer::RGGB);
+    CHECK(gains[0] == Catch::Approx(2.0).epsilon(0.01));
+    CHECK(gains[2] == Catch::Approx(3.0).epsilon(0.01));
+    CHECK(balancedPeak(raw, w, h, 8, Bayer::RGGB, gains) == Catch::Approx(120 / 255.0).epsilon(0.01));
+    // a bluer balance pushes blue above green: the peak follows it
+    CHECK(balancedPeak(raw, w, h, 8, Bayer::RGGB, {2.0, 1.0, 4.5}) == Catch::Approx(180 / 255.0).epsilon(0.01));
+    CHECK(balancedPeak(raw, w, h, 8, Bayer::None, gains) == 0);
+    CHECK(balancedPeak(filled(w * h, 0), w, h, 8, Bayer::RGGB, gains) == 0);
+}
+
 TEST_CASE("renderRgb demosaics a flat colour field exactly") {
     // RGGB 4x4 with R=200, G=100, B=50 everywhere: every output pixel must be (200,100,50).
     const int w = 4, h = 4;
