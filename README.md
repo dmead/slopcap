@@ -1,7 +1,5 @@
 # SlopCap
 
-[![ci](https://github.com/dmead/slopcap/actions/workflows/ci.yml/badge.svg)](https://github.com/dmead/slopcap/actions/workflows/ci.yml)
-
 <p align="center"><img src="docs/images/saturn.png" width="600" alt="Saturn, 4 August 2022"></p>
 
 **SlopCap records video of the planets, the Moon and the Sun** from ZWO and QHY astronomy cameras, on Windows,
@@ -112,8 +110,8 @@ Linux or Mac, can be either end.
 | **Linux** | `slopcap-linux-x64.zip`: unzip and run, Qt and the ZWO and QHY camera drivers included (Ubuntu 26.04 or newer) |
 | **macOS** | `SlopCap.app` (Apple silicon, macOS 15 or newer), with the ZWO and QHY camera drivers inside |
 
-Every build of the code produces all three: open the latest [run](https://github.com/dmead/slopcap/actions/workflows/ci.yml)
-and download them under *Artifacts*. ZWO's and QHY's Windows drivers can't be published here, so the Windows download
+A [build on GitHub](https://github.com/dmead/slopcap/actions/workflows/ci.yml) produces all three: open the latest run
+and download them under *Artifacts*, or build them yourself ([Building and testing](docs/developing.md)). ZWO's and QHY's Windows drivers can't be published here, so the Windows download
 has none built in: copy `ASICamera2.dll` and `qhyccd.dll` (from SharpCap's folder, for example) next to `slopcap.exe`.
 [Installing SlopCap](docs/install.md) covers each system: first launch, camera drivers, the focuser and mount.
 

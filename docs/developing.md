@@ -94,7 +94,17 @@ remote viewing end to end with three SlopCaps in containers (an observatory, a d
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every push and pull request (changes to Markdown files only are skipped):
+**Locally:** `tools/ci-local.sh [REF]` (on Windows: `MSYS_NO_PATHCONV=1 tools/ci-local.sh` from Git Bash) runs the
+Linux and Windows jobs below on this machine, in Docker, for a commit (default `HEAD`; uncommitted changes aren't
+tested). It checks the commit out into its own worktree, `build/ci/src`, and keeps that worktree's build folders, so
+only the first run builds everything. Each job is logged under `build/ci/runs/<time>-<commit>/` with a `summary.txt`;
+the script exits 1 if any job failed. `--jobs "linux-debug coverage"` runs a subset; `--windows-smoke` also starts the
+Windows exe on this desktop as the windows-smoke job does (a window opens for about ten seconds). The Linux zip's start
+in a bare Ubuntu container needs an `ubuntu:26.04` image (`docker pull ubuntu:26.04`); without one it is skipped. The
+macos job needs a Mac: follow [Natively](#natively) there and run `ctest --preset macos-debug`.
+
+**On GitHub:** `.github/workflows/ci.yml` runs the same jobs, plus macOS, only when started by hand (*Actions → ci →
+Run workflow*), because each run costs a private repository's minutes:
 
 | Job | What it does |
 |---|---|
@@ -115,8 +125,8 @@ plugins and the camera SDKs with a launcher, so it runs without Qt installed (it
 newer); build `linux-release` first. The Windows zip takes `build/windows-static/slopcap.exe` (with the camera drivers
 inside when it was built with `SLOPCAP_WIN_SDK_DLL_DIR`), the Mac zip `SlopCap.app` from `tools/macos-app.sh`.
 
-GitHub counts macOS minutes ten times and Windows minutes twice against a private repository's monthly allowance.
-To save minutes, limit the `macos` job to `main` and pull requests in `ci.yml`.
+GitHub counts macOS minutes ten times and Windows minutes twice against a private repository's monthly allowance,
+which is why `ci.yml` only runs when started by hand and `tools/ci-local.sh` is the everyday check.
 
 ## Command-line tools
 

@@ -1,5 +1,6 @@
-# Builds and tests SlopCap on Linux, Windows and macOS on every push and pull request (Markdown-only changes skip it).
-#   linux          docker/build.sh in the project's build image (docker/Dockerfile: Ubuntu 26.04, GCC 15, Qt 6, the
+# Builds and tests SlopCap on Linux, Windows and macOS. Started by hand only (Actions → ci → Run workflow): on a private
+# repository every run costs minutes. tools/ci-local.sh runs the same Linux and Windows jobs locally in Docker.
+#   linux         docker/build.sh in the project's build image (docker/Dockerfile: Ubuntu 26.04, GCC 15, Qt 6, the
 #                  ZWO / QHY SDKs and INDI from the INDI PPA, Xvfb + Mesa): debug, ASan + UBSan and TSan with tests,
 #                  and release, packed as slopcap-linux-x64.zip (tools/package.sh) and started in a bare Ubuntu.
 #   coverage       every test on a gcov build; fails below 90 % of src/ lines (tools/coverage.sh), report attached.
@@ -15,10 +16,6 @@
 name: ci
 
 on:
-  push:
-    paths-ignore: ['**.md', 'docs/**']
-  pull_request:
-    paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
 
 permissions:
