@@ -99,7 +99,10 @@ Linux and Windows jobs below on this machine, in Docker, for a commit (default `
 tested). It checks the commit out into its own worktree, `build/ci/src`, and keeps that worktree's build folders, so
 only the first run builds everything. Each job is logged under `build/ci/runs/<time>-<commit>/` with a `summary.txt`;
 the script exits 1 if any job failed. `--jobs "linux-debug coverage"` runs a subset; `--windows-smoke` also starts the
-Windows exe on this desktop as the windows-smoke job does (a window opens for about ten seconds). The Linux zip's start
+Windows exe on this desktop as the windows-smoke job does (a window opens for about ten seconds). `--upload DEST` copies
+the zips and the summary to an [rclone](https://rclone.org) destination (for example `drive:slopcap-builds`) after a run
+in which every job passed; settings for one machine, such as a default destination, go in `build/ci/settings.sh`, which
+git ignores (see the script's header). The Linux zip's start
 in a bare Ubuntu container needs an `ubuntu:26.04` image (`docker pull ubuntu:26.04`); without one it is skipped. The
 macos job needs a Mac: follow [Natively](#natively) there and run `ctest --preset macos-debug`.
 

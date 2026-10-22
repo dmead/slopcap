@@ -2,32 +2,42 @@
 # The jobs of .github/workflows/ci.yml on this machine, in Docker, instead of on GitHub Actions (which costs minutes on
 # a private repository). The commit is checked out into its own worktree, build/ci/src, whose build folders are kept
 # between runs (later runs are incremental), and every job runs there in turn, also after one has failed.
-#   tools/ci-local.sh [--jobs "JOB ..."] [--windows-smoke] [REF]
+#   tools/ci-local.sh [--jobs "JOB ..."] [--windows-smoke] [--upload DEST] [REF]
 #     REF                  the commit to test (default HEAD; uncommitted changes are not tested)
 #     --jobs               a subset of: linux-debug linux-asan linux-tsan linux-release coverage windows-exe
 #     --windows-smoke      also start the Windows exe on this desktop (Windows only; a window opens for about 10 s)
+#     --upload DEST        when every job passed, copy the zips and summary.txt to DEST/<time>-<commit>/ with rclone
+#                          (DEST is an rclone remote and folder, e.g. drive:slopcap-builds; no share links are made)
+# Machine-local settings, not in git, go in build/ci/settings.sh (read first): SLOPCAP_CI_UPLOAD (the default for
+# --upload), RCLONE (the rclone program when it isn't on PATH) and an exported RCLONE_CONFIG (rclone's own setting).
 # On Windows run it from Git Bash with MSYS_NO_PATHCONV=1. Logs and summary.txt: build/ci/runs/<time>-<commit>/.
-# Exits 1 when a job failed. Not here: the macos job (it needs a Mac: the "Natively" steps in docs/developing.md).
-# The Linux zip is started in a bare Ubuntu, as CI does, when an ubuntu:26.04 image is present (docker pull ubuntu:26.04).
+# Exits 1 when a job or the upload failed. Not here: the macos job (it needs a Mac: the "Natively" steps in
+# docs/developing.md). The Linux zip is started in a bare Ubuntu, as CI does, when an ubuntu:26.04 image is present
+# (docker pull ubuntu:26.04).
 set -uo pipefail
 
 REPO=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
 CI=${SLOPCAP_CI_DIR:-$REPO/build/ci}
 WT=$CI/src
+# shellcheck source=/dev/null
+[ -f "$CI/settings.sh" ] && . "$CI/settings.sh"
 JOBS="linux-debug linux-asan linux-tsan linux-release coverage windows-exe"
 SMOKE=0
+UPLOAD=${SLOPCAP_CI_UPLOAD:-}
 REF=HEAD
 while [ $# -gt 0 ]; do
     case $1 in
         --jobs) JOBS=$2; shift 2 ;;
         --windows-smoke) SMOKE=1; shift ;;
-        -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+        --upload) UPLOAD=$2; shift 2 ;;
+        -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
         *) REF=$1; shift ;;
     esac
 done
 # Git for Windows wants D:/… paths, and with MSYS_NO_PATHCONV=1 (which docker/build.sh needs) nothing converts them
 native() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else echo "$1"; fi; }
 SHA=$(git -C "$(native "$REPO")" rev-parse --verify --quiet "$REF^{commit}") || { echo "not a commit: $REF" >&2; exit 2; }
+docker info >/dev/null 2>&1 || { echo "Docker isn't answering (is Docker Desktop running?)" >&2; exit 2; }
 
 # the worktree: made once, then moved to the commit; untracked files go, the build folders stay
 if [ ! -e "$WT/.git" ]; then
@@ -52,8 +62,10 @@ job() {   # job NAME COMMAND...: run in the worktree, log to RUN/NAME.log, one l
     rc=$?
     result=pass
     [ $rc -eq 0 ] || { result="FAIL (exit $rc)"; failed=1; }
+    [ "$name" = coverage ] && [ $rc -eq 0 ] && coverage_ok=1
     printf '  %-15s %-15s %5d s\n' "$name" "$result" $((SECONDS - t0)) | tee -a "$SUMMARY"
 }
+coverage_ok=0
 
 linux_release() {   # build, pack, and start the zip in a bare Ubuntu (no Qt, only what a desktop has)
     docker/build.sh linux-release && tools/package.sh linux || return 1
@@ -104,9 +116,24 @@ for j in $JOBS; do
 done
 [ $SMOKE = 1 ] && job windows-smoke windows_smoke
 
-[ -f "$WT/build/linux-coverage/coverage.txt" ] && [[ " $JOBS " == *" coverage "* ]] &&
+[ $coverage_ok = 1 ] &&
     echo "  coverage: $(grep '^TOTAL' "$WT/build/linux-coverage/coverage.txt" | awk '{print $NF}') of src/ lines" | tee -a "$SUMMARY"
 for z in "$WT"/build/package/*.zip; do [ -f "$z" ] && echo "  package: $z" | tee -a "$SUMMARY"; done
 echo "  logs: $RUN" | tee -a "$SUMMARY"
 [ $failed = 0 ] && echo "all jobs passed" | tee -a "$SUMMARY" || echo "SOME JOBS FAILED" | tee -a "$SUMMARY"
+
+if [ -n "$UPLOAD" ]; then
+    if [ $failed != 0 ]; then
+        echo "upload: skipped (a job failed)" | tee -a "$SUMMARY"
+    else
+        dest=$UPLOAD/$(basename "$RUN")
+        up=done
+        for f in "$WT"/build/package/*.zip "$SUMMARY"; do
+            [ -f "$f" ] || continue
+            "${RCLONE:-rclone}" copyto -q --no-traverse "$(native "$f")" "$dest/$(basename "$f")" || up=FAILED
+        done
+        echo "upload to $dest: $up" | tee -a "$SUMMARY"
+        [ $up = done ] || failed=1
+    fi
+fi
 exit $failed
