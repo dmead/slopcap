@@ -6,7 +6,7 @@ focuser and a mount that INDI can drive.
 
 ## The screen
 
-![SlopCap's main window](images/main-window.png)
+![SlopCap's main window, replaying a recording of Jupiter](images/jupiter-capture.png)
 
 - **Top bar:** the mode tabs (**Capture**, **Focus**, **Collimate**, **ADC**; *Align* and *Sequence* aren't finished yet), the
   **Target** and **Filter** for naming recordings, **⇄ Remote** for [remote viewing](remote-viewing.md), the
@@ -88,7 +88,7 @@ planet has a blue fringe on top and a red one underneath, and the detail smears.
 corrector: two prisms with levers, between the telescope and the camera) pushes the colours back together. The ADC
 tab measures how far the red image sits from the blue one, live, with a colour camera.
 
-![The ADC tab before correcting: red sits 4 px below blue](images/adc.png)
+![The ADC tab on Jupiter before correcting: red and blue 2.2 px apart](images/jupiter-adc.png)
 
 1. Centre the planet and set both ADC levers to **zero**.
 2. Press **Remember uncorrected.** The dashed line on the plot is now the direction the ADC has to correct along.

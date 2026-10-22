@@ -2,8 +2,26 @@
 
 [![ci](https://github.com/dmead/slopcap/actions/workflows/ci.yml/badge.svg)](https://github.com/dmead/slopcap/actions/workflows/ci.yml)
 
+![Jupiter and three of its moons](docs/images/jupiter-moons.png)
+
 A planetary / lunar / solar capture program for Windows, Linux and macOS: zero-drop video capture from astronomy
 cameras, a live preview that keeps up, built-in focus / drift / guide-overlay tools, and a REST API. C++20, no Python.
+
+![SlopCap replaying a recording of Jupiter: the camera on the left, the live view with the target it found, the focuser, mount and raw histogram per channel on the right](docs/images/jupiter-capture.png)
+
+| | |
+|---|---|
+| ![The ADC tab measuring Jupiter's atmospheric dispersion](docs/images/jupiter-adc.png) | ![Full view: the live view over a whole screen with a small control bar](docs/images/jupiter-fullview.png) |
+| **ADC:** red and blue 2.2 px apart, live, and what to do with the corrector's levers | **Full view:** the live view over a whole screen or a projector, with gain, exposure and record in a bar that hides itself |
+
+<img src="docs/images/jupiter-stacked.png" align="right" width="256" alt="Jupiter, stacked">
+
+The screenshots replay a recording of Jupiter from 17 August 2022 (ZWO ASI585MC, 1920 × 1080, 16-bit) through
+SlopCap as if it were the camera: single raw frames, as they look at the telescope. The pictures at the top and on the
+right are the same night stacked: the sharpest 10–20 % of the frames aligned and averaged, the colour channels lined
+up, lightly sharpened, white-balanced on the planet. Stacking happens after the night, outside SlopCap (AutoStakkert!,
+RegiStax, PIPP); SlopCap's job is getting every frame onto the disk.
+<br clear="right">
 
 **Documentation:** [docs/](docs/README.md): installing, a night at the telescope, remote viewing, files and logs,
 troubleshooting, building and testing. This README is the developer's quick reference.
