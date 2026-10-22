@@ -213,8 +213,8 @@ AdcPanel::AdcPanel(preview::PreviewWidget* preview, QObject* parent) : QObject(p
     const char* steps[] = {
         "Centre the planet and set both ADC levers to <b>zero</b>.",
         "Press <b>Remember uncorrected</b>: the dashed line on the plot is the direction to correct along.",
-        "Rotate the ADC in its holder so the levers are <b>level with the horizon</b> (or spread them a little and turn "
-        "the ADC until the arrow only shrinks).",
+        ("Rotate the ADC in its holder so the levers are <b>level with the horizon</b> (or spread them a little and turn "
+         "the ADC until the arrow only shrinks)."),
         "Spread the levers evenly until the arrow is gone. Too far reverses it. Check again as the planet climbs or sinks."};
     for (int i = 0; i < 4; ++i) {
         auto* row = new QHBoxLayout;
