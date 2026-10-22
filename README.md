@@ -2,213 +2,130 @@
 
 [![ci](https://github.com/dmead/slopcap/actions/workflows/ci.yml/badge.svg)](https://github.com/dmead/slopcap/actions/workflows/ci.yml)
 
-![Jupiter and three of its moons](docs/images/jupiter-moons.png)
+<p align="center"><img src="docs/images/saturn.png" width="600" alt="Saturn, 4 August 2022"></p>
 
-A planetary / lunar / solar capture program for Windows, Linux and macOS: zero-drop video capture from astronomy
-cameras, a live preview that keeps up, built-in focus / drift / guide-overlay tools, and a REST API. C++20, no Python.
+**SlopCap records video of the planets, the Moon and the Sun** from ZWO and QHY astronomy cameras, on Windows,
+Linux and macOS. It gets every frame onto the disk, shows a live picture that keeps up, and helps with everything that
+decides how sharp the result will be: collimation, focus for each colour, atmospheric dispersion, and knowing what
+you're pointed at. Its recordings go straight into AutoStakkert!, PIPP and WinJUPOS. It can also send the camera's
+picture to other computers on the network, point to point, for a projector at an outreach night or a warm room indoors.
 
-![SlopCap replaying a recording of Jupiter: the camera on the left, the live view with the target it found, the focuser, mount and raw histogram per channel on the right](docs/images/jupiter-capture.png)
+<sub>Saturn above: 5,000 frames of 6.7 ms from a ZWO ASI585MC on 4 August 2022 at 07:03 UT, the best 25 % stacked in
+AutoStakkert! and lightly sharpened. It was recorded before SlopCap existed; the Jupiter in the screenshots below is a
+recording from the same summer, replayed through SlopCap as if it were the camera.</sub>
+
+![SlopCap replaying a recording of Jupiter: the camera's controls on the left, the live view with the target it identified, the focuser, mount and raw histogram per colour on the right](docs/images/jupiter-capture.png)
+
+## What it does
+
+- **Records every frame.** Frames go from the camera into memory set aside in advance and on to the disk without
+  waiting on each other. Should anything fall behind, SlopCap counts what the camera lost and what the disk lost,
+  separately, and shows it. A ZWO camera has been recorded at 168 frames a second with nothing dropped, on Linux
+  and on Windows.
+- **A live picture that keeps up**, colour-corrected and stretched on the graphics card, with a histogram, the
+  camera's raw readout per colour channel, and the sharpness and dispersion of the planet as you watch.
+  Right-click the planet to centre the region of interest on it.
+- **Gain at the camera's sweet spots:** buttons for unity gain, lowest read noise and the high-conversion-gain switch,
+  from what the camera itself reports.
+- **Names recordings the way WinJUPOS expects** (`2022-08-04-0702_8-Saturn.ser`, from the time at the middle of the
+  recording), with a text file of every setting next to each. Leave the target on **Auto** and SlopCap works out
+  whether it's looking at the Moon, Mars, Jupiter, Saturn, Uranus or Neptune from the image and the clock.
+- **Collimation** on a defocused star: it measures how far the secondary's shadow sits from the ring's centre and
+  points the way to turn.
+- **Focus, colour by colour**, with an electronic focuser, below.
+- **ADC:** with an atmospheric dispersion corrector, it measures how far the planet's red and blue images sit apart
+  and says which way to move the levers.
+- **The mount:** nudge the planet back into the frame with guide pulses (INDI).
+- **Point-to-point video** to other computers, below.
+- **A log of the night:** every setting, recording, drop, focuser move and decision, for working out afterwards what
+  happened.
+
+## Focus, colour by colour
+
+Through a Barlow lens, an ADC or any other glass in the light path, red, green and blue light don't come to focus in
+quite the same place. On a colour camera that means one focuser position can't be perfect for all three, and judging
+focus by eye on the combined picture mostly judges green. SlopCap scores each colour on its own.
+
+![The Focus tab after a sweep: a curve per colour, red sharpest 104 steps inside green and blue 137 outside, the critical focus zone around the chosen position, and the five ways to choose](docs/images/focus-sweep.png)
+
+**Live:** three bars (red, green, blue) show each colour's sharpness as you turn the focuser, against the best that
+colour has reached so far, smoothed over the last few frames so the seeing doesn't make them jump.
+
+**The sweep** finds each colour's best position. Pick a range (Coarse ±1500 or Fine ±350 steps around where the
+focuser is, or your own), a step size and how many frames to take at each step. SlopCap moves the focuser through the
+range, always finishing each move in the same direction so the focuser's slack is taken up the same way every time,
+waits for it to settle, and scores every frame:
+
+- **Four sharpness measures** on the same frames: edge contrast, fine detail, contrast, and Fourier mid-band
+  frequencies. They react differently to seeing and to the planet's detail; **Which metric is tightest** shows which one
+  agreed with itself best on this sweep, and you can switch the chart to any of them.
+- **The best quarter of the frames** at each position counts, the moments of good seeing, not the average blur.
+- **A curve per colour**, fitted near its peak, gives each colour's best position with an error. A peak at the end of
+  the range is flagged, so you know to widen it.
+- **The critical focus zone**, from the telescope's focal ratio and the focuser's step size in Settings: how far from
+  perfect focus you can be before it shows (±2.44 λN²). SlopCap says whether all three colours fit inside it, or that
+  they can't all be sharp and you have to choose.
+
+**Then choose what to focus on**, and **Go to** moves there with the same final approach as the sweep:
+
+| Focus on | Position | When |
+|---|---|---|
+| **Green** | green's best | most of the luminance detail is in green |
+| **Luminance-weighted** | 0.30 red + 0.59 green + 0.11 blue | the detail your eye and most processing see |
+| **Balanced** | where the worst colour loses least | all three colours as even as they can be |
+| **Red** | red's best | infrared or red-filtered work, Mars |
+| **Blue** | blue's best | blue-channel detail |
+
+Every sweep's scores, frame by frame, are saved as a CSV next to the recordings.
+
+<sub>The screenshot shows a sweep against INDI's focuser simulator, with a test camera whose red, green and blue are
+sharpest at different positions.</sub>
+
+## Point-to-point video
+
+The computer at the telescope has the camera; the people are often somewhere else. **One SlopCap shares its camera,
+others watch it**, directly over the local network: no server in between, no cloud, no account. Any SlopCap, Windows,
+Linux or Mac, can be either end.
+
+![Full view: the live picture over a whole screen, with gain, exposure, stretch and Record in a bar that hides itself](docs/images/jupiter-fullview.png)
+
+- **Share** with one click on **⇄ Remote** at the telescope. **Watch** by picking it from the list on the other
+  computer (SlopCaps on the network find each other), or type its address.
+- **The picture is the camera's raw frames, not a video stream.** The viewer's stretch, colour, zoom and full-screen
+  view work exactly as if the camera were plugged into it, and the planet looks the same on both screens.
+- **Detail first.** Frames are sent **lossless**, every bit of 16-bit data included, as long as the link carries at
+  least about 5 frames a second. A slow link costs frames per second, never detail; only below that does SlopCap step
+  down to high-quality JPEG, and then to smaller sizes. A planetary region of interest stays lossless on ordinary home
+  networks: a Saturn frame is about 130 kB. Each viewer gets the quality its own link can carry.
+- **Watchers can steer.** Gain, exposure and every other setting can be changed from either end, and both follow.
+  **Record** on a viewer records **at the telescope**: the raw files never leave it, and the viewer shows the file,
+  time and frame count.
+- **Full view** for projectors: the live picture over a whole screen, with gain, exposure and Record in a bar that
+  gets out of the way when the mouse rests.
+- A dropped link **reconnects by itself**, and both ends show who's watching and the stream's speed.
+
+## Get SlopCap
 
 | | |
 |---|---|
-| ![The ADC tab measuring Jupiter's atmospheric dispersion](docs/images/jupiter-adc.png) | ![Full view: the live view over a whole screen with a small control bar](docs/images/jupiter-fullview.png) |
-| **ADC:** red and blue 2.2 px apart, live, and what to do with the corrector's levers | **Full view:** the live view over a whole screen or a projector, with gain, exposure and record in a bar that hides itself |
+| **Windows** | `slopcap.exe`: one file, no installer |
+| **Linux** | `slopcap-linux-x64.zip`: unzip and run, Qt and the ZWO and QHY camera drivers included (Ubuntu 26.04 or newer) |
+| **macOS** | `SlopCap.app` (Apple silicon, macOS 15 or newer), with the ZWO and QHY camera drivers inside |
 
-<img src="docs/images/jupiter-stacked.png" align="right" width="256" alt="Jupiter, stacked">
+Every build of the code produces all three: open the latest [run](https://github.com/dmead/slopcap/actions/workflows/ci.yml)
+and download them under *Artifacts*. ZWO's and QHY's Windows drivers can't be published here, so the Windows download
+has none built in: copy `ASICamera2.dll` and `qhyccd.dll` (from SharpCap's folder, for example) next to `slopcap.exe`.
+[Installing SlopCap](docs/install.md) covers each system: first launch, camera drivers, the focuser and mount.
 
-The screenshots replay a recording of Jupiter from 17 August 2022 (ZWO ASI585MC, 1920 × 1080, 16-bit) through
-SlopCap as if it were the camera: single raw frames, as they look at the telescope. The pictures at the top and on the
-right are the same night stacked: the sharpest 10–20 % of the frames aligned and averaged, the colour channels lined
-up, lightly sharpened, white-balanced on the planet. Stacking happens after the night, outside SlopCap (AutoStakkert!,
-RegiStax, PIPP); SlopCap's job is getting every frame onto the disk.
-<br clear="right">
+## Documentation
 
-**Documentation:** [docs/](docs/README.md): installing, a night at the telescope, remote viewing, files and logs,
-troubleshooting, building and testing. This README is the developer's quick reference.
-
-Status: **M1 in progress**: capture pipeline + ZWO / QHY backends; ZWO verified at 168 fps with 0 drops on Linux and Windows. See [PLAN.md](PLAN.md) for the design and milestones.
-
-## What's here
-
-| Path | What |
+| | |
 |---|---|
-| `src/io/ser.*` | SER video reader / writer (timestamp trailer, truncated-file recovery, real-world quirks) |
-| `src/camera/camera.hpp` | `ICamera`: the interface every camera backend implements |
-| `src/camera/sim_camera.*` | `SimCamera`: replays a SER recording as a camera (real-time pacing, ROI, drop counting) |
-| `src/pipeline/frame_ring.*` | `FrameRing`: pre-allocated, page-aligned frame slots passed capture → writer lock-free |
-| `src/pipeline/capture_session.*` | `CaptureSession`: capture thread + SER writer thread; counts camera drops vs ring drops |
-| `src/camera/asi_camera.*`, `qhy_camera.*` | ZWO and QHY backends (built when their SDKs are found) |
-| `src/camera/open_camera.*` | open a camera from a spec: `asi[:N]`, `qhy[:N]`, `sim:FILE.ser`, `sim-loop:FILE.ser` (replays forever) |
-| `src/preview/` | `LatestFrame` tap, CPU reference debayer/stretch/histogram, `GlRenderer` (GPU), preview + histogram widgets |
-| `src/app/` | `slopcap`: the GUI. `slopcap --camera SPEC [--out DIR] [--record] [--serve \| --connect HOST] [--fullscreen] [--quit-after S --screenshot F.png]` |
-| `tools/bench` | `slopcap-bench --camera SPEC …` / `--sim FILE.ser` / `--list`: record through the full pipeline and report fps / drops / ring peak / MB/s |
-| `tools/serinfo` | `slopcap-serinfo FILE.ser…`: header, frames vs header, timestamps, real frame rate, longest gap |
-| `tools/camprobe` | `slopcap-camprobe [--json]`: what each connected ZWO / QHY camera reports (fixtures from real cameras inside) |
-| `src/analysis/` | per-channel focus scoring (4 metrics), focus sweep fits, defocused-star collimation, low-precision ephemerides (Moon, Mars to Neptune) and target identification |
-| `src/devices/` | minimal INDI client (Qt Network), a backlash-aware focuser, and a mount (guide pulses, axis moves, goto, park, tracking) |
-| `src/net/` | remote viewing: one SlopCap shares its camera, others watch and steer it (protocol, JPEG frame codec, discovery, rate control) |
-| `tools/diag` | `slopcap-diag FILE.ser…`: optical diagnostics from planetary recordings |
-| `tools/focusbench` | `slopcap-focusbench FILE.ser [frames] [metric]`: time the focus scorer |
-| `tests/` | Catch2 unit tests; `slopcap-gl-tests` checks the GPU preview against the CPU reference |
+| [Installing SlopCap](docs/install.md) | Windows, Linux or Mac: getting it running, cameras, focuser and mount |
+| [A night at the telescope](docs/user-guide.md) | the screen, the camera, collimating, focusing, the ADC, recording |
+| [Remote viewing](docs/remote-viewing.md) | sharing a camera, watching one, picture quality, firewalls |
+| [Files, settings and logs](docs/files-and-logs.md) | where recordings, settings and the session logs are |
+| [Troubleshooting](docs/troubleshooting.md) | when something doesn't work |
 
-## At the telescope
-
-```bash
-build/linux-release/slopcap                      # remembers the last camera, folder, target, focuser, per-camera settings
-build/linux-release/slopcap --camera asi --focuser localhost:7624
-```
-
-1. **Capture tab:** Connect the camera. Set gain/exposure (exposure in µs); the gain-landmark buttons set unity /
-   lowest-read-noise gain. Watch "clipped %" under the histogram. Wheel zooms, drag pans, F fits, 1 = 1:1,
-   C = crosshair, right-click "Centre ROI here" moves a planetary ROI onto the target. The Mount panel (the LX200's
-   INDI driver, e.g. `indi_lx200classic`, on the focuser's INDI server) shows RA / Dec; N / E / W / S send guide pulses
-   of the chosen length to nudge the target, Stop halts every motion.
-2. **Collimate tab** (bright star): defocus to a ring 40–100 px across, tick "Analyse", turn the secondary screw toward
-   the arrow (the ring's thin side) in small amounts, re-centre the star, repeat until the offset is < 2 %.
-3. **Focus tab:** Connect (INDI server, default localhost:7624; the Gemini EAF is MyFocuserPro2). Set backlash
-   (~600) and the final approach direction. Watch the R/G/B bars while nudging; then "Start sweep around current
-   position". The table shows each channel's best focus ± error for every metric and the spread; pick a strategy
-   (Green, Luminance-weighted, Balanced, Red, Blue) and "Go to". Each sweep's per-frame scores are saved as a CSV
-   in the recording folder.
-   **ADC tab** (colour camera, planet low in the sky): levers at zero, "Remember uncorrected", level the ADC, spread
-   the levers until the red − blue arrow is gone; it says under-, over-corrected or rotated, and what the air causes
-   at the target's altitude (Settings → Site).
-4. **Record** (Ctrl+R): files are named WinJUPOS-style from the mid-capture time and the Target field
-   (`2026-10-17-0315_4-Saturn.ser`), with a `.txt` of the settings and focuser position next to each. With Target
-   **Auto**, SlopCap identifies the Moon, Mars or an outer planet from the image and the clock: Saturn's rings, the
-   Moon's shape at tonight's phase, a darkened limb, size and colour. It never asks the mount. Why it decided shows
-   under the Target panel. When it can't decide, it says what's left ("Moon or Jupiter") and names the file "Target";
-   Settings → Focal length (the image scale) settles most of those, and Settings → Site rules out what's below the
-   horizon. The name is fixed while recording.
-
-Every run writes a session log: `~/.local/share/SlopCap/SlopCap/logs/slopcap-<UTC start>.log` (Windows:
-`%LOCALAPPDATA%\SlopCap\SlopCap\logs`). It records the version, settings, camera and controls; each recording's start
-and stop, with drops and writer latency; a stats line every 10 s; INDI connections, driver messages and Alerts (e.g. a
-focuser whose serial port won't open); focuser moves and sweeps; mount pulses; and automatic-target decisions with
-their measurements.
-
-Afterwards: `slopcap-diag --png OUT/ *.ser` stacks the best frames of each recording and reports dispersion, limb
-sharpness per channel and side, halo and jitter.
-
-## Remote viewing (outreach nights)
-
-One SlopCap shares its camera (the **server**: the computer with the USB connection), others watch it (**clients**:
-e.g. a laptop on a projector across the field). Any build (Windows, Linux) can be either.
-
-- **Server:** "⇄ Remote" at the top → *Share this camera on the network* (or `slopcap --camera qhy --serve`).
-- **Client:** "⇄ Remote" → pick the server from the list (same subnet), or *Watch an address…* with `192.168.1.20`
-  (or `slopcap --connect 192.168.1.20`, `--connect auto` for the first one found).
-- Either side can change gain, exposure and every other control; the other side's UI follows. ROI, bit depth and
-  readout changes from a client are applied by the server. **Record** on a client records *on the server*: raw files
-  never leave it, and the client shows the server's file, time and frame count.
-- Both sides show a badge over the video while a link is up (LIVE FROM … / SHARED WITH …) and the stream's Mbps in
-  the bottom bar. A dropped link reconnects by itself.
-- **Full screen** (toolbar button or F11; Esc leaves): the preview over a whole screen; with several screens, pick
-  which. Gain, exposure, stretch and record sit in a bar that hides itself (and the cursor) after 3 s; move the mouse
-  to bring it back.
-- The stream is the raw frame: **lossless** first (every bit, 16-bit included: each Bayer plane predicted pixel by
-  pixel, the residuals deflated), else JPEG (each Bayer site its own plane, 16-bit through a square-root curve).
-  **Detail first, frame rate second:** frames go at the best setting as many as the link carries (up to 30 fps); a
-  slow link drops frames, not detail. Only when fewer than ~4 fps get through (5 fps is the floor) does a viewer step
-  down: JPEG quality 85, 75, 65, then 1/2 and 1/4 size. Each change and its reason goes to the session log
-  (`remote: … lossless → quality 85 …`). Measured on real recordings (desktop CPU): a 512×320 8-bit Saturn is
-  127 kB lossless, a 1468×1188 16-bit Moon 1.6 MB (8 fps over 100 Mbps, so it stays lossless), a 3008×3008 16-bit
-  Moon 5.6 MB (2 fps: it goes as JPEG 85, 333 kB, at 30 fps).
-
-Ports: TCP 45720 (the stream; the next free one up to 45729 if taken) and UDP 45721 (discovery). On Windows the server
-needs both allowed in, e.g. as admin:
-
-```powershell
-New-NetFirewallRule -DisplayName "SlopCap remote" -Direction Inbound -Program "C:\Users\<you>\slopcap\slopcap.exe" -Action Allow -Profile Private,Domain
-```
-
-The protocol is described at the top of `src/net/protocol.hpp`. `tools/remote-test.sh FILE.ser` tests it end to end in
-three containers on one Docker network (an observatory server, a desktop client, a projector client in full view).
-
-## Build in Docker (any machine)
-
-`docker/build.sh` builds and tests inside a pinned Ubuntu 26.04 image (GCC 15, CMake, Ninja, Catch2, MinGW-w64,
-ZWO / QHY SDKs, Qt 6). Tests run under Xvfb (a virtual X display) with Mesa's software OpenGL, so the GPU preview
-tests work without a screen. The repo is mounted at the same path as on the host, so `build/<preset>/` works from either side.
-
-```bash
-docker/build.sh                          # linux-debug build + tests
-docker/build.sh linux-asan linux-tsan    # any presets
-docker/build.sh windows-cross            # Windows command-line tools (SLOPCAP_WIN_SDK_DLL_DIR=... to include camprobe)
-docker/build.sh windows-static           # Windows GUI: one self-contained build/windows-static/slopcap.exe
-docker/build.sh --shell                  # shell in the build environment
-```
-
-The image is tagged with the Dockerfile's hash. With a registry in `docker/registry`, a machine pulls the image
-instead of building it, and any changed environment is pushed when first built (`docker/build.sh --push` to retry).
-`.devcontainer/` opens the same environment in VS Code.
-
-### Windows: one self-contained slopcap.exe
-
-`windows-static` builds in its own image (`docker/Dockerfile.mingw`: Fedora's MinGW-w64 GCC plus Qt 6 compiled
-statically, once, and cached in the registry). Point `SLOPCAP_WIN_SDK_DLL_DIR` at a folder holding the Windows
-`ASICamera2.dll` and `qhyccd.dll` (e.g. copied from SharpCap's folder) and they are embedded too:
-
-```bash
-SLOPCAP_WIN_SDK_DLL_DIR=tools/camprobe/build-win/sdk docker/build.sh windows-static
-```
-
-Copy `build/windows-static/slopcap.exe` anywhere and run it: no installer, no DLLs. On first use it extracts the
-camera SDKs to `%LOCALAPPDATA%\SlopCap\SlopCap\sdk\` (a DLL placed next to the exe takes precedence, to try a newer SDK).
-The camera SDKs are delay-loaded, so without them SlopCap still starts and the camera menu says which one is
-missing. Settings live in the registry (`HKCU\Software\SlopCap`). The preview needs OpenGL 3.3; without it (some
-Remote Desktop sessions) capture still works and the preview says why it's blank. The focuser and mount are INDI-only
-for now (no ASCOM yet).
-
-## Build
-
-Linux (Ubuntu 26.04): `sudo apt install build-essential cmake ninja-build catch2 qt6-base-dev`, plus `indi-3rdparty-libs` from the
-INDI PPA for the camera SDKs (camprobe only).
-
-```bash
-cmake --preset linux-debug && cmake --build --preset linux-debug && ctest --preset linux-debug
-cmake --preset linux-asan  && cmake --build --preset linux-asan  && ctest --preset linux-asan   # ASan + UBSan
-cmake --preset linux-tsan  && cmake --build --preset linux-tsan  && ctest --preset linux-tsan   # ThreadSanitizer
-cmake --preset linux-release && cmake --build --preset linux-release
-```
-
-Windows: `windows-msvc` preset (Visual Studio 2022 Build Tools, Catch2 via vcpkg), or cross-build from Linux with
-`windows-cross` (MinGW-w64; set `SLOPCAP_WIN_SDK_DLL_DIR` to a folder with the target machine's `ASICamera2.dll` and
-`qhyccd.dll`).
-
-macOS (Apple silicon or Intel): Xcode's command-line tools (`xcode-select --install`), then `brew install qtbase cmake
-ninja catch2 libusb`.
-
-```bash
-tools/macos-sdks.sh         # ZWO + QHY SDKs into build/mac-sdk (once; optional: without them, no cameras)
-tools/macos-indi.sh         # INDI into ~/indi, for the focuser and mount (once; optional)
-cmake --preset macos-debug && cmake --build --preset macos-debug && PATH=~/indi/bin:$PATH ctest --preset macos-debug
-tools/macos-app.sh          # build/macos-release/SlopCap.app, self-contained (Qt, SDKs inside) and signed ad hoc
-tools/macos-app.sh --dmg    # ... plus SlopCap.dmg to copy to other Macs
-```
-
-**Cameras:** `tools/macos-sdks.sh` takes the SDKs from INDI's indi-3rdparty repository (the same source as the Linux
-packages; ZWO 1.41, QHY 26.7.21; every file hash-checked against GitHub), and the build copies them into SlopCap.app
-with libusb. On a Mac, QHY cameras start without firmware: SlopCap uploads it from the SDK when it starts (in the
-background; the camera reappears on USB a few seconds later), so give a QHY camera a moment before opening the camera menu.
-
-**Focuser and mount:** INDI, as on Linux. Homebrew has no INDI, so `tools/macos-indi.sh` builds indiserver and the
-drivers into `~/indi`. For the Gemini EAF (macOS has the CH340 driver built in; the port is `/dev/cu.usbserial-…`):
-
-```bash
-PATH=~/indi/bin:$PATH indiserver indi_myfocuserpro2_focus     # add indi_lx200classic for the mount
-indi_setprop 'MyFocuserPro2.DEVICE_PORT.PORT=/dev/cu.usbserial-1420'   # once, with the port `ls /dev/cu.*` shows
-indi_setprop 'MyFocuserPro2.CONFIG_PROCESS.CONFIG_SAVE=On'
-```
-
-then Focus → Connect (localhost:7624) in SlopCap.
-
-`-DSLOPCAP_FONT_DIR=<folder>` embeds IBM Plex from wherever its TTFs are (the default is the Linux path). The app keeps
-settings in `~/Library/Preferences/com.slopcap.SlopCap.plist`, logs in `~/Library/Application Support/SlopCap/SlopCap/logs`
-and records to `~/Movies/SlopCap`. Recording uses `F_NOCACHE` where Linux uses `O_DIRECT`. App Nap is off for SlopCap, so
-capture and sharing keep full speed in the background. macOS asks once for Local Network access the first time
-SlopCap shares, watches or reaches an INDI server on another machine. Full view is Ctrl+Cmd+F (F11 also works).
-The app is signed ad hoc, not notarized: on another Mac, the first launch needs right-click → Open (or System Settings →
-Privacy & Security → Open Anyway). It runs on the macOS version Homebrew's Qt was built for, and newer.
-
-Optional test against a real recording: `SLOPCAP_TEST_SER=/path/to/file.ser ctest --preset linux-debug`.
+**Building it yourself, running the tests, how the code is laid out:** [Building and testing](docs/developing.md).
+The design and what's still to come: [PLAN.md](PLAN.md).

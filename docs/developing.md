@@ -81,6 +81,10 @@ maintained; the MinGW static build above is the one that's used.
   options. The same executable tests the ZWO and QHY backends against fakes of their SDKs (`tests/fakes/`: the fakes'
   C functions take the real libraries' place there), so every SDK call and error path runs without a camera.
 
+**Screenshots for the docs:** the README's Focus tab picture comes from a hidden test that sweeps INDI's focuser
+simulator with a test camera whose colours focus apart: `SLOPCAP_DOCS_DIR=DIR slopcap-app-tests "[docs]"` (under
+Xvfb in the build image) writes `DIR/focus.png`.
+
 **Coverage:** `tools/coverage.sh [MIN]` builds the `linux-coverage` preset (gcov) in the Docker image, runs every
 test and prints line coverage of `src/` per file and folder (`build/linux-coverage/coverage.txt`; it exits 1 below
 `MIN` percent). CI requires 90 %.
@@ -114,19 +118,68 @@ inside when it was built with `SLOPCAP_WIN_SDK_DLL_DIR`), the Mac zip `SlopCap.a
 GitHub counts macOS minutes ten times and Windows minutes twice against a private repository's monthly allowance.
 To save minutes, limit the `macos` job to `main` and pull requests in `ci.yml`.
 
+## Command-line tools
+
+Built next to `slopcap` (`build/<preset>/`):
+
+| Tool | Does |
+|---|---|
+| `slopcap-bench --camera SPEC …` / `--sim FILE.ser` / `--list` | records through the full capture pipeline and reports frames per second, drops, the frame ring's peak and MB/s |
+| `slopcap-serinfo FILE.ser…` | a SER file's header, frames on disk against the header, timestamps, the real frame rate and the longest gap |
+| `slopcap-camprobe [--json]` | what every connected ZWO and QHY camera reports (its controls, readout modes, gain landmarks); the fixtures from real cameras are in `tools/camprobe/fixtures` |
+| `slopcap-diag [--png OUT/] FILE.ser…` | optical diagnostics from planetary recordings: stacks the best frames and reports dispersion, limb sharpness per colour and side, halo and jitter |
+| `slopcap-focusbench FILE.ser [frames] [metric]` | times the focus scorer on a recording |
+
+`slopcap` itself takes `--camera SPEC` (`asi[:N]`, `qhy[:N]`, `sim:FILE.ser`, `sim-loop:FILE.ser`), `--out`, `--record`,
+`--tab`, `--serve` / `--listen ADDRESS` / `--connect HOST`, `--fullscreen`, `--set NAME=VALUE[@SECONDS]`, `--snapshot
+SECONDS:FILE`, `--screenshot FILE --quit-after SECONDS` and `--settings DIR` (an INI file instead of the user's
+settings): handy for scripted screenshots and smoke tests. `slopcap --help` lists them all.
+
+## Platform notes
+
+**Docker.** The image is tagged with the Dockerfile's hash. With a registry in `docker/registry`, a machine pulls the
+image instead of building it, and an environment that changed is pushed when it's first built (`docker/build.sh
+--push` to retry). `.devcontainer/` opens the same environment in VS Code. The checkout is mounted at the same path as
+on the host, so `build/<preset>/` and compile errors read the same from either side.
+
+**Windows.** `windows-static` builds in its own image (`docker/Dockerfile.mingw`: Fedora's MinGW-w64 GCC and a statically
+built Qt 6). With `SLOPCAP_WIN_SDK_DLL_DIR`, `ASICamera2.dll` and `qhyccd.dll` are embedded in the exe; on first use
+they're written to `%LOCALAPPDATA%\SlopCap\SlopCap\sdk\<hash>\` and loaded from there (a DLL placed next to the exe
+wins, to try a newer SDK). The SDKs are delay-loaded, so without them SlopCap still starts and the camera menu says
+which is missing. Settings live in the registry (`HKCU\Software\SlopCap`). The preview needs OpenGL 3.3; without it
+(Windows' own OpenGL 1.1, some Remote Desktop sessions) capture still works and the preview says why it's blank. The
+focuser and mount are INDI-only for now (no ASCOM yet).
+
+**macOS.** `tools/macos-sdks.sh` takes the ZWO (1.41) and QHY (26.7.21) SDKs from INDI's indi-3rdparty repository, the
+same source as the Linux packages, every file hash-checked; the build copies them and Homebrew's libusb into
+SlopCap.app. QHY cameras start without firmware on a Mac: SlopCap uploads it from the SDK in the background at launch
+and the camera reappears on USB a few seconds later. Homebrew has no INDI, so `tools/macos-indi.sh` builds indiserver
+and the drivers into `~/indi`. Recording uses `F_NOCACHE` where Linux uses `O_DIRECT`; App Nap is off for SlopCap so
+capture and sharing keep full speed in the background. `-DSLOPCAP_FONT_DIR=<folder>` embeds IBM Plex from wherever its
+TTFs are. The app is signed ad hoc, not notarized, and runs on the macOS version Homebrew's Qt was built for and newer.
+
+**Remote viewing.** The protocol is described at the top of `src/net/protocol.hpp`. `tools/remote-test.sh FILE.ser`
+runs it end to end in three containers on one Docker network: an observatory server, a desktop viewer and a projector
+viewer in full view.
+
 ## Where things are
 
 | Path | What |
 |---|---|
-| `src/io/` | SER reader and writer (unbuffered, aligned writes that keep the file readable if cut off) |
-| `src/camera/` | `ICamera` and its backends: ZWO, QHY, and the simulated camera that replays a SER |
-| `src/pipeline/` | the capture session: capture thread, lock-free frame ring, writer thread |
-| `src/preview/` | the live view: GPU debayer and stretch, the CPU reference, histogram |
-| `src/analysis/` | focus scoring and sweeps, collimation, ephemerides, target identification |
-| `src/devices/` | a small INDI client, the focuser (backlash-aware) and the mount |
-| `src/net/` | remote viewing: protocol (described at the top of `protocol.hpp`), frame codec, discovery, rate control |
-| `src/app/` | the GUI |
-| `tools/` | `slopcap-serinfo`, `slopcap-diag`, `slopcap-bench`, `slopcap-camprobe`, `slopcap-focusbench`, scripts |
+| `src/io/ser.*` | SER reader and writer: timestamp trailer, truncated-file recovery, real-world quirks |
+| `src/io/ser_direct.*`, `direct_file.*` | the unbuffered, aligned SER writer (O_DIRECT / F_NOCACHE / unbuffered Windows I/O) that keeps a cut-off file readable |
+| `src/camera/camera.hpp` | `ICamera`: the interface every camera backend implements |
+| `src/camera/asi_camera.*`, `qhy_camera.*` | the ZWO and QHY backends (built when their SDKs are found) |
+| `src/camera/sim_camera.*` | `SimCamera`: replays a SER recording as a camera (real-time pacing, ROI, drop counting) |
+| `src/camera/open_camera.*` | opens a camera from a spec: `asi[:N]`, `qhy[:N]`, `sim:FILE.ser`, `sim-loop:FILE.ser` |
+| `src/pipeline/frame_ring.*` | `FrameRing`: pre-allocated, page-aligned frame slots passed from capture to writer without locks |
+| `src/pipeline/capture_session.*` | `CaptureSession`: the capture and writer threads; counts camera drops apart from ring drops |
+| `src/preview/` | the live view: `LatestFrame` tap, the GPU debayer and stretch (`GlRenderer`), the CPU reference, histograms |
+| `src/analysis/` | per-channel focus scoring (four metrics) and sweep fits, collimation, atmospheric dispersion, low-precision ephemerides (the Moon, Mars to Neptune), target identification |
+| `src/devices/` | a small INDI client (Qt Network), the backlash-aware focuser and the mount (guide pulses, moves, goto, park, tracking) |
+| `src/net/` | remote viewing: protocol, frame codec (lossless and JPEG), discovery, rate control, server and client |
+| `src/app/` | the GUI: main window, focus, collimation and ADC panels, mount, settings, full view, session log |
+| `tools/` | the command-line tools above, packaging (`package.sh`), coverage, macOS and remote-test scripts |
 | `tests/` | Catch2 tests; `tests/fakes/` the ZWO and QHY SDK fakes; `tests/app_harness.*` the application tests' helpers |
 
 The design, its reasoning and the to-do list are in [PLAN.md](../PLAN.md).

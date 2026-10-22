@@ -5,8 +5,10 @@ doesn't need one to record: without it the preview stays blank and says why, and
 
 ## Windows
 
-SlopCap for Windows is a single file, `slopcap.exe`. There is no installer and nothing else to copy: Qt and the ZWO
-and QHY camera drivers are built into it.
+SlopCap for Windows is a single file, `slopcap.exe`. There is no installer and nothing else to copy: Qt is built
+into it, and so are the ZWO and QHY camera drivers when it was built with them. The download from GitHub's builds has
+no camera drivers (ZWO's and QHY's DLLs can't be published there): copy `ASICamera2.dll` and `qhyccd.dll`, from
+SharpCap's or FireCapture's folder for example, next to `slopcap.exe`.
 
 1. Copy `slopcap.exe` anywhere, for example `C:\Users\<you>\slopcap\`.
 2. Double-click it.

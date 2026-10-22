@@ -108,8 +108,9 @@ void clearSettings();
 
 /// The ZWO fake (tests/fakes) as a small camera for the window tests; returns false when this build has no fake.
 bool useFakeAsi(int width = 640, int height = 480);
-/// Frames whose per-channel sharpness depends on *position (a focuser): R, G and B are sharpest at best[0..2].
-void drawFocusFrames(const std::atomic<int>* position, std::array<int, 3> best);
+/// Frames whose per-channel sharpness depends on *position (a focuser): R, G and B are sharpest at best[0..2], and
+/// the limb softens by a pixel every `stepsPerPixel` steps away from that.
+void drawFocusFrames(const std::atomic<int>* position, std::array<int, 3> best, double stepsPerPixel = 15);
 /// A defocused star: a ring with the secondary's shadow `offset` px off centre (collimation).
 void drawDonut(double offset);
 /// A planet whose red image sits (dx, dy) px from its blue one (atmospheric dispersion); change them any time.

@@ -233,3 +233,51 @@ TEST_CASE("focus: INDI focuser and mount simulators, sweeps, results, collimatio
     w.close();
     CHECK(Modals::get().takeUnexpected().join("; ").toStdString() == "");
 }
+
+// Not part of the normal run ([.] hides it): the Focus tab after a sweep of a camera whose red, green and blue come to
+// focus at different places, saved for the README.   SLOPCAP_DOCS_DIR=DIR slopcap-app-tests "[docs]"
+TEST_CASE("docs: the Focus tab after a per-colour sweep (screenshot)", "[.][docs]") {
+    const QString out = qEnvironmentVariable("SLOPCAP_DOCS_DIR");
+    if (out.isEmpty()) SKIP("set SLOPCAP_DOCS_DIR to where the screenshot goes");
+    SimServer server({"indi_simulator_focus"});
+    if (!server.ok) SKIP("indiserver / indi_simulator_focus not installed");
+    if (!useFakeAsi()) SKIP("no fake ZWO SDK in this build");
+    clearSettings();
+    {
+        QSettings st;
+        st.setValue("focuser/server", server.address());
+        st.setValue("focuser/autoConnect", true);
+        st.setValue("focuser/backlash", 20);
+        st.setValue("optics/focalRatio", 10.0);      // a 2.8 m SCT at f/10
+        st.setValue("optics/micronsPerStep", 2.0);   // the critical focus zone is then ±67 steps
+        st.setValue("record/target", "Jupiter");
+    }
+    TempDir dir;
+    std::atomic<int> position{0};
+    MainWindow w;
+    MainWindowProbe p(w);
+    w.setOutputDir(dir.q());
+    w.resize(1500, 950);
+    w.show();
+    REQUIRE(QTest::qWaitForWindowExposed(&w));
+    auto& focuser = p.focus->focuser();
+    QObject::connect(&focuser, &devices::Focuser::positionChanged, &w, [&](int pos) { position = pos; });
+    REQUIRE(waitFor([&] { return focuser.ready(); }, 15000));
+    REQUIRE(arrive(focuser, 5000));
+    position = 5000;
+    drawFocusFrames(&position, {4890, 5000, 5130}, 70);   // red sharpest 110 steps inside green, blue 130 outside
+    w.connectCamera("asi");
+    REQUIRE(p.waitForFrames(3));
+    p.modes->button(MainWindow::Focus)->click();
+    const auto spins = p.sweepPanel->findChildren<QSpinBox*>();
+    spins[0]->setValue(4600);
+    spins[1]->setValue(5400);
+    spins[2]->setValue(50);
+    spins[3]->setValue(10);
+    spins[4]->setValue(150);
+    button(p.sweepPanel, "Run sweep")->click();
+    REQUIRE(waitFor([&] { return !p.focus->sweeping(); }, 300000));
+    button(p.resultsPanel, "Balanced")->click();
+    pump(500);
+    CHECK(w.grab().save(out + "/focus.png"));
+}

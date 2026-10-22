@@ -238,13 +238,14 @@ bool useFakeAsi([[maybe_unused]] int width, [[maybe_unused]] int height) {
 #endif
 }
 
-void drawFocusFrames([[maybe_unused]] const std::atomic<int>* position, [[maybe_unused]] std::array<int, 3> best) {
+void drawFocusFrames([[maybe_unused]] const std::atomic<int>* position, [[maybe_unused]] std::array<int, 3> best,
+                     [[maybe_unused]] double stepsPerPixel) {
 #ifdef SLOPCAP_FAKE_ASI
-    fake::setAsiDraw([position, best](uint8_t* px, int w, int h, int bps, int) {
+    fake::setAsiDraw([position, best, stepsPerPixel](uint8_t* px, int w, int h, int bps, int) {
         const double r = std::min(w, h) / 6.0, cx = w / 2.0, cy = h / 2.0;
         const int pos = position->load();
         std::array<double, 3> edge{};
-        for (std::size_t c = 0; c < 3; ++c) edge[c] = 1 + std::abs(pos - best[c]) / 15.0;
+        for (std::size_t c = 0; c < 3; ++c) edge[c] = 1 + std::abs(pos - best[c]) / stepsPerPixel;
         for (int y = 0; y < h; ++y)
             for (int x = 0; x < w; ++x) {
                 const int site = (y & 1) * 2 + (x & 1);   // RGGB
