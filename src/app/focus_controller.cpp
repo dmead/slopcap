@@ -37,7 +37,7 @@ FocusController::FocusController(QObject* parent) : QObject(parent), focuser_(in
         }
     });
     connect(&focuser_, &devices::Focuser::failed, this, [this](const QString& why) {
-        if (state_ != State::Idle) finish(why, false);
+        if (state_ != State::Idle) finish(why, true);
         emit focuserChanged();
     });
     connect(&indi_, &devices::IndiClient::serverDisconnected, this, &FocusController::focuserChanged);
@@ -154,7 +154,7 @@ void FocusController::startSweep(const SweepSettings& s) {
 
 void FocusController::nextPosition() {
     if (index_ >= positions_.size()) {
-        finish(QString("Sweep complete · %1 positions × %2 frames").arg(positions_.size()).arg(settings_.frames), true);
+        finish(QString("Sweep complete · %1 positions × %2 frames").arg(positions_.size()).arg(settings_.frames), false);
         return;
     }
     state_ = State::Moving;
@@ -163,10 +163,15 @@ void FocusController::nextPosition() {
 }
 
 void FocusController::stopSweep() {
-    if (state_ != State::Idle) finish("Sweep stopped", false);
+    if (state_ != State::Idle) finish("Sweep stopped", true);
 }
 
-void FocusController::finish(const QString& why, bool completed) {
+void FocusController::stopFocuser() {
+    if (state_ != State::Idle) finish("Sweep stopped", false);   // not back to the start: that's another move
+    focuser_.abort();
+}
+
+void FocusController::finish(const QString& why, bool putBack) {
     state_ = State::Idle;
     settle_.stop();
     if (csvOut_) csvOut_->flush();
@@ -174,7 +179,7 @@ void FocusController::finish(const QString& why, bool completed) {
     csvOut_.reset();
     csv_.reset();
     emit sweepProgress(why + (file.isEmpty() ? QString() : " · scores in " + file));
-    if (!completed && focuser_.ready()) focuser_.goTo(startPosition_);   // interrupted: put focus back
+    if (putBack && focuser_.ready()) focuser_.goTo(startPosition_);   // interrupted: put focus back
     emit sweepUpdated();
     emit sweepStateChanged(false);
 }

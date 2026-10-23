@@ -178,6 +178,7 @@ void Focuser::goTo(int position) {
 void Focuser::moveBy(int steps) { goTo((moving_ ? target_ : position_) + steps); }
 
 void Focuser::abort() {
+    qInfo().noquote() << "focuser: stop at" << position_ << (moving_ ? QString("(was going to %1)").arg(target_) : QString());
     legs_.clear();
     legTimeout_.stop();
     if (ready()) client_.sendSwitch(device_, "FOCUS_ABORT_MOTION", "ABORT");

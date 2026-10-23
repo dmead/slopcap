@@ -70,7 +70,7 @@ green and blue images don't come to focus at exactly the same place, and SlopCap
    after connecting overshoots even toward that direction, since which way the gears sit isn't known yet. If the
    focuser's USB drops out, SlopCap reconnects it by itself once it's back.
 2. **Watch the live sharpness bars** (R, G, B) while you nudge the focuser with the ± step buttons; the tick on each
-   bar is the best seen so far.
+   bar is the best seen so far. **STOP**, above them, halts the focuser at once (and ends a sweep where it is).
 3. **Run a sweep:** **Run RGB focus sweep →** (or the Focus tab) opens the sweep. **Coarse ±1500** or **Fine ±350**
    sets the range around the current position (or set From, To, Step, frames per step and settle time yourself);
    then **Run sweep**. SlopCap moves the focuser through the range, scores every frame and fits a curve per colour.

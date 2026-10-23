@@ -146,6 +146,11 @@ FocuserSection::FocuserSection(FocusController& fc, QWidget* parent) : QWidget(p
     connect(&fc_, &FocusController::focuserChanged, posBox, [this, posBox] { posBox->setVisible(fc_.focuser().ready()); });
     posBox->setVisible(false);
 
+    // Outside nudges_, so it stays live during a sweep (the nudges are disabled then)
+    stop_ = theme::button("STOP", "stop");
+    connect(stop_, &QPushButton::clicked, this, [this] { fc_.stopFocuser(); });
+    v->addWidget(stop_);
+
     nudges_ = new QWidget;
     auto* g = new QGridLayout(nudges_);
     g->setContentsMargins(0, 0, 0, 0);
@@ -201,6 +206,7 @@ void FocuserSection::refresh() {
     title_->setText(QString("FOCUSER%1").arg(ok ? " · " + f.device().toUpper() : ""));
     offline_->setVisible(!ok);
     offlineText_->setText(fc_.indi().isConnected() ? "INDI connected · no focuser yet" : "Not connected · " + fc_.server());
+    stop_->setVisible(ok);
     nudges_->setVisible(ok);
     nudges_->setEnabled(!fc_.sweeping());
     position_->setText(ok ? thousands(f.position()) : "—");

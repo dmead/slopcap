@@ -56,6 +56,7 @@ private:
     QLabel* title_ = nullptr;
     QLabel* position_ = nullptr;
     QLabel* max_ = nullptr;
+    QPushButton* stop_ = nullptr;
     QWidget* nudges_ = nullptr;
     QWidget* offline_ = nullptr;
     QLabel* offlineText_ = nullptr;

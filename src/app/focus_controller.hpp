@@ -60,6 +60,7 @@ public:
 
     void startSweep(const SweepSettings& s);
     void stopSweep();
+    void stopFocuser();                    ///< STOP: halt the motor now, ending any sweep where it is
     bool sweeping() const { return state_ != State::Idle; }
     const analysis::SweepAnalysis& sweep() const { return analysis_; }
     int sweepStart() const { return startPosition_; }
@@ -80,7 +81,7 @@ signals:
 private:
     enum class State { Idle, Moving, Settling, Collecting };
     void nextPosition();
-    void finish(const QString& why, bool completed);
+    void finish(const QString& why, bool putBack);
 
     devices::IndiClient indi_;
     devices::Focuser focuser_;
