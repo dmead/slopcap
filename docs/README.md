@@ -19,6 +19,7 @@ ready for it: collimation, focus, and knowing what you are pointed at. It runs o
 |---|---|
 | [Building and testing](developing.md) | you want to build SlopCap from source, run the tests, or understand the CI |
 | [PLAN.md](../PLAN.md) | you want the design, the reasoning behind it and what's still to do |
+| [Mount support (design)](design/mounts.md) | you're working on mounts: INDI, ASCOM, Alpaca and the built-in drivers |
 
 ## The short version
 
