@@ -4,6 +4,7 @@
 #include "app/full_view_bar.hpp"
 #include "app/mount_section.hpp"
 #include "app_harness.hpp"
+#include "preview/histogram_widget.hpp"
 #include "preview/preview_widget.hpp"
 #if defined(SLOPCAP_FAKE_ASI) || defined(SLOPCAP_FAKE_QHY)
 #include "fakes/fake_sdk.hpp"
@@ -21,6 +22,7 @@
 #include <QSettings>
 #include <QSlider>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QTest>
 #include <QWheelEvent>
 
@@ -420,6 +422,50 @@ TEST_CASE("window: a replayed recording as the camera: preview, controls, record
     REQUIRE(m.done());
     CHECK_FALSE(w.isVisible());
     CHECK(unexpectedModals() == "");
+}
+
+TEST_CASE("window: numbers that change every frame don't move the layout", "[app]") {
+    // The target, sharpness and histogram readouts change on every frame. When their text widths drove the side
+    // columns' widths (280-320 px, from their content) and the stats beside the histogram, the preview, the histogram
+    // and both columns jumped about with every frame (2026-10-22, the user on the rig).
+    clearSettings();
+    MainWindow w;
+    MainWindowProbe p(w);
+    w.resize(1600, 900);
+    w.show();
+    REQUIRE(QTest::qWaitForWindowExposed(&w));
+    p.statsTimer.stop();   // it would clear the footer readouts set below (no camera)
+    auto layout = [&] {
+        waitFor([] { return false; }, 100);   // let the layouts settle
+        std::vector<std::pair<const char*, QRect>> out;
+        for (auto [name, wid] : std::initializer_list<std::pair<const char*, QWidget*>>{
+                 {"left column", p.left}, {"right column", p.right}, {"preview", p.preview}, {"histogram", p.histogram},
+                 {"centre", p.tCentre}, {"margin", p.tMargin}, {"size", p.tDisc}, {"dispersion", p.tDisp},
+                 {"sharpness", p.sSharp}, {"strip dispersion", p.sDisp}, {"frame", p.sFrame}, {"peak and clipped", p.histInfo},
+                 {"footer fps", p.fFps}, {"footer message", p.fMessage}})
+            out.emplace_back(name, QRect(wid->mapTo(&w, QPoint()), wid->size()));
+        return out;
+    };
+    auto show = [&](const QString& centre, const QString& margin, const QString& size, const QString& disp, const QString& sharp,
+                    const QString& hist, const QString& fps) {
+        p.tCentre->setText(centre);
+        p.tMargin->setText(margin);
+        p.tDisc->setText(size);
+        p.tDisp->setText(disp);
+        p.sDisp->setText(disp);
+        p.sSharp->setText(sharp);
+        p.histInfo->setText(hist);
+        p.fState->setText("○ Previewing");
+        p.fFps->setText(fps);
+        return layout();
+    };
+    const auto small = show("8, 6", "0 px", "9 × 9 px", "0.0, 0.0 px", "0.50", "peak 5% · clipped 0.00%", "0.0 fps");
+    const auto large = show("3839, 2159", "1079 px", "3840 × 2160 px", "-12.3, -45.6 px", "1.00", "peak 100% · clipped 100.00%", "154.1 fps");
+    for (std::size_t i = 0; i < small.size(); ++i) {
+        const auto r = [](QRect q) { return QString("%1,%2 %3x%4").arg(q.x()).arg(q.y()).arg(q.width()).arg(q.height()).toStdString(); };
+        INFO(small[i].first << ": " << r(small[i].second) << " then " << r(large[i].second));
+        CHECK(small[i].second == large[i].second);
+    }
 }
 
 TEST_CASE("window: full view", "[app]") {

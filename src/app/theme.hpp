@@ -51,6 +51,11 @@ QLabel* section(const QString& text);                 ///< small uppercase panel
 QLabel* label(const QString& text, const char* role); ///< a label with a style role
 QFrame* card();                                       ///< rounded control-coloured box
 QWidget* stat(const QString& caption, QLabel*& value); ///< caption over a mono value, in a card
+/// Keep a readout at least as wide as `widest` in its own font (empty: no reserve), so digits coming and going every
+/// frame don't push what's beside it, or resize the panel it's in.
+void reserveWidth(QLabel* label, const QString& widest);
+/// Set a style sheet only when it differs: every new one re-polishes the widget and re-lays out its window.
+void setStyleIfChanged(QWidget* w, const QString& css);
 QPushButton* button(const QString& text, const char* variant = nullptr);
 /// Exclusive row of buttons styled as one segmented control. Returns the container; `group` gets the buttons with ids
 /// 0..n-1.

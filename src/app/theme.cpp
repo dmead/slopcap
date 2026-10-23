@@ -4,6 +4,7 @@
 #include <QButtonGroup>
 #include <QDir>
 #include <QFontDatabase>
+#include <QFontMetricsF>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -14,6 +15,8 @@
 #include <QStyle>
 #include <QStyleFactory>
 #include <QVBoxLayout>
+
+#include <cmath>
 
 namespace slopcap::app::theme {
 
@@ -171,8 +174,25 @@ QWidget* stat(const QString& caption, QLabel*& value) {
     v->setSpacing(2);
     v->addWidget(label(caption, "dim"));
     value = label("—", "mono");
+    // the card's width comes from its caption, never from the live value: a grid of these shifted with every frame
+    value->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     v->addWidget(value);
     return c;
+}
+
+void reserveWidth(QLabel* label, const QString& widest) {
+    if (widest.isEmpty()) {
+        label->setMinimumWidth(0);
+        return;
+    }
+    label->ensurePolished();   // the role's font comes from the style sheet
+    // fractional advance, rounded up: whole-pixel metrics fall a pixel short of what the label lays out
+    const double w = QFontMetricsF(label->font()).horizontalAdvance(widest);
+    label->setMinimumWidth(static_cast<int>(std::ceil(w)) + 2 * label->margin());
+}
+
+void setStyleIfChanged(QWidget* w, const QString& css) {
+    if (w->styleSheet() != css) w->setStyleSheet(css);
 }
 
 QPushButton* button(const QString& text, const char* variant) {

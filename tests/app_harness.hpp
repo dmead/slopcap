@@ -165,6 +165,8 @@ struct MainWindowProbe {
     AdcPanel*& adc{w.adc_};
     MountSection*& mountSection{w.mountSection_};
     QStackedWidget*& left{w.left_};
+    QStackedWidget*& right{w.right_};
+    preview::HistogramWidget*& histogram{w.histogram_};
 
     QLabel*& noCamera{w.noCamera_};
     QSlider*& gain{w.gain_};
@@ -186,6 +188,9 @@ struct MainWindowProbe {
     QLabel*& nextFile{w.nextFile_};
     QPushButton*& record{w.record_};
     QLabel*& tCentre{w.tCentre_};
+    QLabel*& tMargin{w.tMargin_};
+    QLabel*& tDisc{w.tDisc_};
+    QLabel*& tDisp{w.tDisp_};
     QLabel*& tAuto{w.tAuto_};
     QButtonGroup*& zoom{w.zoom_};
     QButtonGroup*& stretch{w.stretch_};
@@ -193,6 +198,8 @@ struct MainWindowProbe {
     QLabel*& recBadge{w.recBadge_};
     QLabel*& remoteBadge{w.remoteBadge_};
     QLabel*& histInfo{w.histInfo_};
+    QLabel*& sSharp{w.sSharp_};
+    QLabel*& sDisp{w.sDisp_};
     QLabel*& sFrame{w.sFrame_};
     QLabel*& fState{w.fState_};
     QLabel*& fFps{w.fFps_};

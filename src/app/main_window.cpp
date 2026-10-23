@@ -242,7 +242,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             if (hist[static_cast<std::size_t>(b)]) total += hist[static_cast<std::size_t>(b)], top = b;
         const double clipped = total ? 100.0 * hist[255] / static_cast<double>(total) : 0;
         histInfo_->setText(QString("peak %1% · clipped %2%").arg(top * 100 / 255).arg(clipped, 0, 'f', 2));
-        histInfo_->setStyleSheet(clipped > 0.1 ? QString("color: %1").arg(theme::kRecText.name()) : "");
+        theme::setStyleIfChanged(histInfo_, clipped > 0.1 ? QString("color: %1").arg(theme::kRecText.name()) : "");
     });
     connect(preview_, &preview::PreviewWidget::rawFrame, this, [this](const LatestFrame::Frame& f) {
         if (!cam_) return;
@@ -468,6 +468,11 @@ QWidget* MainWindow::buildFooter() {
     fMessage_ = theme::label("", "muted");
     h->addWidget(fMessage_, 1);
     mk(fDisplay_);
+    // the readouts that change every tick while previewing (the recording ones are reserved while recording)
+    theme::reserveWidth(fState_, "○ Previewing");
+    theme::reserveWidth(fFps_, "999.9 fps");
+    theme::reserveWidth(fDropped_, "9999 dropped");
+    theme::reserveWidth(fDisplay_, "preview 999 fps · GPU debayer");
     return f;
 }
 
@@ -771,6 +776,8 @@ QWidget* MainWindow::buildPreviewPage() {
     hh->addWidget(theme::label("Histogram", "muted"));
     hh->addStretch(1);
     histInfo_ = theme::label("", "monoMuted");
+    histInfo_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);   // in its reserved width: the words stay put
+    theme::reserveWidth(histInfo_, "peak 100% · clipped 100.00%");
     hh->addWidget(histInfo_);
     hist->addLayout(hh);
     histogram_ = new preview::HistogramWidget;
@@ -779,14 +786,16 @@ QWidget* MainWindow::buildPreviewPage() {
     auto* stats = new QGridLayout;
     stats->setHorizontalSpacing(20);
     stats->setVerticalSpacing(2);
-    auto statCol = [&](int col, const QString& cap, QLabel*& val) {
+    // Each value keeps the width of its widest text: these change every frame, and the histogram takes what's left
+    auto statCol = [&](int col, const QString& cap, QLabel*& val, const QString& widest) {
         stats->addWidget(theme::label(cap, "dim"), 0, col);
         val = theme::label("—", "mono");
+        theme::reserveWidth(val, widest);
         stats->addWidget(val, 1, col);
     };
-    statCol(0, "Sharpness (G)", sSharp_);
-    statCol(1, "Dispersion", sDisp_);
-    statCol(2, "Frame", sFrame_);
+    statCol(0, "Sharpness (G)", sSharp_, "0.00");
+    statCol(1, "Dispersion", sDisp_, "-99.9, -99.9 px");
+    statCol(2, "Frame", sFrame_, "3840×2160 · 16-bit");
     sh->addLayout(stats);
     v->addWidget(strip);
     return page;
@@ -1280,7 +1289,7 @@ void MainWindow::updateTargetInfo() {
     const int margin = std::min({s.targetX0, s.targetY0, l.frameWidth - s.targetX1, l.frameHeight - s.targetY1});
     const double frac = static_cast<double>(margin) / std::max(1, std::min(l.frameWidth, l.frameHeight));
     tMargin_->setText(QString("%1 px").arg(std::max(0, margin)));
-    tMargin_->setStyleSheet(QString("color: %1").arg((frac > 0.1 ? theme::kGood : frac > 0.03 ? theme::kAccent : theme::kRecText).name()));
+    theme::setStyleIfChanged(tMargin_, QString("color: %1").arg((frac > 0.1 ? theme::kGood : frac > 0.03 ? theme::kAccent : theme::kRecText).name()));
     tDisc_->setText(QString("%1 × %2 px").arg(s.targetX1 - s.targetX0).arg(s.targetY1 - s.targetY0));
     const QString disp = s.channels == 3 ? QString("%1, %2 px").arg(s.ch[0].cx - s.ch[2].cx, 0, 'f', 1).arg(s.ch[0].cy - s.ch[2].cy, 0, 'f', 1) : "—";
     tDisp_->setText(disp);
@@ -1551,7 +1560,7 @@ void MainWindow::updateStats() {
     const QString freeText = freeTB >= 1 ? QString("%1 TB free").arg(freeTB, 0, 'f', 1) : QString("%1 GB free").arg(freeTB * 1000, 0, 'f', 0);
     if (!session_) {
         fState_->setText(cam_ ? "○ Stopped" : "○ No camera");
-        fState_->setStyleSheet("");
+        theme::setStyleIfChanged(fState_, "");
         for (auto* l : {fFps_, fDropped_, fRing_, fFrames_, fDisplay_}) l->clear();
         fDisk_->setText(freeText);
         return;
@@ -1565,11 +1574,11 @@ void MainWindow::updateStats() {
     if (!s.error.empty()) message("Error: " + QString::fromStdString(s.error));
     else if (!s.notice.empty() && fMessage_->text().isEmpty()) message(QString::fromStdString(s.notice));
     fState_->setText(recording_ ? "● Recording" : "○ Previewing");
-    fState_->setStyleSheet(recording_ ? QString("color: %1; font-weight: 600;").arg(theme::kRecText.name()) : "");
+    theme::setStyleIfChanged(fState_, recording_ ? QString("color: %1; font-weight: 600;").arg(theme::kRecText.name()) : "");
     fFps_->setText(QString("<span style='color:%1'>%2</span> fps").arg(theme::kText.name()).arg(s.captureFps, 0, 'f', 1));
     const uint64_t dropped = s.cameraDropped + s.ringDropped;
     fDropped_->setText(dropped ? QString("%1 dropped (%2 camera, %3 disk)").arg(dropped).arg(s.cameraDropped).arg(s.ringDropped) : "0 dropped");
-    fDropped_->setStyleSheet(QString("color: %1").arg((dropped ? theme::kRecText : theme::kGood).name()));
+    theme::setStyleIfChanged(fDropped_, QString("color: %1").arg((dropped ? theme::kRecText : theme::kGood).name()));
     if (++statsLogTick_ % 40 == 0) {   // every 10 s (stats run every 250 ms): the night's timeline
         const auto& l = focus_->live();
         qInfo().noquote() << QString::fromStdString(std::format(
@@ -1581,6 +1590,9 @@ void MainWindow::updateStats() {
                           << "· sharpness R/G/B" << QString("%1/%2/%3").arg(l.median[0], 0, 'g', 4).arg(l.median[1], 0, 'g', 4).arg(l.median[2], 0, 'g', 4)
                           << "· target" << targetName();
     }
+    theme::reserveWidth(fRing_, recording_ ? "buffer 100% · 99,999 / 99,999" : "");
+    theme::reserveWidth(fDisk_, recording_ ? "disk 9999 MB/s · 9.9 TB free · 9999 min" : "");
+    theme::reserveWidth(fFrames_, recording_ ? "9,999,999 frames" : "");
     if (recording_) {
         const double minutes = s.writeMBps > 1 ? static_cast<double>(disk.bytesAvailable()) / 1e6 / s.writeMBps / 60 : 0;
         fRing_->setText(QString("buffer %1% · %2 / %3")
@@ -1940,7 +1952,7 @@ void MainWindow::updateClientStats() {
     const bool up = remote_->link() == net::RemoteClient::Link::Connected && cam_;
     const bool rec = up && st["recording"].toBool();
     fState_->setText(rec ? "● Recording on " + name : up ? "⇄ Watching " + name : "⇄ " + name + "…");
-    fState_->setStyleSheet(rec ? QString("color: %1; font-weight: 600;").arg(theme::kRecText.name()) : "");
+    theme::setStyleIfChanged(fState_, rec ? QString("color: %1; font-weight: 600;").arg(theme::kRecText.name()) : "");
     const double secs = st["seconds"].toDouble();
     const int lim = st["limit"].toInt();
     record_->setText(rec ? "■  Stop · " + mmss(secs) : "●  Record on " + name);
@@ -1957,7 +1969,7 @@ void MainWindow::updateClientStats() {
     fFps_->setText(QString("<span style='color:%1'>%2</span> fps at the camera").arg(theme::kText.name()).arg(st["fps"].toDouble(), 0, 'f', 1));
     const auto dropped = static_cast<qint64>(st["dropped"].toDouble());
     fDropped_->setText(QString("%1 dropped").arg(dropped));
-    fDropped_->setStyleSheet(QString("color: %1").arg((dropped ? theme::kRecText : theme::kGood).name()));
+    theme::setStyleIfChanged(fDropped_, QString("color: %1").arg((dropped ? theme::kRecText : theme::kGood).name()));
     fRing_->clear();
     fDisk_->setText(QString("%1: %2").arg(name, st["disk"].toString()));
     fFrames_->setText(rec ? QString("%1 frames").arg(thousands(st["frames"].toDouble())) : QString());
