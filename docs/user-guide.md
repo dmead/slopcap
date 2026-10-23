@@ -66,7 +66,9 @@ green and blue images don't come to focus at exactly the same place, and SlopCap
 
 1. **Connect the focuser:** the Focuser panel's **Connect** uses the INDI server in Settings (normally
    `localhost:7624`). In Settings, set the focuser's **backlash** (about 600 steps for a Gemini EAF) and the direction
-   every move should finish in, so that the final approach always takes up the slack the same way.
+   every move should finish in, so that the final approach always takes up the slack the same way. The first move
+   after connecting overshoots even toward that direction, since which way the gears sit isn't known yet. If the
+   focuser's USB drops out, SlopCap reconnects it by itself once it's back.
 2. **Watch the live sharpness bars** (R, G, B) while you nudge the focuser with the ± step buttons; the tick on each
    bar is the best seen so far.
 3. **Run a sweep:** **Run RGB focus sweep →** (or the Focus tab) opens the sweep. **Coarse ±1500** or **Fine ±350**

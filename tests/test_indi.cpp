@@ -110,6 +110,77 @@ TEST_CASE("INDI focuser: connects, and moves with a fixed final approach directi
     CHECK(f.position() == in + 450);
 }
 
+TEST_CASE("INDI focuser: the backlash is taken up unless the gears are known to be loaded the approach way") {
+    SimServer server({"indi_simulator_focus"});
+    if (!server.ok) SKIP("indiserver / indi_simulator_focus not installed");
+    IndiClient client;
+    Focuser f(client);
+    f.setBacklash(300);
+    f.setApproachOutward(true);
+    std::vector<int> seen;
+    bool arrived = false;
+    QObject::connect(&f, &Focuser::positionChanged, [&](int p) { seen.push_back(p); });
+    QObject::connect(&f, &Focuser::arrived, [&] { arrived = true; });
+    client.connectToServer("127.0.0.1", server.port);
+    REQUIRE(waitFor([&] { return f.ready(); }, 8000));
+    const int start = f.position();
+    auto go = [&](int to) {
+        arrived = false;
+        seen.clear();
+        f.goTo(to);
+        REQUIRE(waitFor([&] { return arrived; }, 30000));
+        CHECK(f.position() == to);
+    };
+
+    // Just connected, nobody knows which way it last ran: even an outward move comes from below.
+    go(start + 100);
+    CHECK(*std::min_element(seen.begin(), seen.end()) <= start + 100 - 300);
+    // Loaded outward now: a further outward step goes straight there.
+    go(start + 200);
+    CHECK(*std::min_element(seen.begin(), seen.end()) >= start + 100);
+
+    // Sent inward, then at once a little outward of where it still says it is (tonight's clicks on the real EAF): it's
+    // heading inward by then, so the outward move still has to come back out from 300 below its target.
+    arrived = false;
+    seen.clear();
+    f.goTo(start + 150);
+    f.goTo(f.position() + 50);
+    REQUIRE(waitFor([&] { return arrived && f.position() == start + 250; }, 30000));
+    CHECK(std::find(seen.begin(), seen.end(), start + 250 - 300) != seen.end());
+}
+
+TEST_CASE("INDI focuser: a serial port that went away under the driver is reconnected") {
+    SimServer server({"indi_simulator_focus"});
+    if (!server.ok) SKIP("indiserver / indi_simulator_focus not installed");
+    IndiClient client;
+    Focuser f(client);
+    std::vector<QString> failures;
+    int offs = 0;
+    QObject::connect(&f, &Focuser::failed, [&](const QString& why) { failures.push_back(why); });
+    QObject::connect(&client, &IndiClient::propertyUpdated, [&](const QString& dev, const QString& name) {
+        const auto* p = client.property(dev, name);
+        if (name == "CONNECTION" && p->elements.count("CONNECT") && !p->elements.at("CONNECT").on()) ++offs;
+    });
+    client.connectToServer("127.0.0.1", server.port);
+    REQUIRE(waitFor([&] { return f.ready(); }, 8000));
+
+    // What MyFocuserPro2 said every second after its USB adapter dropped off the bus (2026-10-22), while its CONNECTION
+    // still read On. The simulator's port can't vanish, so the message is played in.
+    const QString dev = f.device();
+    emit client.message(dev, "[ERROR] Connection write error: Write Error: Input/output error.");
+    REQUIRE(waitFor([&] { return offs > 0; }, 5000));
+    // ready() can still be true from before the driver has deleted its properties, so wait for CONNECT itself
+    REQUIRE(waitFor([&] { return client.property(dev, "CONNECTION")->elements.at("CONNECT").on() && f.ready(); }, 8000));
+    REQUIRE(failures.size() == 1);
+    CHECK(failures[0].contains("serial port"));
+
+    // The driver repeats the error on every poll: that's one reconnect, not one per message.
+    emit client.message(dev, "[ERROR] Connection write error: Write Error: Input/output error.");
+    waitFor([] { return false; }, 1000);
+    CHECK(offs == 1);
+    CHECK(failures.size() == 1);
+}
+
 TEST_CASE("INDI focuser and mount on one server: an LX200's focuser port is left to the mount") {
     // Every LX200 driver says TELESCOPE | GUIDER | FOCUSER; with it seen first, the focuser must still be the EAF.
     SimServer server({"indi_lx200classic"}, {"indi_simulator_focus"});
