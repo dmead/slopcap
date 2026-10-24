@@ -57,8 +57,10 @@ class AdcPanel;
 class CollimationPanel;
 class FocusChartPanel;
 class FocusController;
+class FocusCurveInset;
 class FocusResultsPanel;
 class FullViewBar;
+class LiveInset;
 class MountSection;
 class RawHistogramSection;
 class SweepPanel;
@@ -102,6 +104,9 @@ private:
     QWidget* buildFooter();
     QWidget* buildCaptureLeft();
     QWidget* buildCaptureRight();
+    QWidget* buildFocusLeft();                   ///< the camera small, the focuser, then the sweep settings
+    QWidget* withFocuser(QWidget* column);       ///< a side column with the focuser controls under it
+    void updateCurveInset();                     ///< the sweep's curves over the preview: when, and where
     QWidget* buildPreviewPage();
     void showCameraMenu();
     void populateCameraUi();
@@ -207,6 +212,9 @@ private:
     FocusResultsPanel* resultsPanel_ = nullptr;
     CollimationPanel* collim_ = nullptr;
     AdcPanel* adc_ = nullptr;
+    LiveInset* liveInset_ = nullptr;            ///< Focus tab: the camera, while the chart has the middle
+    FocusCurveInset* curveInset_ = nullptr;     ///< the other tabs: the sweep's curves over a corner of the preview
+    bool curveDismissed_ = false;               ///< closed: hidden until the next sweep starts
 
     // capture left
     QWidget* cameraBox_ = nullptr;

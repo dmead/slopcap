@@ -185,8 +185,10 @@ void PreviewWidget::initializeGL() {
 }
 
 void PreviewWidget::poll() {
-    // Without a GL context frames still flow (histogram, focus, collimation); only the picture is missing.
-    if (!source_ || (!glReady_ && glError_.isEmpty())) return;
+    // Without a GL context frames still flow (histogram, focus, collimation); only the picture is missing. A GPU view
+    // that is on screen but not started yet gets a moment; a hidden one (the window opened on the Focus tab) may not
+    // start for a long time, and focus sweeps can't wait for it.
+    if (!source_ || (!glReady_ && glError_.isEmpty() && isVisible())) return;
     // take() swaps buffers, so the frame is only valid until the next take(): use it right here.
     const LatestFrame::Frame* f = source_->take();
     if (!f) return;

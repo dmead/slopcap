@@ -158,6 +158,9 @@ struct MainWindowProbe {
     QPushButton*& remotePill{w.remotePill_};
     QLabel*& headerInfo{w.headerInfo_};
     preview::PreviewWidget*& preview{w.preview_};
+    LiveInset*& liveInset{w.liveInset_};
+    FocusCurveInset*& curveInset{w.curveInset_};
+    bool& curveDismissed{w.curveDismissed_};
     SweepPanel*& sweepPanel{w.sweepPanel_};
     FocusChartPanel*& chartPanel{w.chartPanel_};
     FocusResultsPanel*& resultsPanel{w.resultsPanel_};

@@ -229,4 +229,27 @@ double balancedPeak(std::span<const std::byte> pixels, int width, int height, in
     return bright[static_cast<std::size_t>(k)];
 }
 
+std::vector<std::byte> sampleMosaic(std::span<const std::byte> pixels, int width, int height, int bitDepth, int x, int y, int w, int h,
+                                    int cellStep, int& outWidth, int& outHeight) {
+    outWidth = outHeight = 0;
+    const int bpp = bitDepth > 8 ? 2 : 1;
+    const int x0 = std::clamp(x, 0, width) & ~1, y0 = std::clamp(y, 0, height) & ~1;
+    const int x1 = std::clamp(x + w, 0, width), y1 = std::clamp(y + h, 0, height);
+    const int cellsX = (x1 - x0) / 2, cellsY = (y1 - y0) / 2;
+    if (cellsX <= 0 || cellsY <= 0 || pixels.size() < static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * bpp) return {};
+    const int k = std::max(1, cellStep);
+    const int outCx = (cellsX + k - 1) / k, outCy = (cellsY + k - 1) / k;
+    outWidth = outCx * 2, outHeight = outCy * 2;
+    std::vector<std::byte> out(static_cast<std::size_t>(outWidth) * static_cast<std::size_t>(outHeight) * bpp);
+    const auto rowBytes = static_cast<std::size_t>(width) * bpp, outRowBytes = static_cast<std::size_t>(outWidth) * bpp;
+    for (int cy = 0; cy < outCy; ++cy)
+        for (int r = 0; r < 2; ++r) {
+            const std::byte* src = pixels.data() + static_cast<std::size_t>(y0 + cy * k * 2 + r) * rowBytes;
+            std::byte* dst = out.data() + static_cast<std::size_t>(cy * 2 + r) * outRowBytes;
+            for (int cx = 0; cx < outCx; ++cx)
+                std::copy_n(src + static_cast<std::size_t>(x0 + cx * k * 2) * bpp, 2 * bpp, dst + static_cast<std::size_t>(cx) * 2 * bpp);
+        }
+    return out;
+}
+
 }  // namespace slopcap::preview

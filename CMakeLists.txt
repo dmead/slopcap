@@ -206,7 +206,7 @@ if(SLOPCAP_BUILD_GUI)
     # The application's windows and panels: a library, so the tests drive the same code the program runs.
     add_library(slopcap_app STATIC src/app/main_window.cpp src/app/theme.cpp src/app/focus_controller.cpp
       src/app/focus_views.cpp src/app/collimation_panel.cpp src/app/settings_dialog.cpp src/app/mount_section.cpp
-      src/app/raw_histogram.cpp src/app/session_log.cpp src/app/full_view_bar.cpp src/app/adc_panel.cpp)
+      src/app/raw_histogram.cpp src/app/session_log.cpp src/app/full_view_bar.cpp src/app/adc_panel.cpp src/app/live_inset.cpp)
     set_target_properties(slopcap_app PROPERTIES AUTOMOC ON)
     target_link_libraries(slopcap_app PUBLIC slopcap_gui slopcap_net PRIVATE slopcap_warnings)
     # qt_add_executable: with a static Qt it also links the platform plugin (qwindows) into the exe

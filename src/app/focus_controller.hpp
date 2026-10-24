@@ -1,6 +1,7 @@
 // Focus logic shared by the Capture sidebar and Focus mode: the INDI focuser, live per-channel sharpness (median of the
 // last N frames, as a fraction of each channel's own best), and the focus sweep (PLAN.md §7a): step the focuser
-// through a range, score every frame with every metric, fit each channel's curve.
+// through a range, score every frame with every metric, fit each channel's curve. A sweep whose peak lands at an end
+// of its range carries on past that end until the curve comes down on both sides, then goes to the best focus.
 #pragma once
 
 #include "analysis/focus.hpp"
@@ -33,6 +34,8 @@ struct LiveFocus {
 struct SweepSettings {
     int from = 0, to = 0, step = 50, frames = 60, settleMs = 400;
     bool fourier = true;
+    bool extend = true;     ///< a peak at an end: 3 more positions past it at a time, up to twice the range again
+    bool goToBest = true;   ///< when complete: to the target's best focus (no peak: the sharpest position swept)
 };
 
 class FocusController : public QObject {
@@ -65,6 +68,13 @@ public:
     const analysis::SweepAnalysis& sweep() const { return analysis_; }
     int sweepStart() const { return startPosition_; }
     const SweepSettings& sweepSettings() const { return settings_; }
+    /// The positions the running sweep covers, extensions included (nothing while idle).
+    std::optional<std::pair<int, int>> sweepSpan() const;
+    /// Positions done, and planned so far.
+    std::pair<int, int> sweepCount() const { return {static_cast<int>(index_), static_cast<int>(positions_.size())}; }
+    /// Whose best focus a finished sweep goes to (the Focus tab's "Focus on").
+    void setTarget(analysis::FocusTarget t) { target_ = t; }
+    analysis::FocusTarget target() const { return target_; }
 
     // Optics, for the critical focus zone: ±2.44 λ N² (λ = 550 nm), converted to steps.
     void setOptics(double focalRatio, double micronsPerStep) { fRatio_ = focalRatio, umPerStep_ = micronsPerStep; }
@@ -81,7 +91,9 @@ signals:
 private:
     enum class State { Idle, Moving, Settling, Collecting };
     void nextPosition();
-    void finish(const QString& why, bool putBack);
+    std::vector<int> extension() const;   ///< positions past an end where a peak still is (empty: the curve is bracketed)
+    void complete();                      ///< every position done: say so, and go to the best focus
+    void finish(const QString& why, std::optional<int> thenGoTo);
 
     devices::IndiClient indi_;
     devices::Focuser focuser_;
@@ -97,6 +109,8 @@ private:
     std::vector<int> positions_;
     std::size_t index_ = 0;
     int collected_ = 0, startPosition_ = 0;
+    int lowLimit_ = 0, highLimit_ = 0;   ///< how far past the range extensions may go
+    analysis::FocusTarget target_ = analysis::FocusTarget::Green;
     QTimer settle_;
     analysis::SweepAnalysis analysis_;
     std::unique_ptr<QFile> csv_;

@@ -56,4 +56,10 @@ Levels autoLevels(const std::array<uint32_t, 256>& hist, double blackPercentile 
 /// Bayer: bilinear interpolation, edges mirrored. 16-bit input is little-endian, full-scale 65535.
 std::vector<uint8_t> renderRgb(std::span<const std::byte> pixels, int width, int height, int bitDepth, Bayer bayer, const Levels& lv);
 
+/// A smaller raw frame cut from one: the region (x, y, w, h), clipped to the frame and taken in whole 2x2 cells from an
+/// even corner, keeping every `cellStep`-th cell each way, so a Bayer frame keeps its pattern (for a thumbnail that
+/// renderRgb then draws at a fraction of the cost). Its size goes to outWidth / outHeight (0 when nothing is left).
+std::vector<std::byte> sampleMosaic(std::span<const std::byte> pixels, int width, int height, int bitDepth, int x, int y, int w, int h,
+                                    int cellStep, int& outWidth, int& outHeight);
+
 }  // namespace slopcap::preview

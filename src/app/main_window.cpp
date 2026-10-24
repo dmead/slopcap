@@ -6,6 +6,7 @@
 #include "app/focus_controller.hpp"
 #include "app/focus_views.hpp"
 #include "app/full_view_bar.hpp"
+#include "app/live_inset.hpp"
 #include "app/mount_section.hpp"
 #include "app/raw_histogram.hpp"
 #include "app/theme.hpp"
@@ -125,13 +126,14 @@ QWidget* scrolled(QWidget* w) {
     return sa;
 }
 
-/// A side-column page: panel-coloured, fixed width range as in the design.
-QWidget* sideColumn(QWidget* content, int minW, int maxW) {
+/// A side-column page: panel-coloured, fixed width range as in the design. Scrolled, unless the content scrolls
+/// its own part (a button that must stay in view).
+QWidget* sideColumn(QWidget* content, int minW, int maxW, bool scroll = true) {
     auto* f = new QFrame;
     f->setProperty("role", "panel");
     auto* l = new QVBoxLayout(f);
     l->setContentsMargins(0, 0, 0, 0);
-    l->addWidget(scrolled(content));
+    l->addWidget(scroll ? scrolled(content) : content);
     f->setMinimumWidth(minW);
     f->setMaximumWidth(maxW);
     return f;
@@ -187,15 +189,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     chartPanel_ = new FocusChartPanel(*focus_);
     resultsPanel_ = new FocusResultsPanel(*focus_);
     left_->addWidget(sideColumn(buildCaptureLeft(), 280, 320));   // Capture
-    left_->addWidget(sideColumn(sweepPanel_, 250, 300));          // Focus
+    left_->addWidget(sideColumn(buildFocusLeft(), 260, 300, false));   // Focus (Run sweep stays in view)
     left_->addWidget(sideColumn(collim_->left(), 260, 300));      // Collimate
     left_->addWidget(sideColumn(adc_->left(), 260, 300));         // ADC
     centre_->addWidget(buildPreviewPage());
     centre_->addWidget(chartPanel_);
+    // the focuser on every tab (Capture has it in its own column, Focus on the left): one focuser, the same controls
     right_->addWidget(sideColumn(buildCaptureRight(), 280, 320));
     right_->addWidget(sideColumn(resultsPanel_, 280, 330));
-    right_->addWidget(sideColumn(collim_->right(), 280, 320));
-    right_->addWidget(sideColumn(adc_->right(), 280, 320));
+    right_->addWidget(sideColumn(withFocuser(collim_->right()), 280, 320));
+    right_->addWidget(sideColumn(withFocuser(adc_->right()), 280, 320));
     for (auto* s : {left_, right_}) s->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     h->addWidget(left_);
     h->addWidget(centre_, 1);
@@ -233,6 +236,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(macFull, &QShortcut::activated, this, [this] { setFullView(!fullView_); });
 #endif
     preview_->installEventFilter(this);
+    // the focus sweep over a corner of the preview (made after the preview's own layers, so it's on top of them)
+    curveInset_ = new FocusCurveInset(*focus_, preview_);
+    curveInset_->hide();
+    connect(curveInset_, &FocusCurveInset::openFocusMode, this, [this] { setMode(Focus); });
+    connect(curveInset_, &FocusCurveInset::dismissed, this, [this] {
+        curveDismissed_ = true;
+        updateCurveInset();
+    });
 
     connect(preview_, &preview::PreviewWidget::frameShown, this, [this](const std::array<uint32_t, 256>& hist, const preview::Levels& lv, const FrameInfo&) {
         histogram_->setData(hist, lv);
@@ -247,6 +258,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(preview_, &preview::PreviewWidget::rawFrame, this, [this](const LatestFrame::Frame& f) {
         if (!cam_) return;
         focus_->onFrame(f, cam_->info().bayer);
+        if (mode_ == Focus) liveInset_->showFrame(f, cam_->info().bayer, preview_->levels(), focus_->live().last);
         if (mode_ == Collimate) collim_->onFrame(f, cam_->info().bayer);
         if (mode_ == Adc) adc_->onFrame(f, cam_->info().bayer);
         // the readout histogram: up to 10 times a second, while the Capture sidebar shows it
@@ -265,6 +277,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(focus_, &FocusController::liveUpdated, this, &MainWindow::updateTargetInfo);
     connect(focus_, &FocusController::sweepUpdated, this, &MainWindow::updateFocusMode);
     connect(focus_, &FocusController::sweepStateChanged, this, [this](bool running) {
+        if (running) curveDismissed_ = false;   // a new sweep: its curves show over the preview again
         updateFocusMode();
         if (running) setMode(Focus);
     });
@@ -691,6 +704,60 @@ QWidget* MainWindow::buildCaptureRight() {
     return w;
 }
 
+// ================================================================ focus: left column
+
+QWidget* MainWindow::buildFocusLeft() {
+    // The chart has the middle of the window here, so the camera comes along small: the planet stays in view while
+    // the focuser moves
+    auto* top = new QWidget;
+    auto* tv = new QVBoxLayout(top);
+    tv->setContentsMargins(0, 0, 0, 6);
+    tv->setSpacing(10);
+    auto* hdr = new QHBoxLayout;
+    hdr->addWidget(theme::section("Camera"));
+    hdr->addStretch(1);
+    QButtonGroup* views = nullptr;
+    hdr->addWidget(theme::segmented({"Target", "Frame"}, views, true));
+    views->button(0)->setChecked(true);
+    views->button(0)->setToolTip("Close up on the target");
+    views->button(1)->setToolTip("The whole frame; the box is the part focus is scored on");
+    tv->addLayout(hdr);
+    liveInset_ = new LiveInset;
+    liveInset_->setToolTip("Double-click for the full preview (Capture)");
+    connect(views, &QButtonGroup::idClicked, this, [this](int id) { liveInset_->setView(id == 0 ? LiveInset::View::Target : LiveInset::View::Frame); });
+    connect(liveInset_, &LiveInset::activated, this, [this] { setMode(Capture); });
+    tv->addWidget(liveInset_);
+    tv->addSpacing(6);
+    tv->addWidget(new FocuserControls(*focus_));
+    sweepPanel_->setHeader(top);
+    return sweepPanel_;
+}
+
+QWidget* MainWindow::withFocuser(QWidget* column) {
+    auto* w = new QWidget;
+    auto* v = new QVBoxLayout(w);
+    v->setContentsMargins(0, 0, 0, 0);
+    v->setSpacing(0);
+    v->addWidget(column, 1);
+    auto* box = new QWidget;
+    auto* bv = new QVBoxLayout(box);
+    bv->setContentsMargins(16, 8, 16, 16);
+    bv->addWidget(new FocuserControls(*focus_));
+    v->addWidget(box);
+    return w;
+}
+
+void MainWindow::updateCurveInset() {
+    if (!curveInset_) return;
+    const bool show = mode_ != Focus && !fullView_ && !curveDismissed_ && (focus_->sweeping() || curveInset_->hasData());
+    if (show) {
+        const int w = std::clamp(preview_->width() * 3 / 10, 220, 340), h = w * 3 / 5;
+        curveInset_->setGeometry(preview_->width() - w - 12, preview_->height() - h - 12, w, h);
+        curveInset_->raise();
+    }
+    curveInset_->setVisible(show);
+}
+
 // ================================================================ centre: preview
 
 QWidget* MainWindow::buildPreviewPage() {
@@ -864,6 +931,8 @@ void MainWindow::updateFocusMode() {
     const auto chosen = resultsPanel_->chosen(m);
     chartPanel_->update(m, sweepPanel_->channelsShown(), chosen);
     resultsPanel_->update(m);
+    curveInset_->update(m, sweepPanel_->channelsShown(), chosen);
+    updateCurveInset();
 }
 
 // ================================================================ camera
@@ -930,6 +999,7 @@ void MainWindow::disconnectCamera() {
     saveSettings();
     cam_.reset();
     rawHist_->clear();
+    liveInset_->clear();
     adc_->reset();
     autoName_.clear();
     autoDetail_.clear();
@@ -2017,6 +2087,7 @@ void MainWindow::setFullView(bool on, QScreen* target) {
     fullView_ = on;
     for (QWidget* w : {header_, footer_, toolbar_, strip_, static_cast<QWidget*>(left_), static_cast<QWidget*>(right_)}) w->setVisible(!on);
     previewHolder_->layout()->setContentsMargins(on ? QMargins() : QMargins(20, 20, 20, 20));
+    updateCurveInset();   // not on the projector
     escape_->setEnabled(on);
     preview_->setMouseTracking(on);   // moves without a button wake the control bar
     if (on) {
@@ -2064,6 +2135,7 @@ bool MainWindow::eventFilter(QObject* o, QEvent* e) {
     if (o == preview_ && e->type() == QEvent::Resize) {
         if (remoteBadge_->isVisible()) remoteBadge_->move(preview_->width() - remoteBadge_->width() - 12, 12);
         if (fullBar_->isVisible()) fullBar_->place();
+        if (curveInset_->isVisible()) updateCurveInset();
     }
     if (fullView_ && e->type() == QEvent::MouseMove) {
         if (!fullBar_->isVisible()) {

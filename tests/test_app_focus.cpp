@@ -4,6 +4,7 @@
 #include "app/collimation_panel.hpp"
 #include "app/focus_controller.hpp"
 #include "app/focus_views.hpp"
+#include "app/live_inset.hpp"
 #include "app/mount_section.hpp"
 #include "app_harness.hpp"
 #include "devices/focuser.hpp"
@@ -20,6 +21,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QTableWidget>
 #include <QTest>
 
@@ -234,6 +236,123 @@ TEST_CASE("focus: INDI focuser and mount simulators, sweeps, results, collimatio
     CHECK(Modals::get().takeUnexpected().join("; ").toStdString() == "");
 }
 
+// The default sweep started well outside focus (what happened at the telescope: every sweep peaked at its first
+// position and stopped there). It has to carry on past its range until the curve comes down on both sides, then go to
+// the peak and hand the focuser back to every tab. Meanwhile the camera stays in view on the Focus tab, and the curves
+// show over the preview on the others. The window opens on the Focus tab, so its preview has never been on screen.
+TEST_CASE("focus: a sweep from outside focus finds it; camera and focuser on every tab", "[app][indi]") {
+    SimServer server({"indi_simulator_focus"});
+    if (!server.ok) SKIP("indiserver / indi_simulator_focus not installed");
+    if (!useFakeAsi()) SKIP("no fake ZWO SDK in this build");
+    auto& m = Modals::get();
+    m.clear();
+    clearSettings();
+    {
+        QSettings st;
+        st.setValue("focuser/server", server.address());
+        st.setValue("focuser/autoConnect", true);
+        st.setValue("focuser/backlash", 20);
+    }
+    TempDir dir;
+    std::atomic<int> position{0};
+    MainWindow w;
+    MainWindowProbe p(w);
+    w.setOutputDir(dir.q());
+    w.showTab("focus");
+    w.show();
+    REQUIRE(QTest::qWaitForWindowExposed(&w));
+    auto& focuser = p.focus->focuser();
+    QObject::connect(&focuser, &devices::Focuser::positionChanged, &w, [&](int pos) { position = pos; });
+    REQUIRE(waitFor([&] { return focuser.ready(); }, 15000));
+    REQUIRE(arrive(focuser, 4400));
+    position = 4400;
+    drawFocusFrames(&position, {5000, 5000, 5000});
+    w.connectCamera("asi");
+    REQUIRE(p.waitForFrames(3));   // frames flow, though the GPU preview hasn't started
+
+    // the camera, small, beside the chart: close up and whole
+    REQUIRE(waitFor([&] { return p.liveInset->hasImage(); }, 5000));
+    p.liveInset->setView(LiveInset::View::Frame);
+    pump(300);
+    p.liveInset->grab();
+    p.liveInset->setView(LiveInset::View::Target);
+    pump(300);
+    QTest::mouseDClick(p.liveInset, Qt::LeftButton);
+    CHECK(p.mode == MainWindow::Capture);
+    p.modes->button(MainWindow::Focus)->click();
+
+    // a set of focuser controls on every tab; the Focus tab's nudges move the range along with the focuser
+    CHECK(w.findChildren<FocuserControls*>().size() == 4);
+    auto* focusControls = p.left->widget(MainWindow::Focus)->findChild<FocuserControls*>();
+    REQUIRE(focusControls);
+    auto* sp = p.sweepPanel;
+    const auto spins = sp->findChildren<QSpinBox*>();
+    REQUIRE(spins.size() == 5);   // from, to, step, frames, settle
+    CHECK(waitFor([&] { return spins[0]->value() == 4400 - 350; }, 3000));
+    button(focusControls, "+100")->click();
+    CHECK(waitFor([&] { return !focuser.moving() && focuser.position() == 4500 && spins[0]->value() == 4500 - 350; }, 20000));
+    CHECK(labelWith(sp, "Centred on the focuser"));
+    button(focusControls, "−100")->click();
+    CHECK(waitFor([&] { return !focuser.moving() && focuser.position() == 4400 && spins[1]->value() == 4400 + 350; }, 20000));
+    spins[3]->setValue(6);     // frames and settle don't fix the range
+    spins[4]->setValue(100);
+    CHECK(labelWith(sp, "Centred on the focuser"));
+
+    // focus is 250 steps past the top of the range
+    button(sp, "Run sweep")->click();
+    REQUIRE(p.focus->sweeping());
+    CHECK_FALSE(button(focusControls, "+10")->isEnabled());
+    w.showTab("capture");   // the curves come in over the preview
+    CHECK(waitFor([&] { return p.curveInset->isVisible(); }, 3000));
+    CHECK(waitFor([&] { return labelWith(p.curveInset, "Sweep ") != nullptr; }, 3000));
+    p.curveInset->grab();
+    REQUIRE(waitFor([&] { return !p.focus->sweeping(); }, 240000));
+    CHECK(labelWith(sp, "Sweep complete"));
+    CHECK(labelWith(sp, "carried on to"));
+    const auto r = p.focus->sweep().result(analysis::Metric::Gradient);
+    REQUIRE(r.ch[1].best);
+    CHECK(std::abs(*r.ch[1].best - 5000) < 40);
+    CHECK_FALSE(r.ch[1].atEdge);
+    // ... went there, and every tab's step buttons are back (a completed sweep used to leave them greyed out)
+    CHECK(waitFor([&] { return !focuser.moving() && std::abs(focuser.position() - 5000) < 40; }, 30000));
+    for (auto* c : w.findChildren<FocuserControls*>()) CHECK(button(c, "+10")->isEnabled());
+    CHECK(waitFor([&] { return spins[0]->value() == focuser.position() - 350; }, 3000));
+
+    // the curves stay over the preview: a click opens the Focus tab, × hides them until the next sweep
+    CHECK(p.curveInset->isVisible());
+    CHECK(labelWith(p.curveInset, "Best focus"));
+    QTest::mouseClick(p.curveInset, Qt::LeftButton, {}, QPoint(20, p.curveInset->height() - 10));
+    CHECK(p.mode == MainWindow::Focus);
+    CHECK_FALSE(p.curveInset->isVisible());
+    w.showTab("adc");
+    CHECK(p.curveInset->isVisible());
+    button(p.curveInset, "×")->click();
+    CHECK_FALSE(p.curveInset->isVisible());
+    w.showTab("capture");
+    CHECK_FALSE(p.curveInset->isVisible());
+    w.setFullView(true);
+    pump(200);
+    w.setFullView(false);
+
+    // a sweep set by hand, with neither extension nor the move at the end: it stays where it finished
+    p.modes->button(MainWindow::Focus)->click();
+    spins[0]->setValue(4900);
+    spins[1]->setValue(5000);
+    CHECK(labelWith(sp, "Fixed range"));
+    checkBox(sp, "Carry on")->setChecked(false);
+    checkBox(sp, "Go to the best")->setChecked(false);
+    button(sp, "Run sweep")->click();
+    REQUIRE(p.focus->sweeping());
+    CHECK_FALSE(p.curveDismissed);
+    REQUIRE(waitFor([&] { return !p.focus->sweeping(); }, 120000));
+    CHECK_FALSE(labelWith(sp, "carried on"));
+    pump(500);
+    CHECK(focuser.position() == (focuser.approachOutward() ? 5000 : 4900));
+    CHECK(spins[0]->value() == 4900);   // a fixed range stays fixed
+    w.close();
+    CHECK(Modals::get().takeUnexpected().join("; ").toStdString() == "");
+}
+
 // Not part of the normal run ([.] hides it): the Focus tab after a sweep of a camera whose red, green and blue come to
 // focus at different places, saved for the README.   SLOPCAP_DOCS_DIR=DIR slopcap-app-tests "[docs]"
 TEST_CASE("docs: the Focus tab after a per-colour sweep (screenshot)", "[.][docs]") {
@@ -276,8 +395,14 @@ TEST_CASE("docs: the Focus tab after a per-colour sweep (screenshot)", "[.][docs
     spins[3]->setValue(10);
     spins[4]->setValue(150);
     button(p.sweepPanel, "Run sweep")->click();
+    // halfway, the Capture tab: the curves coming in over the live preview
+    REQUIRE(waitFor([&] { return p.focus->sweepCount().first >= 9; }, 300000));
+    w.showTab("capture");
+    pump(800);
+    CHECK(w.grab().save(out + "/capture-sweep.png"));
+    p.modes->button(MainWindow::Focus)->click();
     REQUIRE(waitFor([&] { return !p.focus->sweeping(); }, 300000));
     button(p.resultsPanel, "Balanced")->click();
-    pump(500);
+    pump(1500);   // (the camera, small, at the best focus it went to)
     CHECK(w.grab().save(out + "/focus.png"));
 }

@@ -14,6 +14,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSpinBox>
 #include <QTableWidget>
 #include <QVBoxLayout>
@@ -114,9 +115,9 @@ void ChannelBars::paintEvent(QPaintEvent*) {
     }
 }
 
-// ---------------------------------------------------------------- FocuserSection
+// ---------------------------------------------------------------- FocuserControls
 
-FocuserSection::FocuserSection(FocusController& fc, QWidget* parent) : QWidget(parent), fc_(fc) {
+FocuserControls::FocuserControls(FocusController& fc, QWidget* parent) : QWidget(parent), fc_(fc) {
     auto* v = new QVBoxLayout(this);
     v->setContentsMargins(0, 0, 0, 0);
     v->setSpacing(10);
@@ -134,17 +135,15 @@ FocuserSection::FocuserSection(FocusController& fc, QWidget* parent) : QWidget(p
     v->addWidget(offline_);
     connect(conn, &QPushButton::clicked, this, [this] { fc_.connectFocuser(fc_.server()); });
 
-    auto* posBox = new QWidget;
-    auto* posRow = new QHBoxLayout(posBox);
+    posBox_ = new QWidget;
+    auto* posRow = new QHBoxLayout(posBox_);
     posRow->setContentsMargins(0, 0, 0, 0);
     position_ = theme::label("—", "monoLarge");
     max_ = theme::label("", "dim");
     posRow->addWidget(position_);
     posRow->addStretch(1);
     posRow->addWidget(max_, 0, Qt::AlignBottom);
-    v->addWidget(posBox);
-    connect(&fc_, &FocusController::focuserChanged, posBox, [this, posBox] { posBox->setVisible(fc_.focuser().ready()); });
-    posBox->setVisible(false);
+    v->addWidget(posBox_);
 
     // Outside nudges_, so it stays live during a sweep (the nudges are disabled then)
     stop_ = theme::button("STOP", "stop");
@@ -163,6 +162,34 @@ FocuserSection::FocuserSection(FocusController& fc, QWidget* parent) : QWidget(p
         g->addWidget(b, 0, i);
     }
     v->addWidget(nudges_);
+
+    connect(&fc_, &FocusController::focuserChanged, this, &FocuserControls::refresh);
+    // A sweep that ends where it is (complete) moves nothing afterwards: the step buttons must come back anyway.
+    connect(&fc_, &FocusController::sweepStateChanged, this, &FocuserControls::refresh);
+    refresh();
+}
+
+void FocuserControls::refresh() {
+    auto& f = fc_.focuser();
+    const bool ok = f.ready();
+    title_->setText(QString("FOCUSER%1").arg(ok ? " · " + f.device().toUpper() : ""));
+    offline_->setVisible(!ok);
+    offlineText_->setText(fc_.indi().isConnected() ? "INDI connected · no focuser yet" : "Not connected · " + fc_.server());
+    posBox_->setVisible(ok);
+    stop_->setVisible(ok);
+    nudges_->setVisible(ok);
+    nudges_->setEnabled(!fc_.sweeping());
+    position_->setText(ok ? thousands(f.position()) : "—");
+    max_->setText(ok && f.maxPosition() > 0 ? "of " + thousands(f.maxPosition()) + (f.moving() ? " · moving" : "") : "");
+}
+
+// ---------------------------------------------------------------- FocuserSection
+
+FocuserSection::FocuserSection(FocusController& fc, QWidget* parent) : QWidget(parent), fc_(fc) {
+    auto* v = new QVBoxLayout(this);
+    v->setContentsMargins(0, 0, 0, 0);
+    v->setSpacing(10);
+    v->addWidget(new FocuserControls(fc_));
 
     auto* liveCard = theme::card();
     auto* lv = new QVBoxLayout(liveCard);
@@ -202,24 +229,24 @@ FocuserSection::FocuserSection(FocusController& fc, QWidget* parent) : QWidget(p
 
 void FocuserSection::refresh() {
     auto& f = fc_.focuser();
-    const bool ok = f.ready();
-    title_->setText(QString("FOCUSER%1").arg(ok ? " · " + f.device().toUpper() : ""));
-    offline_->setVisible(!ok);
-    offlineText_->setText(fc_.indi().isConnected() ? "INDI connected · no focuser yet" : "Not connected · " + fc_.server());
-    stop_->setVisible(ok);
-    nudges_->setVisible(ok);
-    nudges_->setEnabled(!fc_.sweeping());
-    position_->setText(ok ? thousands(f.position()) : "—");
-    max_->setText(ok && f.maxPosition() > 0 ? "of " + thousands(f.maxPosition()) + (f.moving() ? " · moving" : "") : "");
-    note_->setText(ok ? QString("Backlash %1 steps — moves finish %2.").arg(f.backlash()).arg(f.approachOutward() ? "outward" : "inward") : "");
+    note_->setText(f.ready() ? QString("Backlash %1 steps — moves finish %2.").arg(f.backlash()).arg(f.approachOutward() ? "outward" : "inward") : "");
 }
 
 // ---------------------------------------------------------------- SweepPanel
 
 SweepPanel::SweepPanel(FocusController& fc, QWidget* parent) : QWidget(parent), fc_(fc) {
-    auto* v = new QVBoxLayout(this);
-    v->setContentsMargins(16, 16, 16, 16);
+    // The settings scroll; the status and Run stay at the bottom, in view however tall the column gets
+    auto* outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    auto* body = new QWidget;
+    auto* v = new QVBoxLayout(body);
+    v->setContentsMargins(16, 16, 16, 8);
     v->setSpacing(14);
+    header_ = new QVBoxLayout;
+    header_->setContentsMargins(0, 0, 0, 0);
+    header_->setSpacing(10);
+    v->addLayout(header_);
     v->addWidget(theme::section("Sweep"));
     auto* seg = new QWidget;
     auto* sh = new QHBoxLayout(seg);
@@ -240,7 +267,7 @@ SweepPanel::SweepPanel(FocusController& fc, QWidget* parent) : QWidget(parent), 
     connect(fine, &QPushButton::clicked, this, [this] { preset(350, 50); });
 
     auto* grid = new QGridLayout;
-    grid->setSpacing(10);
+    grid->setSpacing(8);
     from_ = monoSpin(0, 1'000'000, 0, 50);
     to_ = monoSpin(0, 1'000'000, 0, 50);
     step_ = monoSpin(1, 10000, 50, 10);
@@ -252,7 +279,19 @@ SweepPanel::SweepPanel(FocusController& fc, QWidget* parent) : QWidget(parent), 
     grid->addWidget(labelled("Step", step_), 1, 0);
     grid->addWidget(labelled("Frames / step", frames_), 1, 1);
     grid->addWidget(labelled("Settle", settle_), 2, 0);
+    frames_->setToolTip("Frames scored at each position");
+    settle_->setToolTip("Wait after each move before scoring (the image stops shaking)");
     v->addLayout(grid);
+    follows_ = theme::label("", "dim");
+    follows_->setWordWrap(true);
+    v->addWidget(follows_);
+    // By hand, From / To stay put; the presets centre them on the focuser again and follow it from then on
+    for (auto* s : {from_, to_})
+        connect(s, &QSpinBox::valueChanged, this, [this] {
+            if (setting_) return;
+            follow_ = false;
+            refresh();
+        });
 
     metric_ = new QComboBox;
     for (auto m : {Metric::Gradient, Metric::Laplacian, Metric::Variance, Metric::Fourier}) metric_->addItem(metricLabel(m), static_cast<int>(m));
@@ -262,14 +301,12 @@ SweepPanel::SweepPanel(FocusController& fc, QWidget* parent) : QWidget(parent), 
         emit displayChanged();
     });
 
-    auto* chBox = new QFrame;
-    chBox->setStyleSheet(QString("QFrame#channels { border: 1px solid %1; border-radius: 8px; }").arg(theme::kControlLine.name()));
-    chBox->setObjectName("channels");
-    auto* cv = new QVBoxLayout(chBox);
-    cv->setContentsMargins(12, 10, 12, 10);
-    cv->setSpacing(8);
-    cv->addWidget(theme::label("Channels (raw Bayer planes)", "muted"));
-    const char* names[3] = {"Red", "Green (G1 + G2)", "Blue"};
+    auto* chBox = new QWidget;
+    auto* cv = new theme::FlowLayout(chBox, 12);
+    auto* chLabel = theme::label("Channels", "muted");
+    chLabel->setToolTip("Raw Bayer planes, not interpolated: green is G1 and G2 together");
+    cv->addWidget(chLabel);
+    const char* names[3] = {"Red", "Green", "Blue"};
     for (int c = 0; c < 3; ++c) {
         channel_[static_cast<std::size_t>(c)] = new QCheckBox(names[c]);
         channel_[static_cast<std::size_t>(c)]->setChecked(true);
@@ -282,21 +319,35 @@ SweepPanel::SweepPanel(FocusController& fc, QWidget* parent) : QWidget(parent), 
     fourier_ = new QCheckBox("Also score Fourier (slower)");
     fourier_->setChecked(true);
     v->addWidget(fourier_);
-
-    auto* bl = new QHBoxLayout;
-    bl->addWidget(theme::label("Backlash take-up", "muted"));
-    bl->addStretch(1);
-    backlash_ = theme::label("—", "mono");
-    bl->addWidget(backlash_);
-    v->addLayout(bl);
+    // (check box texts don't wrap: short enough for the narrowest column)
+    extend_ = new QCheckBox("Carry on past the ends");
+    extend_->setChecked(true);
+    extend_->setToolTip("While the sharpest position is at an end of the range, add 3 positions past it at a time (up to "
+                        "twice the range again), until the curve comes down on both sides of its peak");
+    v->addWidget(extend_);
+    goToBest_ = new QCheckBox("Go to the best focus after");
+    goToBest_->setChecked(true);
+    goToBest_->setToolTip("The position for the channel chosen under Focus on (right); without a peak, the sharpest position "
+                          "swept. Off: the focuser stays at the last position.");
+    v->addWidget(goToBest_);
 
     v->addStretch(1);
     status_ = theme::label("", "muted");
     status_->setWordWrap(true);
-    v->addWidget(status_);
     run_ = theme::button("Run sweep");
     run_->setMinimumHeight(40);
-    v->addWidget(run_);
+    auto* scroll = new QScrollArea;
+    scroll->setWidget(body);
+    scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setFrameShape(QFrame::NoFrame);
+    outer->addWidget(scroll, 1);
+    auto* bar = new QVBoxLayout;
+    bar->setContentsMargins(16, 8, 16, 16);
+    bar->setSpacing(8);
+    bar->addWidget(status_);
+    bar->addWidget(run_);
+    outer->addLayout(bar);
     connect(run_, &QPushButton::clicked, this, [this] {
         if (fc_.sweeping()) {
             fc_.stopSweep();
@@ -305,6 +356,8 @@ SweepPanel::SweepPanel(FocusController& fc, QWidget* parent) : QWidget(parent), 
         SweepSettings s;
         s.from = from_->value(), s.to = to_->value(), s.step = step_->value(), s.frames = frames_->value(), s.settleMs = settle_->value();
         s.fourier = fourier_->isChecked();
+        s.extend = extend_->isChecked();
+        s.goToBest = goToBest_->isChecked();
         fc_.startSweep(s);
     });
     connect(&fc_, &FocusController::sweepProgress, status_, &QLabel::setText);
@@ -313,27 +366,47 @@ SweepPanel::SweepPanel(FocusController& fc, QWidget* parent) : QWidget(parent), 
     refresh();
 }
 
+void SweepPanel::setHeader(QWidget* w) { header_->addWidget(w); }
+
 std::array<bool, 3> SweepPanel::channelsShown() const {
     return {channel_[0]->isChecked(), channel_[1]->isChecked(), channel_[2]->isChecked()};
 }
 
 void SweepPanel::preset(int halfRange, int step) {
     const int at = fc_.focuser().ready() ? fc_.focuser().position() : (from_->value() + to_->value()) / 2;
+    setting_ = true;
     from_->setValue(std::max(0, at - halfRange));
     to_->setValue(at + halfRange);
     step_->setValue(step);
+    setting_ = false;
+    follow_ = true;
+    refresh();
+}
+
+void SweepPanel::centre() {
+    auto& f = fc_.focuser();
+    // Not while sweeping (the range on screen is the one running), nor halfway through a move: where it ends up counts
+    if (!follow_ || !f.ready() || f.moving() || fc_.sweeping()) return;
+    const int half = (to_->value() - from_->value()) / 2;
+    if ((from_->value() + to_->value()) / 2 == f.position()) return;
+    setting_ = true;
+    from_->setValue(std::max(0, f.position() - half));
+    to_->setValue(f.position() + half);
+    setting_ = false;
 }
 
 void SweepPanel::refresh() {
     auto& f = fc_.focuser();
     const bool ok = f.ready();
     if (ok && from_->value() == 0 && to_->value() == 0) preset(350, 50);   // first time: centre on the focuser
-    backlash_->setText(ok ? QString("%1 steps").arg(f.backlash()) : "—");
+    centre();
+    const QString backlash = ok ? QString(" · backlash take-up %1 steps").arg(f.backlash()) : QString();
+    follows_->setText((follow_ ? "Centred on the focuser, wherever it goes" : "Fixed range (set by hand): a preset centres it again") + backlash);
     run_->setEnabled(ok);
     run_->setText(fc_.sweeping() ? "Stop sweep" : ok ? "Run sweep" : "Connect the focuser first");
     run_->setProperty("variant", fc_.sweeping() ? "stop" : "accent");
     theme::restyle(run_);
-    for (auto* w : std::initializer_list<QWidget*>{from_, to_, step_, frames_, settle_, fourier_}) w->setEnabled(!fc_.sweeping());
+    for (auto* w : std::initializer_list<QWidget*>{from_, to_, step_, frames_, settle_, fourier_, extend_, goToBest_}) w->setEnabled(!fc_.sweeping());
 }
 
 // ---------------------------------------------------------------- FocusChart
@@ -348,46 +421,83 @@ void FocusChart::setData(const analysis::SweepResult& r, std::array<bool, 3> sho
     update();
 }
 
+void FocusChart::setProgress(std::optional<std::pair<int, int>> span, std::optional<int> at) {
+    span_ = span;
+    at_ = at;
+    update();
+}
+
+void FocusChart::setCompact(bool on) {
+    compact_ = on;
+    setMinimumHeight(on ? 60 : 320);
+    update();
+}
+
 void FocusChart::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     const QFont mono = theme::monoFont();
     QFont small = mono;
     small.setPixelSize(11);
-    const QRectF frame = rect().adjusted(44, 0, -1, -26);
+    const QRectF frame = compact_ ? QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5) : QRectF(rect()).adjusted(44, 0, -1, -26);
     p.setPen(QPen(theme::kLine, 1));
-    p.setBrush(theme::kPanel);
-    p.drawRoundedRect(frame, 8, 8);
-    if (r_.channels == 0 || r_.ch[0].points.empty()) {
+    p.setBrush(compact_ ? Qt::NoBrush : QBrush(theme::kPanel));
+    p.drawRoundedRect(frame, compact_ ? 4 : 8, compact_ ? 4 : 8);
+    const bool empty = r_.channels == 0 || r_.ch[0].points.empty();
+    if (empty && !span_) {
+        if (compact_) return;
         p.setPen(theme::kDim);
         p.drawText(frame, Qt::AlignCenter, "No sweep yet — connect the focuser, set a range and Run sweep");
         return;
     }
-    const QRectF plot = frame.adjusted(12, 12, -12, -12);
+    const QRectF plot = frame.adjusted(compact_ ? 6 : 12, compact_ ? 6 : 12, compact_ ? -6 : -12, compact_ ? -6 : -12);
+    // x: the whole planned range while a sweep runs (the points fill it in), else what was swept
     double x0 = 1e18, x1 = -1e18;
+    if (span_) x0 = span_->first, x1 = span_->second;
     for (int c = 0; c < r_.channels; ++c)
         for (const auto& pt : r_.ch[static_cast<std::size_t>(c)].points)
             x0 = std::min<double>(x0, pt.position), x1 = std::max<double>(x1, pt.position);
     if (x1 <= x0) x1 = x0 + 1;
-    const double y0 = 0.6, y1 = 1.02;   // each channel normalised to its own best, as in the design
+    // Each channel normalised to its own best (the fitted peak, when it lies in the range). The floor goes as low as
+    // the curves do, so a wide sweep shows its whole V and not only the top 40 %.
+    auto normOf = [&](const analysis::ChannelCurve& cv) {
+        double top = 0;
+        for (const auto& pt : cv.points) top = std::max(top, pt.bestQuarter);
+        if (cv.best && *cv.best >= x0 && *cv.best <= x1) top = std::max(top, cv.fitted(*cv.best));
+        return top;
+    };
+    double lowest = 0.6;
+    for (int c = 0; c < r_.channels; ++c) {
+        const auto& cv = r_.ch[static_cast<std::size_t>(c)];
+        const double norm = normOf(cv);
+        if (!shown_[static_cast<std::size_t>(c)] || norm <= 0) continue;
+        for (const auto& pt : cv.points) lowest = std::min(lowest, pt.bestQuarter / norm);
+    }
+    const double y0 = std::clamp(std::floor((lowest - 0.02) * 10) / 10, 0.0, 0.6), y1 = 1.02;
     auto X = [&](double pos) { return plot.left() + (pos - x0) / (x1 - x0) * plot.width(); };
     auto Y = [&](double v) { return plot.bottom() - (v - y0) / (y1 - y0) * plot.height(); };
 
     // grid + axes labels
     p.setFont(small);
     for (int i = 0; i <= 4; ++i) {
-        const double v = 1.0 - 0.1 * i;
+        const double v = 1.0 - (1.0 - y0) * i / 4;
         p.setPen(QPen(QColor(0x1f, 0x23, 0x28), 1));
         if (i > 0 && i < 4) p.drawLine(QPointF(plot.left(), Y(v)), QPointF(plot.right(), Y(v)));
+        if (compact_) continue;
         p.setPen(theme::kDim);
         p.drawText(QRectF(0, Y(v) - 8, 38, 16), Qt::AlignRight | Qt::AlignVCenter, QString::number(v, 'f', 2));
     }
-    for (int i = 0; i <= 4; ++i) {
+    for (int i = 0; i <= 4 && !compact_; ++i) {
         const double pos = x0 + (x1 - x0) * i / 4;
         p.setPen(theme::kDim);
         const double x = X(pos);
         const QRectF r = i == 0 ? QRectF(x, frame.bottom() + 6, 80, 16) : i == 4 ? QRectF(x - 80, frame.bottom() + 6, 80, 16) : QRectF(x - 40, frame.bottom() + 6, 80, 16);
         p.drawText(r, i == 0 ? Qt::AlignLeft : i == 4 ? Qt::AlignRight : Qt::AlignHCenter, thousands(pos));
+    }
+    // where the focuser is while the sweep runs
+    if (at_ && *at_ >= x0 && *at_ <= x1) {
+        p.setPen(QPen(theme::kMuted, 1, Qt::DashLine));
+        p.drawLine(QPointF(X(*at_), frame.top() + 2), QPointF(X(*at_), frame.bottom() - 2));
     }
     // critical focus zone around the chosen position
     if (chosen_ && zone_) {
@@ -402,41 +512,46 @@ void FocusChart::paintEvent(QPaintEvent*) {
     for (int c = 0; c < r_.channels; ++c) {
         if (!shown_[static_cast<std::size_t>(c)]) continue;
         const auto& cv = r_.ch[static_cast<std::size_t>(c)];
-        const double peak = cv.best ? cv.fitted(*cv.best) : 0;
-        double top = peak;
-        for (const auto& pt : cv.points) top = std::max(top, pt.bestQuarter);
-        if (top <= 0) continue;
-        const double norm = peak > 0 ? peak : top;
+        const double norm = normOf(cv);
+        if (norm <= 0) continue;
         const QColor col = r_.channels == 1 ? theme::kText : theme::kChannel[c];
         if (cv.best) {
+            // the parabola describes the top of the curve only: draw it where it's above the floor
             QPainterPath path;
+            bool pen = false;
             for (int i = 0; i <= 120; ++i) {
-                const double pos = x0 + (x1 - x0) * i / 120.0;
-                const QPointF q(X(pos), Y(std::max(y0 - 0.05, cv.fitted(pos) / norm)));
-                if (i == 0) path.moveTo(q);
+                const double pos = x0 + (x1 - x0) * i / 120.0, y = cv.fitted(pos) / norm;
+                if (y < y0) {
+                    pen = false;
+                    continue;
+                }
+                const QPointF q(X(pos), Y(y));
+                if (!pen) path.moveTo(q);
                 else path.lineTo(q);
+                pen = true;
             }
-            QPen pen(col, 2.5, r_.channels == 1 ? Qt::SolidLine : kChannelLine[c]);
-            pen.setCapStyle(Qt::RoundCap);
-            p.setPen(pen);
+            QPen line(col, compact_ ? 1.5 : 2.5, r_.channels == 1 ? Qt::SolidLine : kChannelLine[c]);
+            line.setCapStyle(Qt::RoundCap);
+            p.setPen(line);
             p.setBrush(Qt::NoBrush);
             p.drawPath(path);
             p.setPen(QPen(col, 1, r_.channels == 1 ? Qt::SolidLine : kChannelLine[c]));
             p.drawLine(QPointF(X(*cv.best), frame.top()), QPointF(X(*cv.best), frame.bottom()));
         }
+        const double marker = compact_ ? 6 : 10;
         for (const auto& pt : cv.points) {
             const double x = X(pt.position), y = Y(pt.bestQuarter / norm);
-            p.setPen(QPen(theme::kGround, 1.5));
+            p.setPen(QPen(theme::kGround, compact_ ? 1 : 1.5));
             if (r_.channels == 1) {
                 p.setBrush(col);
-                p.drawEllipse(QPointF(x, y), 4.5, 4.5);
+                p.drawEllipse(QPointF(x, y), marker * 0.45, marker * 0.45);
             } else {
-                theme::drawChannelMarker(p, c, x, y, 10);
+                theme::drawChannelMarker(p, c, x, y, marker);
             }
         }
     }
     p.restore();
-    if (chosen_) {
+    if (chosen_ && !compact_) {
         const QString t = "focus " + thousands(*chosen_);
         p.setFont(mono);
         const QFontMetrics fm(mono);
@@ -531,6 +646,7 @@ void FocusChartPanel::update(Metric m, std::array<bool, 3> shown, std::optional<
     const auto r = fc_.sweep().result(m);
     const auto zone = fc_.criticalZoneSteps();
     chart_->setData(r, shown, chosen, zone);
+    chart_->setProgress(fc_.sweepSpan(), fc_.sweeping() && fc_.focuser().ready() ? std::optional<int>(fc_.focuser().position()) : std::nullopt);
     subtitle_->setText(QString("%1 · each channel normalised to its own best · best quarter of %2 frames")
                            .arg(metricLabel(m))
                            .arg(fc_.sweepSettings().frames));
@@ -626,6 +742,7 @@ FocusResultsPanel::FocusResultsPanel(FocusController& fc, QWidget* parent) : QWi
         v->addWidget(b);
         connect(b, &QPushButton::clicked, this, [this, t = defs[i].t] {
             target_ = t;
+            fc_.setTarget(t);   // where a finished sweep goes
             emit targetChanged();
         });
     }
@@ -731,5 +848,57 @@ void FocusResultsPanel::update(Metric m) {
         metrics_->setItem(row, 2, new QTableWidgetItem(rr.spread ? QString::number(std::lround(*rr.spread)) : "—"));
     }
 }
+
+// ---------------------------------------------------------------- FocusCurveInset
+
+FocusCurveInset::FocusCurveInset(FocusController& fc, QWidget* parent) : QWidget(parent), fc_(fc) {
+    setAttribute(Qt::WA_NoSystemBackground);
+    setAttribute(Qt::WA_TranslucentBackground);
+    setCursor(Qt::PointingHandCursor);
+    setToolTip("The focus sweep: click for the Focus tab");
+    auto* v = new QVBoxLayout(this);
+    v->setContentsMargins(10, 6, 6, 10);
+    v->setSpacing(4);
+    auto* top = new QHBoxLayout;
+    top->setSpacing(4);
+    status_ = theme::label("", "monoMuted");
+    status_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    top->addWidget(status_, 1);
+    auto* close = theme::button("×", "ghost");
+    // the size in the style sheet: the theme's min-height and padding win over setFixedSize
+    close->setStyleSheet("padding: 0; font-size: 15px; min-width: 20px; max-width: 20px; min-height: 20px; max-height: 20px;");
+    close->setToolTip("Hide until the next sweep");
+    connect(close, &QPushButton::clicked, this, &FocusCurveInset::dismissed);
+    top->addWidget(close);
+    v->addLayout(top);
+    chart_ = new FocusChart;
+    chart_->setCompact(true);
+    chart_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    v->addWidget(chart_, 1);
+}
+
+void FocusCurveInset::update(Metric m, std::array<bool, 3> shown, std::optional<double> chosen) {
+    const auto r = fc_.sweep().result(m);
+    hasData_ = r.channels > 0 && !r.ch[0].points.empty();
+    const bool running = fc_.sweeping();
+    chart_->setData(r, shown, chosen, std::nullopt);
+    chart_->setProgress(fc_.sweepSpan(), running && fc_.focuser().ready() ? std::optional<int>(fc_.focuser().position()) : std::nullopt);
+    const auto [done, total] = fc_.sweepCount();
+    status_->setText(running    ? QString("Sweep %1 / %2 · at %3").arg(std::min(done + 1, total)).arg(total).arg(thousands(fc_.focuser().position()))
+                     : chosen ? QString("Best focus %1").arg(thousands(*chosen))
+                              : QString("Sweep: no peak found"));
+}
+
+void FocusCurveInset::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing);
+    QColor bg = theme::kGround;
+    bg.setAlpha(225);
+    p.setPen(QPen(theme::kLine, 1));
+    p.setBrush(bg);
+    p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 8, 8);
+}
+
+void FocusCurveInset::mousePressEvent(QMouseEvent*) { emit openFocusMode(); }
 
 }  // namespace slopcap::app

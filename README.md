@@ -50,16 +50,18 @@ focus by eye on the combined picture mostly judges green. SlopCap scores each co
 colour has reached so far, smoothed over the last few frames so the seeing doesn't make them jump.
 
 **The sweep** finds each colour's best position. Pick a range (Coarse ±1500 or Fine ±350 steps around where the
-focuser is, or your own), a step size and how many frames to take at each step. SlopCap moves the focuser through the
-range, always finishing each move in the same direction so the focuser's slack is taken up the same way every time,
-waits for it to settle, and scores every frame:
+focuser is, following it as it moves, or your own), a step size and how many frames to take at each step. SlopCap
+moves the focuser through the range, always finishing each move in the same direction so the focuser's slack is taken
+up the same way every time, waits for it to settle, and scores every frame. Started off to one side of focus, it
+doesn't stop at the end of the range with the curve still climbing: it carries on past that end until the curve comes
+down again, then goes to the best focus. The camera stays in view beside the chart, and on the other tabs the curves
+fill in over a corner of the live preview.
 
 - **Four sharpness measures** on the same frames: edge contrast, fine detail, contrast, and Fourier mid-band
   frequencies. They react differently to seeing and to the planet's detail; **Which metric is tightest** shows which one
   agreed with itself best on this sweep, and you can switch the chart to any of them.
 - **The best quarter of the frames** at each position counts, the moments of good seeing, not the average blur.
-- **A curve per colour**, fitted near its peak, gives each colour's best position with an error. A peak at the end of
-  the range is flagged, so you know to widen it.
+- **A curve per colour**, fitted near its peak, gives each colour's best position with an error.
 - **The critical focus zone**, from the telescope's focal ratio and the focuser's step size in Settings: how far from
   perfect focus you can be before it shows (±2.44 λN²). SlopCap says whether all three colours fit inside it, or that
   they can't all be sharp and you have to choose.

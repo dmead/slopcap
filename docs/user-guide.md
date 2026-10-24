@@ -70,14 +70,26 @@ green and blue images don't come to focus at exactly the same place, and SlopCap
    after connecting overshoots even toward that direction, since which way the gears sit isn't known yet. If the
    focuser's USB drops out, SlopCap reconnects it by itself once it's back.
 2. **Watch the live sharpness bars** (R, G, B) while you nudge the focuser with the ± step buttons; the tick on each
-   bar is the best seen so far. **STOP**, above them, halts the focuser at once (and ends a sweep where it is).
+   bar is the best seen so far. **STOP**, above them, halts the focuser at once (and ends a sweep where it is). The
+   focuser's position, STOP and step buttons are on every tab (Capture and Focus in the side column, Collimate and
+   ADC at the bottom of the right one), and all of them work the same focuser.
 3. **Run a sweep:** **Run RGB focus sweep →** (or the Focus tab) opens the sweep. **Coarse ±1500** or **Fine ±350**
-   sets the range around the current position (or set From, To, Step, frames per step and settle time yourself);
-   then **Run sweep**. SlopCap moves the focuser through the range, scores every frame and fits a curve per colour.
+   sets the range around the focuser, and the range then follows the focuser wherever it goes, so it's always centred
+   on where you are now. Set From or To yourself and the range stays put until you pick a preset again. Then **Run
+   sweep**. SlopCap moves the focuser through the range, scores every frame and fits a curve per colour. If the
+   sharpest position is still at one end when the range is done, the sweep **carries on past that end**, 3 positions
+   at a time (up to twice the range again), until the curve comes down on both sides of its peak. Then it **goes to
+   the best focus** for the colour chosen under Focus on (both are check boxes under the settings; without them the
+   sweep covers exactly the range and stops at its last position).
 4. **Read the result:** the chart shows sharpness against position for each colour; the table gives each colour's
    best position and how far it is from green. Choose what to focus on (**Green**, **Luminance-weighted**,
    **Balanced**, **Red** or **Blue**) and press **Go to**. Several sharpness measures are computed on the same frames;
    **Which metric is tightest** shows which one agreed with itself best on this sweep.
+
+The camera stays in view on the Focus tab: the top of its left column shows the target close up, or the whole frame
+with the box focus is scored in (**Target** / **Frame**); double-click it for the full preview. The other way round,
+while a sweep runs (and after it), its curves show small in a corner of the preview on the other tabs: click them for
+the Focus tab, or × to hide them until the next sweep.
 
 With the focal ratio and the focuser's microns per step entered in Settings → Optics, the chart also shows the
 critical focus zone: how far you can be from perfect focus before it shows. Each sweep's numbers are saved as a CSV

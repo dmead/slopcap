@@ -197,3 +197,37 @@ TEST_CASE("renderRgb stretches and handles 16-bit mono") {
     std::vector<std::byte> mid = {std::byte{64}};
     CHECK(renderRgb(mid, 1, 1, 8, Bayer::None, {0.0, 1.0, 2.0})[0] == Catch::Approx(128).margin(1));
 }
+
+TEST_CASE("sampleMosaic cuts and thins a frame in whole Bayer cells") {
+    // 16-bit RGGB, 12 x 8: every sample says where it came from (x in the low byte, y in the high one), and the
+    // colour of a site follows from its parity
+    const int w = 12, h = 8;
+    std::vector<std::byte> raw(static_cast<std::size_t>(w) * h * 2);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            const auto i = (static_cast<std::size_t>(y) * w + x) * 2;
+            raw[i] = static_cast<std::byte>(x), raw[i + 1] = static_cast<std::byte>(y);
+        }
+    auto at = [](const std::vector<std::byte>& v, int ow, int x, int y) {
+        const auto i = (static_cast<std::size_t>(y) * ow + x) * 2;
+        return std::pair{static_cast<int>(v[i]), static_cast<int>(v[i + 1])};
+    };
+    int ow = 0, oh = 0;
+    // an odd corner moves to the even one before it; every second cell each way
+    const auto cut = sampleMosaic(raw, w, h, 16, 3, 1, 9, 7, 2, ow, oh);
+    CHECK(ow == 6);   // cells from x = 2: 2, 6, 10 (cells 2-3, 6-7, 10-11)
+    CHECK(oh == 4);   // cells from y = 0: 0, 4
+    CHECK(at(cut, ow, 0, 0) == std::pair{2, 0});
+    CHECK(at(cut, ow, 1, 1) == std::pair{3, 1});   // the cell's own blue stays blue
+    CHECK(at(cut, ow, 2, 0) == std::pair{6, 0});
+    CHECK(at(cut, ow, 5, 3) == std::pair{11, 5});
+    // clipped to the frame; nothing left is nothing
+    const auto all = sampleMosaic(raw, w, h, 16, -4, -4, 100, 100, 1, ow, oh);
+    CHECK(ow == w);
+    CHECK(oh == h);
+    CHECK(all == raw);
+    CHECK(sampleMosaic(raw, w, h, 16, 20, 0, 4, 4, 1, ow, oh).empty());
+    CHECK(ow == 0);
+    CHECK(sampleMosaic(raw, w, h, 8, 0, 0, 4, 4, 1, ow, oh).size() == 16);   // 8-bit: one byte a sample
+    CHECK(sampleMosaic(std::span(raw).first(10), w, h, 16, 0, 0, 4, 4, 1, ow, oh).empty());   // short buffer
+}

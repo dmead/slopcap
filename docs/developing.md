@@ -83,7 +83,8 @@ maintained; the MinGW static build above is the one that's used.
 
 **Screenshots for the docs:** the README's Focus tab picture comes from a hidden test that sweeps INDI's focuser
 simulator with a test camera whose colours focus apart: `SLOPCAP_DOCS_DIR=DIR slopcap-app-tests "[docs]"` (under
-Xvfb in the build image) writes `DIR/focus.png`.
+Xvfb in the build image) writes `DIR/focus.png` (the README's `docs/images/focus-sweep.png`), and `DIR/capture-sweep.png`,
+the Capture tab halfway through with the curves over the preview.
 
 **Coverage:** `tools/coverage.sh [MIN]` builds the `linux-coverage` preset (gcov) in the Docker image, runs every
 test and prints line coverage of `src/` per file and folder (`build/linux-coverage/coverage.txt`; it exits 1 below
