@@ -36,6 +36,9 @@ RUN curl -fsSL "https://download.qt.io/official_releases/qt/${QT_VERSION%.*}/${Q
 
 COPY --from=ubuntu /usr/include/libasi /usr/include/libasi
 COPY --from=ubuntu /usr/include/libqhy /usr/include/libqhy
+COPY --from=ubuntu /usr/include/libplayerone /usr/include/libplayerone
+COPY --from=ubuntu /usr/include/libtoupcam /usr/include/libtoupcam
+COPY --from=ubuntu /usr/include/libmallincam /usr/include/libmallincam
 COPY --from=ubuntu /usr/share/fonts/truetype/ibm-plex /usr/share/fonts/truetype/ibm-plex
 
 ENV HOME=/tmp

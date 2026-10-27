@@ -1,8 +1,9 @@
 # A night at the telescope
 
 This guide walks through a planetary night with SlopCap: connecting the camera, getting a good image, collimating,
-focusing, and recording. It assumes a colour or mono astronomy camera (ZWO or QHY) and, optionally, an electronic
-focuser that INDI can drive and a mount (through INDI, or one SlopCap drives itself: section 8).
+focusing, and recording. It assumes a colour or mono astronomy camera (ZWO, QHY, Player One, ToupTek or MallinCam)
+and, optionally, an electronic focuser that INDI can drive and a mount (through INDI, or one SlopCap drives itself:
+section 8).
 
 ## The screen
 
@@ -22,8 +23,9 @@ focuser that INDI can drive and a mount (through INDI, or one SlopCap drives its
 
 ## 1. Connect the camera
 
-Click the camera pill at the top right. The list shows every ZWO and QHY camera that's plugged in (`asi:0 ASI585MC`,
-`qhy:0 QHY533M …`). Pick yours. SlopCap remembers the camera and its settings for next time.
+Click the camera pill at the top right. The list shows every camera that's plugged in, by maker (`asi:0 ASI585MC`,
+`qhy:0 QHY533M …`, `playerone:0 Uranus-C`, `touptek:0 …`, `mallincam:0 …`). Pick yours. SlopCap remembers the camera
+and its settings for next time.
 
 No camera to hand? **Replay a recording…** in the same menu plays an existing `.ser` file as if it were a camera,
 in real time. Everything below works on a replay, which is a good way to learn SlopCap indoors.
@@ -197,7 +199,7 @@ Everything is in the window, but SlopCap can also be started ready to go, which 
 
 | Option | Does |
 |---|---|
-| `--camera SPEC` | connect at start: `asi`, `asi:1`, `qhy`, `sim:FILE.ser` (replay), `sim-loop:FILE.ser` (replay forever) |
+| `--camera SPEC` | connect at start: `asi`, `asi:1`, `qhy`, `playerone`, `touptek`, `mallincam`, `sim:FILE.ser` (replay), `sim-loop:FILE.ser` (replay forever) |
 | `--out DIR` | recording folder |
 | `--record` | start recording as soon as the camera is connected |
 | `--focuser HOST:PORT` | connect the focuser through this INDI server |

@@ -1,13 +1,13 @@
 # Building and testing
 
 SlopCap is C++20 with Qt 6 (Widgets, OpenGL, Network), built with CMake presets and Ninja, tested with Catch2. The
-camera backends use the ZWO and QHY SDKs when the build finds them; without them SlopCap still builds and can replay
-recordings and do remote viewing.
+camera backends use the ZWO, QHY, Player One, ToupTek and MallinCam SDKs when the build finds them; without them
+SlopCap still builds and can replay recordings and do remote viewing.
 
 ## The quickest way: Docker
 
 `docker/build.sh` builds and tests inside a pinned image (`docker/Dockerfile`: Ubuntu 26.04, GCC 15, Qt 6, Catch2, the
-ZWO / QHY SDKs and INDI from the INDI PPA, MinGW-w64, Xvfb + Mesa so the OpenGL tests run without a screen). It works
+camera SDKs and INDI from the INDI PPA, MinGW-w64, Xvfb + Mesa so the OpenGL tests run without a screen). It works
 the same on any machine with Docker; on Windows run it from Git Bash with `MSYS_NO_PATHCONV=1`.
 
 ```bash
@@ -22,7 +22,9 @@ when the Dockerfile changes; with a registry in `docker/registry`, machines pull
 
 **The Windows exe** is built with MinGW and a statically built Qt (`docker/Dockerfile.mingw`; building that Qt takes
 a while, once). To build the camera drivers in, point `SLOPCAP_WIN_SDK_DLL_DIR` at a folder holding the Windows
-`ASICamera2.dll` and `qhyccd.dll` (copied from SharpCap's folder, for example; they aren't in this repository):
+`ASICamera2.dll`, `qhyccd.dll`, `PlayerOneCamera.dll`, `toupcam.dll` and `mallincam.dll` (copied from SharpCap's folder,
+for example, where the last two are `ToupCam.dll` and `MallinCam.dll`; they aren't in this repository). Each one found
+is built in; the build checks every SDK function SlopCap calls against the DLL's exports:
 
 ```bash
 SLOPCAP_WIN_SDK_DLL_DIR=tools/camprobe/build-win/sdk docker/build.sh windows-static
@@ -43,7 +45,7 @@ cmake --preset linux-release && cmake --build --preset linux-release            
 
 ```bash
 brew install qtbase cmake ninja catch2 libusb
-tools/macos-sdks.sh        # once: ZWO + QHY SDKs from INDI's indi-3rdparty, hash-checked, into build/mac-sdk
+tools/macos-sdks.sh        # once: the camera SDKs from INDI's indi-3rdparty, hash-checked, into build/mac-sdk
 tools/macos-indi.sh        # once: INDI built into ~/indi (Homebrew has none), for the focuser, mount and INDI tests
 cmake --preset macos-debug && cmake --build --preset macos-debug && PATH=~/indi/bin:$PATH ctest --preset macos-debug
 tools/macos-app.sh --dmg   # build/macos-release/SlopCap.app (Qt, SDKs, libusb inside; signed ad hoc) + SlopCap.dmg
@@ -78,8 +80,9 @@ maintained; the MinGW static build above is the one that's used.
   window's dialogs and menus (answered by `tests/app_harness.cpp`), a replayed recording as the camera, recording and
   its file names, saved settings, full view, focus sweeps and the mount against INDI's simulators, collimation, two
   windows in one process sharing and watching a camera, and the `slopcap` program itself with its command-line
-  options. The same executable tests the ZWO and QHY backends against fakes of their SDKs (`tests/fakes/`: the fakes'
-  C functions take the real libraries' place there), so every SDK call and error path runs without a camera.
+  options. The same executable tests the camera backends against fakes of their SDKs (`tests/fakes/`: the fakes' C
+  functions take the real libraries' place there), so every SDK call and error path runs without a camera. ToupTek's
+  fake is written once (`fake_toup.inc`) and compiled under MallinCam's names too, as the backend is.
 
 **Screenshots for the docs:** the README's Focus tab picture comes from a hidden test that sweeps INDI's focuser
 simulator with a test camera whose colours focus apart: `SLOPCAP_DOCS_DIR=DIR slopcap-app-tests "[docs]"` (under
@@ -144,7 +147,8 @@ Built next to `slopcap` (`build/<preset>/`):
 | `slopcap-diag [--png OUT/] FILE.ser…` | optical diagnostics from planetary recordings: stacks the best frames and reports dispersion, limb sharpness per colour and side, halo and jitter |
 | `slopcap-focusbench FILE.ser [frames] [metric]` | times the focus scorer on a recording |
 
-`slopcap` itself takes `--camera SPEC` (`asi[:N]`, `qhy[:N]`, `sim:FILE.ser`, `sim-loop:FILE.ser`), `--out`, `--record`,
+`slopcap` itself takes `--camera SPEC` (`asi[:N]`, `qhy[:N]`, `playerone[:N]`, `touptek[:N]`, `mallincam[:N]`,
+`sim:FILE.ser`, `sim-loop:FILE.ser`), `--out`, `--record`,
 `--tab`, `--serve` / `--listen ADDRESS` / `--connect HOST`, `--fullscreen`, `--set NAME=VALUE[@SECONDS]`, `--snapshot
 SECONDS:FILE`, `--screenshot FILE --quit-after SECONDS` and `--settings DIR` (an INI file instead of the user's
 settings): handy for scripted screenshots and smoke tests. `slopcap --help` lists them all.
@@ -157,15 +161,15 @@ image instead of building it, and an environment that changed is pushed when it'
 on the host, so `build/<preset>/` and compile errors read the same from either side.
 
 **Windows.** `windows-static` builds in its own image (`docker/Dockerfile.mingw`: Fedora's MinGW-w64 GCC and a statically
-built Qt 6). With `SLOPCAP_WIN_SDK_DLL_DIR`, `ASICamera2.dll` and `qhyccd.dll` are embedded in the exe; on first use
+built Qt 6). With `SLOPCAP_WIN_SDK_DLL_DIR`, the camera SDK DLLs found there are embedded in the exe; on first use
 they're written to `%LOCALAPPDATA%\SlopCap\SlopCap\sdk\<hash>\` and loaded from there (a DLL placed next to the exe
 wins, to try a newer SDK). The SDKs are delay-loaded, so without them SlopCap still starts and the camera menu says
 which is missing. Settings live in the registry (`HKCU\Software\SlopCap`). The preview needs OpenGL 3.3; without it
 (Windows' own OpenGL 1.1, some Remote Desktop sessions) capture still works and the preview says why it's blank. The
-focuser and mount are INDI-only for now (no ASCOM yet).
+focuser is INDI-only for now; the mount has SlopCap's own drivers as well (no ASCOM yet).
 
-**macOS.** `tools/macos-sdks.sh` takes the ZWO (1.41) and QHY (26.7.21) SDKs from INDI's indi-3rdparty repository, the
-same source as the Linux packages, every file hash-checked; the build copies them and Homebrew's libusb into
+**macOS.** `tools/macos-sdks.sh` takes the ZWO (1.41), QHY (26.7.21), Player One (3.10.1), ToupTek and MallinCam
+(60.32226) SDKs from INDI's indi-3rdparty repository, the same source as the Linux packages, every file hash-checked; the build copies them and Homebrew's libusb into
 SlopCap.app. QHY cameras start without firmware on a Mac: SlopCap uploads it from the SDK in the background at launch
 and the camera reappears on USB a few seconds later. Homebrew has no INDI, so `tools/macos-indi.sh` builds indiserver
 and the drivers into `~/indi`. Recording uses `F_NOCACHE` where Linux uses `O_DIRECT`; App Nap is off for SlopCap so
@@ -183,9 +187,10 @@ viewer in full view.
 | `src/io/ser.*` | SER reader and writer: timestamp trailer, truncated-file recovery, real-world quirks |
 | `src/io/ser_direct.*`, `direct_file.*` | the unbuffered, aligned SER writer (O_DIRECT / F_NOCACHE / unbuffered Windows I/O) that keeps a cut-off file readable |
 | `src/camera/camera.hpp` | `ICamera`: the interface every camera backend implements |
-| `src/camera/asi_camera.*`, `qhy_camera.*` | the ZWO and QHY backends (built when their SDKs are found) |
+| `src/camera/asi_camera.*`, `qhy_camera.*`, `playerone_camera.*` | the ZWO, QHY and Player One backends (built when their SDKs are found) |
+| `src/camera/touptek_camera.hpp`, `touptek_family.inc` | ToupTek and MallinCam: one backend, a template over the brand, since MallinCam's SDK is ToupTek's under other names (`touptek_camera.cpp`, `mallincam_camera.cpp` bind each brand's symbols) |
 | `src/camera/sim_camera.*` | `SimCamera`: replays a SER recording as a camera (real-time pacing, ROI, drop counting) |
-| `src/camera/open_camera.*` | opens a camera from a spec: `asi[:N]`, `qhy[:N]`, `sim:FILE.ser`, `sim-loop:FILE.ser` |
+| `src/camera/open_camera.*` | opens a camera from a spec: `asi[:N]`, `qhy[:N]`, `playerone[:N]`, `touptek[:N]`, `mallincam[:N]`, `sim:FILE.ser`, `sim-loop:FILE.ser` |
 | `src/pipeline/frame_ring.*` | `FrameRing`: pre-allocated, page-aligned frame slots passed from capture to writer without locks |
 | `src/pipeline/capture_session.*` | `CaptureSession`: the capture and writer threads; counts camera drops apart from ring drops |
 | `src/preview/` | the live view: `LatestFrame` tap, the GPU debayer and stretch (`GlRenderer`), the CPU reference, histograms |
@@ -194,6 +199,6 @@ viewer in full view.
 | `src/net/` | remote viewing: protocol, frame codec (lossless and JPEG), discovery, rate control, server and client |
 | `src/app/` | the GUI: main window, focus, collimation and ADC panels, mount, settings, full view, session log |
 | `tools/` | the command-line tools above, packaging (`package.sh`), coverage, macOS and remote-test scripts |
-| `tests/` | Catch2 tests; `tests/fakes/` the ZWO and QHY SDK fakes; `tests/app_harness.*` the application tests' helpers |
+| `tests/` | Catch2 tests; `tests/fakes/` the camera SDK fakes; `tests/app_harness.*` the application tests' helpers |
 
 The design, its reasoning and the to-do list are in [PLAN.md](../PLAN.md).

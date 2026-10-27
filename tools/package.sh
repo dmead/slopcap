@@ -4,7 +4,7 @@
 #                              launcher, so it runs without Qt installed (in the build image: run it from anywhere with
 #                              Docker; on Windows from Git Bash with MSYS_NO_PATHCONV=1). Build linux-release first.
 #   tools/package.sh windows   build/windows-static/slopcap.exe (docker/build.sh windows-static; with
-#                              SLOPCAP_WIN_SDK_DLL_DIR set it has the ZWO and QHY drivers inside)
+#                              SLOPCAP_WIN_SDK_DLL_DIR set it has the camera drivers inside)
 #   tools/package.sh macos     build/macos-release/SlopCap.app (tools/macos-app.sh), on a Mac
 set -euo pipefail
 
@@ -64,8 +64,13 @@ linux)
         cp -L "$lib" "$OUT/lib/$base"
     done
     # the camera SDKs are opened by the program, not linked by the plugins: make sure they're there
-    for l in libASICamera2.so libqhyccd.so; do ls "$OUT"/lib/$l* >/dev/null 2>&1 || echo "warning: $l not bundled" >&2; done
+    for l in libASICamera2.so libqhyccd.so libPlayerOneCamera.so libtoupcam.so libmallincam.so; do
+        ls "$OUT"/lib/$l* >/dev/null 2>&1 || echo "warning: $l not bundled" >&2
+    done
     cp /lib/udev/rules.d/99-asi.rules /lib/udev/rules.d/85-qhyccd.rules "$OUT/udev/"
+    for r in 99-player_one_astronomy.rules 99-toupcam.rules 99-mallincam.rules; do
+        if [ -e /lib/udev/rules.d/$r ]; then cp /lib/udev/rules.d/$r "$OUT/udev/"; fi
+    done
     cat > "$OUT/slopcap" <<'LAUNCHER'
 #!/bin/sh
 # Starts SlopCap with the libraries in this folder.

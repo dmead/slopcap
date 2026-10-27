@@ -6,17 +6,19 @@ When something goes wrong, the [session log](files-and-logs.md#session-logs) usu
 
 - **Is it in use?** Only one program can have a camera open. Close SharpCap, FireCapture, NINA or another SlopCap
   first. A camera that's busy may be listed but fail to open with "in use by another program?".
-- **"ZWO support not built" / "QHY support not built":** this copy of SlopCap was built without that vendor's driver
-  (see [Building and testing](developing.md)). The official Windows `slopcap.exe` and Mac `SlopCap.app` include both.
-- **"ZWO SDK not found (ASICamera2.dll)"** (Windows): the driver couldn't be unpacked or loaded. Put `ASICamera2.dll`
-  (or `qhyccd.dll`) next to `slopcap.exe`; SharpCap's program folder has copies.
+- **"ZWO support not built"** (or QHY, Player One, ToupTek, MallinCam): this copy of SlopCap was built without that
+  vendor's driver (see [Building and testing](developing.md)). The released Windows `slopcap.exe` and Linux zip include
+  all five.
+- **"ZWO SDK not found (ASICamera2.dll)"** (Windows; or `qhyccd.dll`, `PlayerOneCamera.dll`, `toupcam.dll`,
+  `mallincam.dll`): the driver couldn't be unpacked or loaded. Put that DLL next to `slopcap.exe`; SharpCap's program
+  folder has copies (its `ToupCam.dll` and `MallinCam.dll` are the last two).
 - **Linux:** check the camera with `lsusb`. If it shows there but not in SlopCap, the USB permission rules from the
   INDI packages are missing: reinstall `indi-3rdparty-libs` and unplug and replug the camera.
 - **Mac, QHY camera:** QHY cameras get their firmware from SlopCap when it starts, then reconnect. Give it about
   5 seconds after launching, then open the camera list again. Unplugging and replugging the camera while SlopCap is
   running needs a restart of SlopCap.
-- **Windows:** the camera needs the vendor's USB driver installed (ZWO's or QHY's "system driver"). If SharpCap sees the
-  camera, SlopCap will.
+- **Windows:** the camera needs the vendor's USB driver installed (ZWO's or QHY's "system driver", for example). If
+  SharpCap sees the camera, SlopCap will.
 
 ## The live view is black, but the camera is connected
 

@@ -6,15 +6,16 @@ doesn't need one to record: without it the preview stays blank and says why, and
 ## Windows
 
 SlopCap for Windows is a single file, `slopcap.exe`. There is no installer and nothing else to copy: Qt is built
-into it, and so are the ZWO and QHY camera drivers when it was built with them. The download from GitHub's builds has
-no camera drivers (ZWO's and QHY's DLLs can't be published there): copy `ASICamera2.dll` and `qhyccd.dll`, from
-SharpCap's or FireCapture's folder for example, next to `slopcap.exe`.
+into it, and so are the camera drivers (ZWO, QHY, Player One, ToupTek, MallinCam) when it was built with them, as the
+releases are. An exe built without them looks for the vendors' DLLs next to `slopcap.exe`: copy `ASICamera2.dll`,
+`qhyccd.dll`, `PlayerOneCamera.dll`, `toupcam.dll` or `mallincam.dll` there, from SharpCap's folder for example
+(SharpCap calls the last two `ToupCam.dll` and `MallinCam.dll`; either name works).
 
 1. Copy `slopcap.exe` anywhere, for example `C:\Users\<you>\slopcap\`.
 2. Double-click it.
 
 The first time a camera is used, SlopCap unpacks the camera drivers to `%LOCALAPPDATA%\SlopCap\SlopCap\sdk\`. To try a
-newer ZWO or QHY driver, put its `ASICamera2.dll` or `qhyccd.dll` next to `slopcap.exe`; a file there wins.
+newer driver, put its DLL next to `slopcap.exe`; a file there wins.
 
 The camera itself still needs the vendor's USB driver (the one SharpCap and FireCapture use too). If the camera works
 in SharpCap, it works in SlopCap.
@@ -23,8 +24,9 @@ in SharpCap, it works in SlopCap.
 asks the first time you share; choose *Private networks*. See [Remote viewing](remote-viewing.md) for the command that
 does it by hand.
 
-**The focuser and mount** go through INDI, which is Linux and macOS software. On Windows, SlopCap can use an INDI
-server running on another computer (Settings → INDI server). ASCOM support is planned.
+**The focuser** goes through INDI, which is Linux and macOS software. On Windows, SlopCap can use an INDI server
+running on another computer (Settings → INDI server). **The mount** can too, or SlopCap drives it itself over its COM
+port or the network (see [the mount](user-guide.md#8-the-mount-optional) in the user guide).
 
 ## Linux (Ubuntu)
 
@@ -41,7 +43,8 @@ cmake --preset linux-release && cmake --build --preset linux-release
 build/linux-release/slopcap
 ```
 
-The INDI packages bring the ZWO and QHY camera drivers and their USB permission rules, so cameras work without root.
+The INDI packages bring the camera drivers (ZWO, QHY, Player One, ToupTek, MallinCam) and their USB permission rules,
+so cameras work without root.
 They also bring `indiserver` and the device drivers for the focuser and the mount. A typical setup runs `indiserver`
 as a user service that starts with the computer, for example for a Gemini EAF focuser:
 
@@ -65,7 +68,8 @@ SlopCap for Mac is `SlopCap.app`, usually inside `SlopCap.dmg`.
 
 The app needs the macOS version it was built on, or newer.
 
-**Cameras:** ZWO and QHY drivers are inside the app. QHY cameras on a Mac start up without their firmware: SlopCap
+**Cameras:** ZWO and QHY drivers are inside the app, and Player One, ToupTek and MallinCam drivers when it was built
+with them (not yet tried on a Mac). QHY cameras on a Mac start up without their firmware: SlopCap
 sends it when it starts, and the camera then reconnects by itself, which takes a few seconds. Wait a moment after
 launching before you open the camera list.
 

@@ -22,15 +22,18 @@ choose a `.ser` file: it plays as if it were a camera.
 
 ## Cameras
 
-The ZWO and QHY camera drivers are built into `slopcap.exe` when it was made with them (the camera menu says
-"SDK not found" for a brand it doesn't have). The camera itself still needs the vendor's USB driver, the one SharpCap
-and FireCapture use too: if the camera works in SharpCap, it works in SlopCap. To try a newer ZWO or QHY driver, put
-its `ASICamera2.dll` or `qhyccd.dll` next to `slopcap.exe`.
+The ZWO, QHY, Player One, ToupTek and MallinCam camera drivers are built into `slopcap.exe` when it was made with them
+(the camera menu says "SDK not found" for a brand it doesn't have). The camera itself still needs the vendor's USB
+driver, the one SharpCap and FireCapture use too: if the camera works in SharpCap, it works in SlopCap. To try a newer
+driver, put its DLL (`ASICamera2.dll`, `qhyccd.dll`, `PlayerOneCamera.dll`, `toupcam.dll` or `mallincam.dll`) next to
+`slopcap.exe`.
 
 ## Focuser and mount
 
-They go through INDI, which runs on Linux and macOS: SlopCap on Windows can use an INDI server on another computer
-(**Settings**, the gear at the top right, then the INDI server's address).
+The focuser goes through INDI, which runs on Linux and macOS: SlopCap on Windows can use an INDI server on another
+computer (**Settings**, the gear at the top right, then the INDI server's address). So can the mount, or SlopCap drives
+it itself over its COM port or the network: LX200 and OnStep, Celestron NexStar, Sky-Watcher SynScan and direct, and
+the SynScan app (see `docs/user-guide.md`, section 8).
 
 ## Remote viewing
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# macOS: fetch the ZWO and QHY camera SDKs as INDI ships them (indilib/indi-3rdparty, which also feeds the Linux
+# macOS: fetch the ZWO, QHY, Player One, ToupTek and MallinCam camera SDKs as INDI ships them (indilib/indi-3rdparty, which also feeds the Linux
 # packages), checking every file against the git hash GitHub lists for the tag. Then configure with
 # -DSLOPCAP_MAC_SDK_DIR=DEST (the macos presets default to build/mac-sdk).
 #   tools/macos-sdks.sh [DEST]          DEST defaults to build/mac-sdk
@@ -8,7 +8,7 @@ set -euo pipefail
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 DEST=${1:-$REPO/build/mac-sdk}
-TAG=v2.2.5   # ZWO ASI SDK 1.41, QHY SDK 26.7.21
+TAG=v2.2.5   # ZWO ASI SDK 1.41, QHY SDK 26.7.21, Player One 3.10.1, ToupTek and MallinCam 60.32226
 case "$(uname -m)" in
     arm64) ARCH=mac_arm64 ;;
     *) ARCH=mac_x64 ;;
@@ -39,4 +39,14 @@ fetch libasi/license.txt
 fetch libasi/$ARCH/libASICamera2.bin
 for h in qhyccd.h qhyccdcamdef.h qhyccderr.h qhyccdstruct.h; do fetch libqhy/$h; done
 fetch libqhy/$ARCH/libqhyccd.bin
-echo "SDKs in $DEST (indi-3rdparty $TAG). Both load libusb: brew install libusb."
+# universal binaries, one per SDK (not yet tried on a Mac)
+fetch libplayerone/PlayerOneCamera.h
+fetch libplayerone/license.txt
+fetch libplayerone/mac/libPlayerOneCamera.bin
+fetch libtoupcam/toupcam.h
+fetch libtoupcam/COPYING.LGPL
+fetch libtoupcam/mac/libtoupcam.bin
+fetch libmallincam/mallincam.h
+fetch libmallincam/COPYING.LGPL
+fetch libmallincam/mac/libmallincam.bin
+echo "SDKs in $DEST (indi-3rdparty $TAG). ZWO's and QHY's load libusb: brew install libusb."

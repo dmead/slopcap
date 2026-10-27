@@ -7,6 +7,12 @@
 #ifdef SLOPCAP_HAVE_QHY
 #include "camera/qhy_camera.hpp"
 #endif
+#ifdef SLOPCAP_HAVE_PLAYERONE
+#include "camera/playerone_camera.hpp"
+#endif
+#if defined(SLOPCAP_HAVE_TOUPTEK) || defined(SLOPCAP_HAVE_MALLINCAM)
+#include "camera/touptek_camera.hpp"
+#endif
 
 #include <format>
 
@@ -61,7 +67,31 @@ std::unique_ptr<ICamera> openCamera(std::string_view spec) {
         throw CameraError("this build has no QHY support (SDK not found at build time)");
 #endif
     }
-    throw CameraError(std::format("unknown camera spec '{}' (use asi[:N], qhy[:N], sim:FILE.ser)", spec));
+    if (spec.starts_with("playerone")) {
+#ifdef SLOPCAP_HAVE_PLAYERONE
+        if (!sdkLoads("PlayerOneCamera.dll")) throw CameraError("Player One SDK not found (PlayerOneCamera.dll)");
+        return std::make_unique<PlayerOneCamera>(indexOf(spec, "playerone"));
+#else
+        throw CameraError("this build has no Player One support (SDK not found at build time)");
+#endif
+    }
+    if (spec.starts_with("touptek")) {
+#ifdef SLOPCAP_HAVE_TOUPTEK
+        if (!sdkLoads("toupcam.dll")) throw CameraError("ToupTek SDK not found (toupcam.dll)");
+        return std::make_unique<ToupTekCamera>(indexOf(spec, "touptek"));
+#else
+        throw CameraError("this build has no ToupTek support (SDK not found at build time)");
+#endif
+    }
+    if (spec.starts_with("mallincam")) {
+#ifdef SLOPCAP_HAVE_MALLINCAM
+        if (!sdkLoads("mallincam.dll")) throw CameraError("MallinCam SDK not found (mallincam.dll)");
+        return std::make_unique<MallinCamCamera>(indexOf(spec, "mallincam"));
+#else
+        throw CameraError("this build has no MallinCam support (SDK not found at build time)");
+#endif
+    }
+    throw CameraError(std::format("unknown camera spec '{}' (use asi[:N], qhy[:N], playerone[:N], touptek[:N], mallincam[:N], sim:FILE.ser)", spec));
 }
 
 std::vector<std::string> listCameras() {
@@ -79,6 +109,21 @@ std::vector<std::string> listCameras() {
         for (const auto& c : QhyCamera::list()) out.push_back(std::format("qhy:{}  {}  [{}]", c.index, c.model, c.id));
 #else
     out.push_back("(QHY support not built)");
+#endif
+#ifdef SLOPCAP_HAVE_PLAYERONE
+    if (!sdkLoads("PlayerOneCamera.dll")) out.push_back("(Player One SDK not found: PlayerOneCamera.dll)");
+    else
+        for (const auto& c : PlayerOneCamera::list()) out.push_back(std::format("playerone:{}  {}", c.index, c.model));
+#endif
+#ifdef SLOPCAP_HAVE_TOUPTEK
+    if (!sdkLoads("toupcam.dll")) out.push_back("(ToupTek SDK not found: toupcam.dll)");
+    else
+        for (const auto& c : ToupTekCamera::list()) out.push_back(std::format("touptek:{}  {}", c.index, c.model));
+#endif
+#ifdef SLOPCAP_HAVE_MALLINCAM
+    if (!sdkLoads("mallincam.dll")) out.push_back("(MallinCam SDK not found: mallincam.dll)");
+    else
+        for (const auto& c : MallinCamCamera::list()) out.push_back(std::format("mallincam:{}  {}", c.index, c.model));
 #endif
     return out;
 }

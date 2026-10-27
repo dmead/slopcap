@@ -36,7 +36,7 @@ namespace {
 /// as missing in the camera menu.
 void prepareCameraSdks() {
     const QString exeDir = QCoreApplication::applicationDirPath();
-    for (const char* name : {"ASICamera2.dll", "qhyccd.dll"}) {
+    for (const char* name : {"ASICamera2.dll", "qhyccd.dll", "PlayerOneCamera.dll", "toupcam.dll", "mallincam.dll"}) {
         const QString beside = exeDir + "/" + name;
         if (QFile::exists(beside)) {
             LoadLibraryW(reinterpret_cast<const wchar_t*>(QDir::toNativeSeparators(beside).utf16()));

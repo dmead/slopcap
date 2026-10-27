@@ -174,6 +174,15 @@ Run it on every camera we have before writing `AsiCamera` / `QhyCamera`, and kee
 
 ## 5b. Adding camera brands (assessed 2026-10-16)
 
+**Done 2026-10-27: Player One, ToupTek and MallinCam** (`playerone_camera.*`, `touptek_camera.hpp` +
+`touptek_family.inc`), tested against fakes of their SDKs, not yet on a real camera. It went more simply than planned
+below: ToupTek-family SDKs are linked like ZWO's and QHY's (delay-loaded on Windows) rather than loaded by a run-time
+loader, and the backend is a template over the brand, so each rebrand is a three-line source file binding its prefix
+(Altair, Omegon, `tscam` and the rest can follow the same way). Frames are pulled with `WaitImageV3` on our own thread,
+so there's no callback bridge. On Windows the DLLs from SharpCap 4.1 are embedded (ToupTek's and MallinCam's are SDK
+54.x; the headers are 60.x, and options newer than 54 fall back). Still to do: `camprobe` probes and fixtures, and a
+zero-drop bench run, each needing a camera of the brand. SVBony is next.
+
 Every SDK below is already on the laptop: they come in the same INDI `indi-3rdparty-libs` package as the ZWO and QHY
 ones, so Linux builds need nothing new. For Windows, each vendor's DLL is taken from the vendor's own software.
 

@@ -96,4 +96,77 @@ struct Qhy {
 Qhy& qhy();
 int qhyFirmwareUploads();                ///< OSXInitQHYCCDFirmwareArray calls in this process (macOS)
 
+struct PoaConfig {
+    std::string name;
+    int id = 0;                          ///< POAConfig
+    int type = 0;                        ///< POAValueType: 0 int, 1 float, 2 bool
+    double min = 0, max = 100, def = 0, value = 0;
+    bool autoSupported = false, writable = true, autoOn = false;
+};
+
+struct PoaCam {
+    std::string name = "Uranus-C", sn = "c0ffee0123";
+    int id = 0, maxWidth = 3856, maxHeight = 2180, bitDepth = 12;
+    bool color = true;
+    int bayer = 0;                       ///< POABayerPattern (0 = RG)
+    double pixelUm = 2.9;
+    std::vector<int> bins{1, 2, 4};
+    std::vector<int> formats{0, 1};      ///< POA_RAW8 = 0, POA_RAW16 = 1
+    std::vector<std::string> modes{"Normal", "LowNoise"};
+    std::vector<PoaConfig> configs;
+    bool gainsOk = true;
+};
+
+struct Poa {
+    std::vector<PoaCam> cams;
+    std::map<std::string, int> fail;     ///< SDK function name -> POAErrors it returns (until erased)
+    std::map<std::string, int> failOnce; ///< the same, for the next call only
+    int timeouts = 0;                    ///< POAGetImageData times out this many times before delivering
+    int dropped = 0;                     ///< what POAGetDroppedImagesCount reports
+    int frameMs = 5;
+    // what the backend did
+    int openId = -1, mode = 0;
+    bool initialised = false, exposing = false;
+    int width = 0, height = 0, bin = 0, startX = 0, startY = 0, format = -1, frames = 0;
+    void reset();
+    PoaCam& cam() { return cams.front(); }
+    PoaConfig* config(const std::string& name);
+};
+Poa& poa();
+
+struct ToupCam {
+    std::string name = "ATR585C", id = "tp-0001", sn = "TP00000000000001";
+    unsigned long long flags = 0;        ///< TOUPCAM_FLAG_*: reset() sets a colour camera with everything
+    unsigned width = 3840, height = 2160;
+    float pixelUm = 2.9f;
+    int maxBits = 12;
+    unsigned fourcc = 0;                 ///< 0: RGGB (reset() fills it); 'YYYY' for mono
+    int maxSpeed = 3, maxFan = 2;
+    int tecRange = 0;                    ///< TECTARGET_RANGE (0: not answered)
+    bool zeroPadding = true;             ///< takes OPTION_ZERO_PADDING (an older SDK doesn't: samples come LSB-aligned)
+};
+
+/// One per brand: the same fake is compiled for ToupTek's symbols and for MallinCam's.
+struct Toup {
+    std::vector<ToupCam> cams;
+    std::map<std::string, int> fail;     ///< function name without the brand prefix ("put_Roi") -> HRESULT
+    std::map<std::string, int> failOnce;
+    bool openFails = false;
+    int timeouts = 0;                    ///< WaitImageV3 times out this many times before delivering
+    unsigned seqJump = 0;                ///< the next frame's sequence number skips this many (frames lost)
+    bool wrongSize = false;              ///< deliver a frame of the wrong size
+    int frameMs = 5;
+    // what the backend did
+    bool open = false, running = false;
+    std::map<unsigned, int> options;
+    unsigned expo = 10000, roiX = 0, roiY = 0, roiW = 0, roiH = 0, seq = 0;
+    unsigned short gain = 100, speed = 0;
+    int autoExpo = 0, frames = 0;
+    short temperature = 215;             ///< 0.1 °C
+    void reset();
+    ToupCam& cam() { return cams.front(); }
+};
+Toup& touptek();
+Toup& mallincam();
+
 }  // namespace fake

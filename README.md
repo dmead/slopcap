@@ -2,11 +2,12 @@
 
 <p align="center"><img src="docs/images/saturn.png" width="600" alt="Saturn, 4 August 2022"></p>
 
-**SlopCap records video of the planets, the Moon and the Sun** from ZWO and QHY astronomy cameras, on Windows,
-Linux and macOS. It gets every frame onto the disk, shows a live picture that keeps up, and helps with everything that
-decides how sharp the result will be: collimation, focus for each colour, atmospheric dispersion, and knowing what
-you're pointed at. Its recordings go straight into AutoStakkert!, PIPP and WinJUPOS. It can also send the camera's
-picture to other computers on the network, point to point, for a projector at an outreach night or a warm room indoors.
+**SlopCap records video of the planets, the Moon and the Sun** from ZWO, QHY, Player One, ToupTek and MallinCam
+astronomy cameras, on Windows, Linux and macOS. It gets every frame onto the disk, shows a live picture that keeps up,
+and helps with everything that decides how sharp the result will be: collimation, focus for each colour, atmospheric
+dispersion, and knowing what you're pointed at. Its recordings go straight into AutoStakkert!, PIPP and WinJUPOS. It can
+also send the camera's picture to other computers on the network, point to point, for a projector at an outreach night
+or a warm room indoors.
 
 <sub>Saturn above: 5,000 frames of 6.7 ms from a ZWO ASI585MC on 4 August 2022 at 07:03 UT, the best 25 % stacked in
 AutoStakkert! and lightly sharpened. It was recorded before SlopCap existed; the Jupiter in the screenshots below is a
@@ -138,13 +139,13 @@ Linux or Mac, can be either end.
 
 | | |
 |---|---|
-| **Windows** | `slopcap.exe`: one file, no installer |
-| **Linux** | `slopcap-linux-x64.zip`: unzip and run, Qt and the ZWO and QHY camera drivers included (Ubuntu 26.04 or newer) |
-| **macOS** | `SlopCap.app` (Apple silicon, macOS 15 or newer), with the ZWO and QHY camera drivers inside |
+| **Windows** | `slopcap.exe`: one file, no installer, the camera drivers inside |
+| **Linux** | `slopcap-linux-x64.zip`: unzip and run, Qt and the camera drivers included (Ubuntu 26.04 or newer) |
+| **macOS** | `SlopCap.app` (Apple silicon, macOS 15 or newer), with the camera drivers inside |
 
-There are no public downloads yet; each of these comes from one build command (see the [build notes](docs/developing.md)).
-ZWO's and QHY's Windows drivers can't be shared here, so the Windows exe looks for `ASICamera2.dll` and `qhyccd.dll`
-beside it (SharpCap's folder has them). [Installing SlopCap](docs/install.md) covers each system: first launch, camera
+Builds are on the [Releases](../../releases) page, and each comes from one build command (see the
+[build notes](docs/developing.md)). A Windows exe built without the vendors' DLLs at hand looks for them beside it
+instead (SharpCap's folder has them all). [Installing SlopCap](docs/install.md) covers each system: first launch, camera
 drivers, the focuser and the mount.
 
 ## Documentation
