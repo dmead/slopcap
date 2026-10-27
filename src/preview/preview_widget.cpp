@@ -100,6 +100,7 @@ PreviewWidget::PreviewWidget(QWidget* parent) : QWidget(parent) {
 }
 
 PreviewWidget::~PreviewWidget() {
+    disconnect(glLost_);   // the GPU view's context goes after this body, when renderer_ already has
     if (glReady_) {
         gl_->makeCurrent();
         renderer_.destroy();
@@ -177,6 +178,16 @@ void PreviewWidget::initializeGL() {
     try {
         renderer_.initialize();
         glReady_ = true;
+        // Qt swaps in a new context when the view lands in a different window: started inside a grab while hidden (the
+        // window opened on the Focus tab), then shown. Let go of this one's objects; the next initializeGL starts again.
+        disconnect(glLost_);
+        glLost_ = connect(gl_->context(), &QOpenGLContext::aboutToBeDestroyed, this, [this] {
+            if (!glReady_) return;
+            gl_->makeCurrent();
+            renderer_.destroy();
+            gl_->doneCurrent();
+            glReady_ = false;
+        });
     } catch (const std::exception& e) {
         // The probe said 3.3, but the renderer can't start (shaders, framebuffers): capture still works
         glError_ = needsGl(QString::fromLocal8Bit(e.what()));
