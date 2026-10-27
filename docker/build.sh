@@ -29,7 +29,10 @@ ensure_image() {
         return
     fi
     echo "building image $name:$tag (first run only)..."
-    docker build -t "$name:$tag" -t "$name:latest" -f "$file" "$@" "$REPO/docker"
+    local ctx=$REPO/docker
+    # Git Bash with MSYS_NO_PATHCONV=1: the docker CLI reads the context and the Dockerfile itself, from Windows paths
+    if command -v cygpath >/dev/null; then ctx=$(cygpath -m "$ctx") file=$(cygpath -m "$file"); fi
+    docker build -t "$name:$tag" -t "$name:latest" -f "$file" "$@" "$ctx"
     if [ -n "$remote" ]; then
         docker tag "$name:$tag" "$remote:$tag" && docker tag "$name:$tag" "$remote:latest"
         if docker push -q "$remote:$tag" && docker push -q "$remote:latest"; then
