@@ -105,7 +105,7 @@ windows_smoke() {   # as CI's windows-smoke: replay a generated recording, recor
     local tmp log py
     py=$(command -v python || command -v python3)
     tmp=$(mktemp -d)
-    "$py" tools/package/make-test-ser.py "$tmp/test.ser" || return 1
+    "$py" tools/package/make-test-ser.py "$(cygpath -w "$tmp/test.ser")" || return 1   # Windows' Python: a Windows path
     QT_LOGGING_RULES="qt.qpa.gl=true" build/windows-static/slopcap.exe --settings "$(cygpath -w "$tmp/settings")" \
         --camera "sim:$(cygpath -w "$tmp/test.ser")" --record --out "$(cygpath -w "$tmp/rec")" --quit-after 8 ||
         { echo "slopcap.exe exited with $?"; return 1; }

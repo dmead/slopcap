@@ -282,9 +282,15 @@ if(SLOPCAP_BUILD_GUI)
     # qt_add_executable: with a static Qt it also links the platform plugin (qwindows) into the exe
     qt_add_executable(slopcap WIN32 MACOSX_BUNDLE src/app/main.cpp)
     set_target_properties(slopcap PROPERTIES AUTOMOC ON)
-    # The build's git version, for the session log ("unknown" outside a checkout, or when git refuses one it doesn't own).
-    execute_process(COMMAND git -c safe.directory=* describe --always --dirty WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                    OUTPUT_VARIABLE SLOPCAP_GIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    # The build's git version, for the session log and the remote-viewing handshake: SLOPCAP_GIT from the environment
+    # when set (docker/build.sh asks git on the host: the Windows image has no git, and a worktree's .git points at a
+    # host path), else git here ("unknown" outside a checkout, or when git refuses one it doesn't own).
+    if(NOT "$ENV{SLOPCAP_GIT}" STREQUAL "")
+      set(SLOPCAP_GIT "$ENV{SLOPCAP_GIT}")
+    else()
+      execute_process(COMMAND git -c safe.directory=* describe --always --dirty WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                      OUTPUT_VARIABLE SLOPCAP_GIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    endif()
     if(NOT SLOPCAP_GIT)
       set(SLOPCAP_GIT unknown)
     endif()

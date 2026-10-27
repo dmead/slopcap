@@ -68,6 +68,9 @@ fi
 # and error messages are interchangeable between host and container builds.
 run=(docker run --rm --user "$(id -u):$(id -g)" -v "$REPO:$REPO" -w "$REPO")
 [ -t 0 ] && run+=(-it)
+# the version the programs report, asked of git here: the Windows image has none, and a worktree's .git names a host path
+version=$(cd "$REPO" && git describe --always --dirty 2>/dev/null || true)
+[ -n "$version" ] && run+=(-e "SLOPCAP_GIT=$version")
 if [ -n "${SLOPCAP_WIN_SDK_DLL_DIR:-}" ]; then
     run+=(-v "$(readlink -f "$SLOPCAP_WIN_SDK_DLL_DIR"):/winsdk:ro" -e SLOPCAP_WIN_SDK_DLL_DIR=/winsdk)
 fi
