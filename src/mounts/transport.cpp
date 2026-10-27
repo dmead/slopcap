@@ -174,6 +174,9 @@ public:
         else s_ = std::make_unique<QTcpSocket>();
         s_->connectToHost(QString::fromStdString(host), static_cast<quint16>(port));
         if (!s_->waitForConnected(5000)) throw MountError("can't reach " + name_ + ": " + s_->errorString().toStdString());
+        // Qt 6.12 on macOS calls a refused connection connected, with no peer, and reports the refusal only at the first
+        // write
+        if (!udp && s_->peerAddress().isNull()) throw MountError("can't reach " + name_ + ": the connection was refused");
         if (!udp) s_->setSocketOption(QAbstractSocket::LowDelayOption, 1);
     }
     void write(std::string_view bytes) override {
