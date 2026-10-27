@@ -21,9 +21,9 @@ choose a `.ser` file: it plays as if it were a camera.
 
 ## Cameras
 
-The ZWO and QHY camera drivers are inside the app. QHY cameras start up on a Mac without their firmware: SlopCap sends
-it when it starts and the camera reconnects by itself, which takes a few seconds, so wait a moment after launching
-before you open the camera list.
+The ZWO, QHY, Player One, ToupTek and MallinCam camera drivers are inside the app. QHY cameras start up on a Mac
+without their firmware: SlopCap sends it when it starts and the camera reconnects by itself, which takes a few
+seconds, so wait a moment after launching before you open the camera list.
 
 ## Focuser and mount
 
@@ -39,5 +39,5 @@ SlopCap source, or point SlopCap at an INDI server on another computer (**Settin
 
 ## License
 
-SlopCap is free software under the GNU General Public License, version 3 (`LICENSE`). The camera drivers inside the
-app are under their own licenses, in `licenses/`.
+SlopCap is free software under the GNU General Public License, version 3 (`LICENSE`). The camera drivers, Qt and the
+other libraries inside the app and the fonts built into it are under their own licenses, in `licenses/`.
