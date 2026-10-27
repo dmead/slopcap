@@ -17,7 +17,7 @@ choose a `.ser` file: it plays as if it were a camera.
 
 ## What it needs
 
-- A Mac with Apple silicon, on macOS 15 (Sequoia) or newer.
+- A Mac with Apple silicon, on macOS 27 or newer.
 
 ## Cameras
 

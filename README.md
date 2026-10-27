@@ -141,7 +141,7 @@ Linux or Mac, can be either end.
 |---|---|
 | **Windows** | `slopcap-windows-x64.zip`: the program is one file, `slopcap.exe`, with no installer and the camera drivers inside |
 | **Linux** | `slopcap-linux-x64.zip`: unzip and run, Qt and the camera drivers included (Ubuntu 26.04 or newer) |
-| **macOS** | `slopcap-macos-arm64.zip`: `SlopCap.app` (Apple silicon, macOS 15 or newer), with the camera drivers inside |
+| **macOS** | `slopcap-macos-arm64.zip`: `SlopCap.app` (Apple silicon, macOS 27 or newer), with the camera drivers inside |
 
 Builds are on the [Releases](../../releases) page, always as zips with a README for that system, the license and the
 third-party licenses, and each comes from one build command (see the [build notes](docs/developing.md)). A Windows exe
