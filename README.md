@@ -34,7 +34,7 @@ recording from the same summer, replayed through SlopCap as if it were the camer
 - **ADC:** with an atmospheric dispersion corrector, it measures how far the planet's red and blue images sit apart
   and says which way to move the levers.
 - **The mount:** nudge the planet back into the frame with guide pulses, through INDI or with SlopCap's own drivers
-  (Meade LX200 and OnStep, Celestron and Sky-Watcher hand controllers, Sky-Watcher's motors direct, the SynScan app).
+  for the common mounts, below.
 - **Point-to-point video** to other computers, below.
 - **A log of the night:** every setting, recording, drop, focuser move and decision, for working out afterwards what
   happened.
@@ -82,6 +82,35 @@ Every sweep's scores, frame by frame, are saved as a CSV next to the recordings.
 <sub>The screenshot shows a sweep against INDI's focuser simulator, with a test camera whose red, green and blue are
 sharpest at different positions.</sub>
 
+## Line up the colours
+
+Low in the sky the air acts as a weak prism: it lifts a planet's blue image a little above its red one and smears the
+detail. With an atmospheric dispersion corrector (ADC) between the telescope and the camera, the **ADC** tab measures
+how far red sits from blue, live and to a fraction of a pixel, and says what to do next: spread the levers, close them,
+or turn the ADC itself. Knowing the site and the target, it also shows how much dispersion the air is causing at the
+planet's altitude right now, so you know what to expect.
+
+![The ADC tab on Jupiter before correcting: red and blue 2.2 px apart, the arrow over the planet and the plot of the readings](docs/images/jupiter-adc.png)
+
+## Mounts, with or without INDI
+
+The mount panel nudges the planet back into the frame with guide pulses, shows where the telescope points, and parks,
+unparks and switches tracking. SlopCap reaches the mount through an INDI server, or drives it itself, with nothing
+else to install:
+
+| Mount | Connected through |
+|---|---|
+| Meade LX200 Classic, Autostar and Audiostar, LX200GPS | a serial or USB cable |
+| OnStep and OnStepX | USB, Bluetooth, or OnStep's Wi-Fi |
+| Celestron NexStar, CPC, CGE, SLT, Advanced GT | the hand controller |
+| Sky-Watcher with a SynScan hand controller | the hand controller |
+| Sky-Watcher EQ6-R, HEQ5, EQ8, AZ-EQ5 / 6 (equatorial), Star Adventurer GTi | its own motors: the mount's USB port, an EQDIR cable, or its Wi-Fi |
+| Any mount the SynScan app drives | the app, over the network |
+
+Mounts without guide pulses of their own get timed slow moves instead. The drivers are written from each maker's
+published protocol and tested against simulations of them, but haven't been tried on these mounts yet.
+[A night at the telescope](docs/user-guide.md#8-the-mount-optional) says what to put in Settings for each.
+
 ## Point-to-point video
 
 The computer at the telescope has the camera; the people are often somewhere else. **One SlopCap shares its camera,
@@ -113,10 +142,10 @@ Linux or Mac, can be either end.
 | **Linux** | `slopcap-linux-x64.zip`: unzip and run, Qt and the ZWO and QHY camera drivers included (Ubuntu 26.04 or newer) |
 | **macOS** | `SlopCap.app` (Apple silicon, macOS 15 or newer), with the ZWO and QHY camera drivers inside |
 
-A [build on GitHub](https://github.com/dmead/slopcap/actions/workflows/ci.yml) produces all three: open the latest run
-and download them under *Artifacts*, or build them yourself ([Building and testing](docs/developing.md)). ZWO's and QHY's Windows drivers can't be published here, so the Windows download
-has none built in: copy `ASICamera2.dll` and `qhyccd.dll` (from SharpCap's folder, for example) next to `slopcap.exe`.
-[Installing SlopCap](docs/install.md) covers each system: first launch, camera drivers, the focuser and mount.
+There are no public downloads yet; each of these comes from one build command (see the [build notes](docs/developing.md)).
+ZWO's and QHY's Windows drivers can't be shared here, so the Windows exe looks for `ASICamera2.dll` and `qhyccd.dll`
+beside it (SharpCap's folder has them). [Installing SlopCap](docs/install.md) covers each system: first launch, camera
+drivers, the focuser and the mount.
 
 ## Documentation
 
@@ -128,5 +157,5 @@ has none built in: copy `ASICamera2.dll` and `qhyccd.dll` (from SharpCap's folde
 | [Files, settings and logs](docs/files-and-logs.md) | where recordings, settings and the session logs are |
 | [Troubleshooting](docs/troubleshooting.md) | when something doesn't work |
 
-**Building it yourself, running the tests, how the code is laid out:** [Building and testing](docs/developing.md).
-The design and what's still to come: [PLAN.md](PLAN.md).
+**Build notes** (building from source on each system, the tests, local CI, the packages, how the code is laid out):
+[docs/developing.md](docs/developing.md). The design and what's still to come: [PLAN.md](PLAN.md).
