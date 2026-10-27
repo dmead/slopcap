@@ -178,12 +178,38 @@ double separationDeg(double ra1, double dec1, double ra2, double dec2) {
     return 2 * std::asin(std::min(1.0, std::sqrt(h))) / kDeg;
 }
 
-double altitudeDeg(double ra, double dec, double jdUtc, double latitude, double longitude) {
+double localSiderealDeg(double jdUtc, double longitude) {
     const double t = (jdUtc - kJ2000) / 36525.0;
     const double gmst = 280.46061837 + 360.98564736629 * (jdUtc - kJ2000) + 0.000387933 * t * t - t * t * t / 38710000.0;
-    const double ha = (gmst + longitude - ra * 15.0) * kDeg;
+    const double lst = std::fmod(gmst + longitude, 360.0);
+    return lst < 0 ? lst + 360.0 : lst;
+}
+
+double altitudeDeg(double ra, double dec, double jdUtc, double latitude, double longitude) {
+    const double ha = (localSiderealDeg(jdUtc, longitude) - ra * 15.0) * kDeg;
     const double lat = latitude * kDeg, d = dec * kDeg;
     return std::asin(std::clamp(std::sin(lat) * std::sin(d) + std::cos(lat) * std::cos(d) * std::cos(ha), -1.0, 1.0)) / kDeg;
+}
+
+void j2000ToDate(double& ra, double& dec, double jdUtc) {
+    double a = ra * 15 * kDeg, d = dec * kDeg;
+    precess(a, d, jdUtc + kTtMinusUtcDays);
+    ra = std::fmod(a / kDeg / 15 + 24, 24), dec = d / kDeg;
+}
+
+void dateToJ2000(double& ra, double& dec, double jdUtc) {
+    // precess()'s rotation run backwards (Meeus 21.2-21.4 with the angles' roles swapped)
+    const double t = (jdUtc + kTtMinusUtcDays - kJ2000) / 36525.0;
+    const double as = kDeg / 3600.0;
+    const double zeta = (2306.2181 * t + 0.30188 * t * t + 0.017998 * t * t * t) * as;
+    const double z = (2306.2181 * t + 1.09468 * t * t + 0.018203 * t * t * t) * as;
+    const double theta = (2004.3109 * t - 0.42665 * t * t - 0.041833 * t * t * t) * as;
+    const double a0 = ra * 15 * kDeg - z, d0 = dec * kDeg;
+    const double a = std::cos(d0) * std::sin(a0);
+    const double b = std::cos(theta) * std::cos(d0) * std::cos(a0) + std::sin(theta) * std::sin(d0);
+    const double c = -std::sin(theta) * std::cos(d0) * std::cos(a0) + std::cos(theta) * std::sin(d0);
+    ra = std::fmod((std::atan2(a, b) - zeta) / kDeg / 15 + 48, 24);
+    dec = std::asin(std::clamp(c, -1.0, 1.0)) / kDeg;
 }
 
 }  // namespace slopcap::analysis

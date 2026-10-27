@@ -2,7 +2,7 @@
 
 This guide walks through a planetary night with SlopCap: connecting the camera, getting a good image, collimating,
 focusing, and recording. It assumes a colour or mono astronomy camera (ZWO or QHY) and, optionally, an electronic
-focuser and a mount that INDI can drive.
+focuser that INDI can drive and a mount (through INDI, or one SlopCap drives itself: section 8).
 
 ## The screen
 
@@ -147,9 +147,30 @@ traffic, or a smaller ROI); frames dropped by the disk mean the disk can't keep 
 
 ## 8. The mount (optional)
 
-With a mount driver running on the same INDI server as the focuser (for a Meade LX200, `indi_lx200classic`), the
-**Mount** panel on the right shows where the telescope points. **N**, **E**, **W** and **S** send guide pulses of the
-chosen length to nudge the planet back into the ROI; **Stop** halts every motion.
+The **Mount** panel on the right shows where the telescope points. **N**, **E**, **W** and **S** send guide pulses
+of the chosen length to nudge the planet back into the ROI; **Stop** halts every motion. Two ways to reach the mount:
+
+- **Through INDI**, with a mount driver running on the same INDI server as the focuser (for a Meade LX200,
+  `indi_lx200classic`). Leave Settings → Mount empty.
+- **Directly**, with nothing else installed: SlopCap has its own drivers for the common protocols. Put the mount in
+  Settings → Mount (and tick Connect at start), or start SlopCap with `--mount SPEC`:
+
+  | Mount | Spec |
+  |---|---|
+  | Meade LX200, Autostar, Audiostar, LX200GPS, or OnStep, on a serial or USB cable | `lx200:COM3`, `lx200:/dev/ttyUSB0` (it asks which) |
+  | OnStep over its Wi-Fi | `onstep:tcp://192.168.0.1` (port 9999 unless you add `:PORT`) |
+  | Celestron, through the hand controller | `nexstar:COM4` |
+  | Sky-Watcher, through the SynScan hand controller | `synscan:COM4` |
+  | Sky-Watcher on its own motors: the mount's USB port, an EQDIR cable, or its Wi-Fi | `skywatcher:COM5`, `skywatcher:udp://192.168.4.1` |
+  | Sky-Watcher through the SynScan app (phone, tablet or PC) | `synscan-app` (this computer) or `synscan-app:udp://HOST` |
+  | A simulated mount, to try things out | `sim` |
+
+  Serial ports take `@BAUD` when the mount isn't at its usual speed (`lx200:COM3@19200`). `slopcap --list-mounts`
+  prints these and the computer's serial ports. Mounts without guide pulses of their own (the LX200 Classic, the
+  hand controllers) get timed slow moves instead. A Sky-Watcher on its own motors needs Settings → Site to know where
+  it points, starts from its home position (pointing at the pole, counterweights down), and a sync on a known object
+  puts it right. These drivers are written from the makers' published protocols and tested against simulations of
+  them, but none has been tried on a real mount yet; through INDI, the LX200 has.
 
 ## Afterwards
 

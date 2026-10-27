@@ -1,6 +1,7 @@
-// Capture sidebar, under the focuser: the INDI mount, as in the design canvas's "Mount · LX200 (INDI)" panel.
+// Capture sidebar, under the focuser: the mount, as in the design canvas's "Mount · LX200 (INDI)" panel.
 // A nudge pad (N / E / Stop / W / S) sends guide pulses of the chosen length; RA / Dec and the mount's state above it,
-// with Unpark / Start tracking when the mount needs them. The mount shares the focuser's INDI server.
+// with Unpark / Start tracking when the mount needs them. Through INDI the mount shares the focuser's server; with
+// one of SlopCap's own drivers (Settings > Mount), Connect opens that.
 #pragma once
 
 #include "devices/mount.hpp"

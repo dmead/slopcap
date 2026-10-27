@@ -36,4 +36,11 @@ double separationDeg(double ra1, double dec1, double ra2, double dec2);
 /// Altitude above the horizon (degrees) of RA/Dec of date, at a site (latitude, longitude east positive, degrees).
 double altitudeDeg(double ra, double dec, double jdUtc, double latitude, double longitude);
 
+/// Local mean sidereal time, degrees 0..360, at a longitude (east positive).
+double localSiderealDeg(double jdUtc, double longitude);
+
+/// RA (hours) / Dec (degrees) between J2000 and the equinox of date (for mounts that speak J2000).
+void j2000ToDate(double& ra, double& dec, double jdUtc);
+void dateToJ2000(double& ra, double& dec, double jdUtc);
+
 }  // namespace slopcap::analysis

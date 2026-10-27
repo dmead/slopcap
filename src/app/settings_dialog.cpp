@@ -1,6 +1,7 @@
 #include "app/settings_dialog.hpp"
 
 #include "app/theme.hpp"
+#include "mounts/transport.hpp"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -92,6 +93,29 @@ SettingsDialog::SettingsDialog(const Settings& s, QWidget* parent) : QDialog(par
     siteNote->setWordWrap(true);
     v->addWidget(siteNote);
 
+    // (made after the focuser's fields: tests and readers find the INDI server's box first)
+    v->addWidget(theme::section("Mount"));
+    auto* f4 = new QFormLayout;
+    mount_ = new QLineEdit(s.mountSpec);
+    mount_->setProperty("role", "mono");
+    mount_->setPlaceholderText("INDI, on the server above");
+    mountAuto_ = new QCheckBox("Connect at start");
+    mountAuto_->setChecked(s.mountAutoConnect);
+    f4->addRow("Mount", mount_);
+    f4->addRow("", mountAuto_);
+    v->addLayout(f4);
+    QStringList ports;
+    for (const auto& p : mounts::listSerialPorts()) ports << QString::fromStdString(p);
+    auto* mountNote = theme::label(QString("Empty for the INDI server's mount, or one SlopCap drives itself: lx200:PORT (Meade, "
+                                           "OnStep), onstep:tcp://HOST (OnStep's Wi-Fi), nexstar:PORT (Celestron hand "
+                                           "controller), synscan:PORT (Sky-Watcher hand controller), skywatcher:PORT or "
+                                           "skywatcher:udp://192.168.4.1 (a Sky-Watcher's own USB or Wi-Fi; needs the site), "
+                                           "synscan-app (the SynScan app), sim. Serial ports here: %1.")
+                                       .arg(ports.isEmpty() ? QString("none") : ports.join(", ")),
+                                   "dim");
+    mountNote->setWordWrap(true);
+    v->addWidget(mountNote);
+
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -108,6 +132,8 @@ Settings SettingsDialog::settings() const {
     s.micronsPerStep = umStep_->value();
     s.focalLengthMm = focalLength_->value();
     if (latitude_->value() >= -90 && longitude_->value() >= -180) s.latitude = latitude_->value(), s.longitude = longitude_->value();
+    s.mountSpec = mount_->text().trimmed();
+    s.mountAutoConnect = mountAuto_->isChecked();
     return s;
 }
 

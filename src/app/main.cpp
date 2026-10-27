@@ -2,10 +2,12 @@
 //   slopcap [--camera SPEC] [--out DIR] [--record] [--screenshot FILE.png] [--quit-after SECONDS]
 //   slopcap --camera SPEC --serve        share the camera with other SlopCaps on the network
 //   slopcap --connect HOST[:PORT]|auto   watch (and steer) another SlopCap's camera
+//   slopcap --mount lx200:COM3           drive the mount without INDI (--list-mounts for the others)
 #include "app/main_window.hpp"
 #include "app/session_log.hpp"
 #include "app/theme.hpp"
 #include "camera/open_camera.hpp"
+#include "mounts/open_mount.hpp"
 
 #include <QApplication>
 #include <QCommandLineParser>
@@ -14,6 +16,7 @@
 #include <QSysInfo>
 #include <QTimer>
 
+#include <cstdio>
 #include <thread>
 
 #ifdef _WIN32
@@ -97,6 +100,9 @@ int main(int argc, char** argv) {
     args.addOption({"sweep-range", "Sweep +- STEPS around the current position.", "STEPS"});
     args.addOption({"sweep-step", "Sweep step size.", "STEPS"});
     args.addOption({"sweep-frames", "Frames per sweep position.", "N"});
+    args.addOption({"mount", "Drive the mount with SlopCap's own driver: lx200:COM3, onstep:tcp://HOST, nexstar:PORT, synscan:PORT, "
+                    "skywatcher:PORT or skywatcher:udp://HOST, synscan-app, sim (see --list-mounts).", "SPEC"});
+    args.addOption({"list-mounts", "List the mount specs and this computer's serial ports, then quit."});
     args.addOption({"serve", "Share the camera with other SlopCaps on the network (remote viewing)."});
     args.addOption({"listen", "Share on this address only (implies --serve), e.g. 127.0.0.1.", "ADDRESS"});
     args.addOption({"connect", "Watch another SlopCap's camera: HOST[:PORT], or auto for the first one found on the network.", "HOST"});
@@ -109,6 +115,10 @@ int main(int argc, char** argv) {
     args.addOption({"quit-after", "Quit after SECONDS (for smoke tests and screenshots).", "SECONDS"});
     args.addOption({"settings", "Keep settings in an INI file under DIR instead of the user's (tests; a second instance on one machine).", "DIR"});
     args.process(app);
+    if (args.isSet("list-mounts")) {
+        std::fputs(slopcap::mounts::mountSpecHelp().c_str(), stdout);
+        return 0;
+    }
     if (args.isSet("settings")) {
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, args.value("settings"));
@@ -150,6 +160,7 @@ int main(int argc, char** argv) {
     if (args.isSet("focuser"))
         w.startFocuser(args.value("focuser"), args.isSet("sweep"), args.value("sweep-range").toInt(), args.value("sweep-step").toInt(),
                        args.value("sweep-frames").toInt());
+    if (args.isSet("mount")) w.openMount(args.value("mount"));
     if (args.isSet("quit-after")) {
         QTimer::singleShot(static_cast<int>(args.value("quit-after").toDouble() * 1000), &app, [&] {
             if (args.isSet("screenshot")) w.grab().save(args.value("screenshot"));

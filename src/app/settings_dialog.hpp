@@ -1,5 +1,5 @@
-// Settings: focuser connection and behaviour, the optics (critical focus zone, image scale) and the site (which
-// targets are up, for the automatic target).
+// Settings: focuser connection and behaviour, the optics (critical focus zone, image scale), the site (which
+// targets are up, for the automatic target) and which mount.
 #pragma once
 
 #include <QDialog>
@@ -23,6 +23,8 @@ struct Settings {
     double micronsPerStep = 0;   ///< 0 = unknown
     double focalLengthMm = 0;    ///< effective (with any Barlow); 0 = unknown
     std::optional<double> latitude, longitude;   ///< the site (east positive), for what is above the horizon
+    QString mountSpec;           ///< one of SlopCap's own mount drivers (src/mounts/open_mount.hpp); empty = INDI's mount
+    bool mountAutoConnect = false;
 };
 
 class SettingsDialog : public QDialog {
@@ -41,6 +43,8 @@ private:
     QDoubleSpinBox* focalLength_ = nullptr;
     QDoubleSpinBox* latitude_ = nullptr;
     QDoubleSpinBox* longitude_ = nullptr;
+    QLineEdit* mount_ = nullptr;
+    QCheckBox* mountAuto_ = nullptr;
 };
 
 }  // namespace slopcap::app

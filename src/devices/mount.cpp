@@ -1,5 +1,8 @@
 #include "devices/mount.hpp"
 
+#include "mounts/mount_worker.hpp"
+#include "mounts/open_mount.hpp"
+
 #include <QDebug>
 
 #include <algorithm>
@@ -13,6 +16,7 @@ const QString kMotionNS = "TELESCOPE_MOTION_NS", kMotionWE = "TELESCOPE_MOTION_W
 const QString kPark = "TELESCOPE_PARK", kTrack = "TELESCOPE_TRACK_STATE", kAbort = "TELESCOPE_ABORT_MOTION";
 
 bool isNS(Mount::Direction d) { return d == Mount::Direction::North || d == Mount::Direction::South; }
+mounts::Dir toDir(Mount::Direction d) { return static_cast<mounts::Dir>(static_cast<int>(d)); }   // same order
 }  // namespace
 
 Mount::Mount(IndiClient& client, QObject* parent) : QObject(parent), client_(client) {
@@ -21,12 +25,13 @@ Mount::Mount(IndiClient& client, QObject* parent) : QObject(parent), client_(cli
     reconnect_.setSingleShot(true);
     connect(&reconnect_, &QTimer::timeout, this, [this] {
         const auto* p = client_.property(device_, "CONNECTION");
-        if (p && p->elements.count("CONNECT") && !p->elements.at("CONNECT").on() && !p->busy())
+        if (!worker_ && p && p->elements.count("CONNECT") && !p->elements.at("CONNECT").on() && !p->busy())
             client_.sendSwitch(device_, "CONNECTION", "CONNECT");
     });
     connect(&client_, &IndiClient::serverDisconnected, this, [this] {
         reconnect_.stop();
         device_.clear();
+        if (worker_) return;
         nsBusy_ = weBusy_ = slewing_ = false;
         nsTimeout_.stop();
         weTimeout_.stop();
@@ -34,7 +39,7 @@ Mount::Mount(IndiClient& client, QObject* parent) : QObject(parent), client_(cli
         emit readyChanged(false);
     });
     connect(&client_, &IndiClient::propertyDeleted, this, [this](const QString& dev, const QString& name) {
-        if (dev == device_ && (name.isEmpty() || name == kCoords)) emit readyChanged(false);
+        if (!worker_ && dev == device_ && (name.isEmpty() || name == kCoords)) emit readyChanged(false);
     });
     // A driver that never reports a pulse's end: count it as done once its time has passed.
     for (auto* t : {&nsTimeout_, &weTimeout_}) {
@@ -46,21 +51,102 @@ Mount::Mount(IndiClient& client, QObject* parent) : QObject(parent), client_(cli
     }
 }
 
-bool Mount::ready() const { return !device_.isEmpty() && client_.property(device_, kCoords) != nullptr; }
+Mount::~Mount() = default;   // (the worker stops what moves and lets go of the port)
+
+// ---------------------------------------------------------------- which mount
+
+void Mount::setSpec(const QString& spec, std::optional<mounts::Site> site) {
+    const bool same = spec.trimmed() == spec_ && site.has_value() == site_.has_value() &&
+                      (!site || (site->latitude == site_->latitude && site->longitude == site_->longitude));
+    spec_ = spec.trimmed();
+    site_ = site;
+    if (worker_ && !same) close();
+}
+
+bool Mount::builtInSpec() const { return mounts::isBuiltInMount(spec_.toStdString()); }
+
+void Mount::openBuiltIn() {
+    if (worker_ || !builtInSpec()) return;
+    std::function<std::unique_ptr<mounts::IMountDriver>()> make;
+    try {
+        make = mounts::mountFactory(spec_.toStdString(), site_);
+    } catch (const mounts::MountError& e) {
+        emit failed(QString::fromUtf8(e.what()));
+        return;
+    }
+    qInfo().noquote() << "mount: opening" << spec_;
+    const bool wasReady = ready();
+    worker_ = std::make_unique<mounts::MountWorker>(std::move(make));
+    connect(worker_.get(), &mounts::MountWorker::connectedChanged, this, [this](bool ok) {
+        if (ok) {
+            const auto info = worker_->info();
+            qInfo().noquote() << "mount:" << spec_ << "is" << QString::fromStdString(info.model);
+            const auto rates = slewRates();
+            if (!rates.contains(builtInRate_)) builtInRate_ = rates.value(std::min<qsizetype>(1, rates.size() - 1));
+        }
+        emit readyChanged(ok);
+        emit stateChanged();
+    });
+    connect(worker_.get(), &mounts::MountWorker::statusChanged, this, &Mount::onWorkerStatus);
+    connect(worker_.get(), &mounts::MountWorker::failed, this, [this](const QString& why) { emit failed(why); });
+    if (wasReady) emit readyChanged(false);   // INDI's mount steps aside
+}
+
+void Mount::close() {
+    if (!worker_) return;
+    qInfo().noquote() << "mount: closing" << spec_;
+    worker_.reset();
+    slewing_ = pulsing_ = false;
+    emit readyChanged(ready());
+    emit stateChanged();
+    if (!device_.isEmpty()) ensureConnected();   // INDI's, if there is one
+}
+
+void Mount::onWorkerStatus() {
+    const auto st = worker_->status();
+    if (st.haveCoords && (st.ra != ra_ || st.dec != dec_)) {
+        ra_ = st.ra, dec_ = st.dec;
+        emit coordsChanged(ra_, dec_);
+    }
+    const bool wasPulsing = pulsing_;
+    slewing_ = st.slewing;
+    pulsing_ = st.pulsing;
+    emit stateChanged();
+    if (wasPulsing && !pulsing_) emit pulseDone();
+}
+
+int Mount::rateIndex() const { return std::max<qsizetype>(0, slewRates().indexOf(builtInRate_)); }
+
+// ---------------------------------------------------------------- state
+
+QString Mount::device() const { return worker_ ? QString::fromStdString(worker_->info().model) : device_; }
+
+bool Mount::ready() const {
+    if (worker_) return worker_->connected();
+    return !device_.isEmpty() && client_.property(device_, kCoords) != nullptr;
+}
+
+bool Mount::hasCoords() const { return worker_ ? worker_->connected() && worker_->status().haveCoords : ready(); }
 
 std::optional<bool> Mount::tracking() const {
+    if (worker_) return worker_->status().tracking;
     const auto* p = client_.property(device_, kTrack);
     if (!p || !p->elements.count("TRACK_ON")) return std::nullopt;
     return p->elements.at("TRACK_ON").on();
 }
 
 std::optional<bool> Mount::parked() const {
+    if (worker_) return worker_->status().parked;
     const auto* p = client_.property(device_, kPark);
     if (!p || !p->elements.count("PARK")) return std::nullopt;
     return p->elements.at("PARK").on() && !p->busy();   // PARK goes On (Busy) as soon as parking starts
 }
 
-bool Mount::canPulse() const { return client_.property(device_, kGuideNS) && client_.property(device_, kGuideWE); }
+// built-in mounts without pulses of their own get timed moves instead (MountWorker)
+bool Mount::canPulse() const { return worker_ ? worker_->connected() : client_.property(device_, kGuideNS) && client_.property(device_, kGuideWE); }
+
+// ---------------------------------------------------------------- INDI
+
 void Mount::onDefined(const QString& dev, const QString& name) {
     if (device_.isEmpty()) {
         bool isMount = false;
@@ -74,7 +160,7 @@ void Mount::onDefined(const QString& dev, const QString& name) {
         device_ = dev;
         ensureConnected();
     }
-    if (dev != device_) return;
+    if (dev != device_ || worker_) return;   // (a built-in mount: INDI's telescope is left alone)
     if (name == "CONNECTION") ensureConnected();
     if (name == kCoords) {
         readCoords();
@@ -85,6 +171,7 @@ void Mount::onDefined(const QString& dev, const QString& name) {
 }
 
 void Mount::ensureConnected() {
+    if (worker_) return;
     const auto* p = client_.property(device_, "CONNECTION");
     if (!p || !p->elements.count("CONNECT") || p->elements.at("CONNECT").on() || p->busy()) return;
     // After a failed connect, try again every 10 s rather than at once (as the focuser does).
@@ -110,7 +197,7 @@ void Mount::readCoords() {
 }
 
 void Mount::onUpdated(const QString& dev, const QString& name) {
-    if (dev != device_) return;
+    if (dev != device_ || worker_) return;
     if (name == "CONNECTION") {
         ensureConnected();
         return;
@@ -149,16 +236,24 @@ void Mount::updatePulsing() {
     if (!now) emit pulseDone();
 }
 
+// ---------------------------------------------------------------- commands
+
 void Mount::pulse(Direction d, int ms) {
     if (!ready() || !canPulse()) {
         emit failed(ready() ? "mount doesn't take guide pulses" : "no mount");
         return;
     }
     ms = std::max(1, ms);
-    const bool ns = isNS(d);
     const QString elem = d == Direction::North ? "TIMED_GUIDE_N" : d == Direction::South ? "TIMED_GUIDE_S" : d == Direction::East ? "TIMED_GUIDE_E" : "TIMED_GUIDE_W";
-    const QString other = d == Direction::North ? "TIMED_GUIDE_S" : d == Direction::South ? "TIMED_GUIDE_N" : d == Direction::East ? "TIMED_GUIDE_W" : "TIMED_GUIDE_E";
     qInfo().noquote() << "mount: pulse" << elem.right(1) << ms << "ms";
+    if (worker_) {
+        worker_->pulse(toDir(d), ms);
+        pulsing_ = true;
+        emit stateChanged();
+        return;
+    }
+    const bool ns = isNS(d);
+    const QString other = d == Direction::North ? "TIMED_GUIDE_S" : d == Direction::South ? "TIMED_GUIDE_N" : d == Direction::East ? "TIMED_GUIDE_W" : "TIMED_GUIDE_E";
     (ns ? nsBusy_ : weBusy_) = true;
     (ns ? nsTimeout_ : weTimeout_).start(ms + 3000);
     updatePulsing();
@@ -170,12 +265,20 @@ void Mount::startMove(Direction d) {
         emit failed("no mount");
         return;
     }
+    if (worker_) {
+        worker_->move(toDir(d), rateIndex());
+        return;
+    }
     const QString elem = d == Direction::North ? "MOTION_NORTH" : d == Direction::South ? "MOTION_SOUTH" : d == Direction::East ? "MOTION_EAST" : "MOTION_WEST";
     client_.sendSwitch(device_, isNS(d) ? kMotionNS : kMotionWE, elem, true);
 }
 
 void Mount::stopMove() {
     if (!ready()) return;
+    if (worker_) {
+        worker_->stopMoves();
+        return;
+    }
     // Turning a motion switch off ends that motion.
     auto stop = [this](const QString& prop) {
         if (const auto* p = client_.property(device_, prop))
@@ -191,36 +294,50 @@ void Mount::goTo(double raHours, double decDegrees) {
         emit failed("no mount");
         return;
     }
+    if (worker_) {
+        worker_->goTo(raHours, decDegrees);
+        return;
+    }
     client_.sendSwitch(device_, "ON_COORD_SET", "TRACK");
     client_.sendNumbers(device_, kCoords, {{"RA", raHours}, {"DEC", decDegrees}});
 }
 
 void Mount::abort() {
     qInfo() << "mount: abort";
-    if (ready()) client_.sendSwitch(device_, kAbort, "ABORT");
+    if (worker_) worker_->abort();
+    else if (ready()) client_.sendSwitch(device_, kAbort, "ABORT");
 }
 
 void Mount::park() {
     qInfo() << "mount: park";
-    if (ready()) client_.sendSwitch(device_, kPark, "PARK");
+    if (worker_) worker_->park();
+    else if (ready()) client_.sendSwitch(device_, kPark, "PARK");
 }
 
 void Mount::unpark() {
     qInfo() << "mount: unpark";
-    if (ready()) client_.sendSwitch(device_, kPark, "UNPARK");
+    if (worker_) worker_->unpark();
+    else if (ready()) client_.sendSwitch(device_, kPark, "UNPARK");
 }
 
 void Mount::setTracking(bool on) {
     qInfo() << "mount: tracking" << on;
-    if (ready()) client_.sendSwitch(device_, kTrack, on ? "TRACK_ON" : "TRACK_OFF");
+    if (worker_) worker_->setTracking(on);
+    else if (ready()) client_.sendSwitch(device_, kTrack, on ? "TRACK_ON" : "TRACK_OFF");
 }
 
 QStringList Mount::slewRates() const {
+    if (worker_) {
+        QStringList out;
+        for (const auto& r : worker_->info().rates) out << QString::fromStdString(r);
+        return out;
+    }
     const auto* p = client_.property(device_, kSlewRate);
     return p ? p->order : QStringList{};
 }
 
 QString Mount::slewRate() const {
+    if (worker_) return builtInRate_;
     const auto* p = client_.property(device_, kSlewRate);
     if (!p) return {};
     for (const auto& [name, e] : p->elements)
@@ -229,7 +346,13 @@ QString Mount::slewRate() const {
 }
 
 void Mount::setSlewRate(const QString& name) {
-    if (ready() && slewRates().contains(name)) client_.sendSwitch(device_, kSlewRate, name);
+    if (!ready() || !slewRates().contains(name)) return;
+    if (worker_) {
+        builtInRate_ = name;
+        emit stateChanged();
+        return;
+    }
+    client_.sendSwitch(device_, kSlewRate, name);
 }
 
 }  // namespace slopcap::devices

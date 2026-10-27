@@ -184,11 +184,21 @@ endif()
 if(SLOPCAP_BUILD_GUI)
   find_package(Qt6 6.4 QUIET COMPONENTS Widgets OpenGL OpenGLWidgets Network OPTIONAL_COMPONENTS Test)
   if(Qt6_FOUND)
-    # Devices over INDI (focuser, mount; filter wheel later). Qt Core + Network only.
+    # SlopCap's own mount drivers (docs/design/mounts.md): LX200 / OnStep, NexStar / SynScan, Sky-Watcher's motor
+    # controller, the SynScan app, a simulator; serial (own Win32 / termios class), TCP and UDP. Qt Core + Network.
+    add_library(slopcap_mounts STATIC src/mounts/transport.cpp src/mounts/command_channel.cpp src/mounts/lx200.cpp
+      src/mounts/nexstar.cpp src/mounts/skywatcher.cpp src/mounts/synscan_app.cpp src/mounts/sim_mount.cpp
+      src/mounts/mount_worker.cpp src/mounts/open_mount.cpp)
+    set_target_properties(slopcap_mounts PROPERTIES AUTOMOC ON)
+    target_link_libraries(slopcap_mounts PUBLIC slopcap_core Qt6::Core Qt6::Network PRIVATE slopcap_warnings)
+    if(WIN32)
+      target_link_libraries(slopcap_mounts PRIVATE advapi32)   # the COM port list, from the registry
+    endif()
+    # Devices (focuser and mount over INDI, the mount also through slopcap_mounts). Qt Core + Network only.
     add_library(slopcap_devices STATIC src/devices/indi_client.cpp src/devices/focuser.cpp src/devices/mount.cpp)
     set_target_properties(slopcap_devices PROPERTIES AUTOMOC ON)
     target_include_directories(slopcap_devices PUBLIC src)
-    target_link_libraries(slopcap_devices PUBLIC Qt6::Core Qt6::Network PRIVATE slopcap_warnings)
+    target_link_libraries(slopcap_devices PUBLIC slopcap_mounts Qt6::Core Qt6::Network PRIVATE slopcap_warnings)
     # Remote viewing: one SlopCap shares its camera, others watch and steer it (src/net/protocol.hpp).
     add_library(slopcap_net STATIC src/net/protocol.cpp src/net/frame_codec.cpp src/net/discovery.cpp src/net/remote_server.cpp
       src/net/remote_client.cpp src/net/rate_control.cpp)
@@ -292,6 +302,12 @@ if(SLOPCAP_BUILD_TESTS)
       add_executable(slopcap-qt-tests tests/test_indi.cpp)
       target_link_libraries(slopcap-qt-tests PRIVATE slopcap_devices slopcap_warnings Catch2::Catch2)
       add_test(NAME indi-devices COMMAND slopcap-qt-tests)
+      # The built-in mount drivers against fakes that speak each protocol (tests/fakes/fake_mounts.*) over memory,
+      # a pseudo-terminal, TCP and UDP, and the Mount they sit behind.
+      add_executable(slopcap-mount-tests tests/test_mounts.cpp tests/fakes/fake_mounts.cpp)
+      target_link_libraries(slopcap-mount-tests PRIVATE slopcap_devices slopcap_mounts slopcap_warnings Catch2::Catch2)
+      target_include_directories(slopcap-mount-tests PRIVATE tests)
+      add_test(NAME mounts COMMAND slopcap-mount-tests)
       add_executable(slopcap-net-tests tests/test_remote.cpp)
       target_link_libraries(slopcap-net-tests PRIVATE slopcap_net slopcap_warnings Catch2::Catch2)
       add_test(NAME remote COMMAND slopcap-net-tests)

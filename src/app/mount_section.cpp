@@ -52,7 +52,10 @@ MountSection::MountSection(devices::Mount& mount, FocusController& fc, QWidget* 
     ol->addWidget(offlineText_, 1);
     ol->addWidget(connect_);
     v->addWidget(offline_);
-    connect(connect_, &QPushButton::clicked, this, [this] { fc_.connectFocuser(fc_.server()); });
+    connect(connect_, &QPushButton::clicked, this, [this] {
+        if (mount_.builtInSpec()) mount_.openBuiltIn();   // SlopCap's own driver (Settings > Mount)
+        else fc_.connectFocuser(fc_.server());            // INDI's, on the focuser's server
+    });
 
     online_ = new QWidget;
     auto* on = new QVBoxLayout(online_);
@@ -136,14 +139,20 @@ void MountSection::refresh() {
     const bool indi = fc_.indi().isConnected();
     title_->setText(QString("MOUNT%1").arg(ok ? " · " + mount_.device().toUpper() : ""));
     offline_->setVisible(!ok);
-    connect_->setVisible(!indi);
-    offlineText_->setText(indi ? (mount_.device().isEmpty() ? "INDI connected · no mount yet" : "Connecting to " + mount_.device() + "…")
-                               : "Not connected · " + fc_.server());
+    if (mount_.builtInSpec()) {
+        connect_->setVisible(!mount_.builtIn());
+        offlineText_->setText(mount_.builtIn() ? "Connecting to " + mount_.spec() + "… (again every 10 s until it answers)"
+                                               : "Not connected · " + mount_.spec());
+    } else {
+        connect_->setVisible(!indi);
+        offlineText_->setText(indi ? (mount_.device().isEmpty() ? "INDI connected · no mount yet" : "Connecting to " + mount_.device() + "…")
+                                   : "Not connected · " + fc_.server());
+    }
     online_->setVisible(ok);
     pad_->setVisible(ok);
     if (!ok) return;
 
-    coords_->setText(QString("RA %1   Dec %2").arg(formatRa(mount_.ra()), formatDec(mount_.dec())));
+    coords_->setText(mount_.hasCoords() ? QString("RA %1   Dec %2").arg(formatRa(mount_.ra()), formatDec(mount_.dec())) : QString("RA —   Dec —"));
     const auto parked = mount_.parked();
     const auto tracking = mount_.tracking();
     QStringList state;

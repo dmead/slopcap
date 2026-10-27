@@ -82,6 +82,8 @@ public:
     void setMode(Mode m);
     /// Connect the focuser; optionally start a sweep around its position once it's ready (0 = default).
     void startFocuser(const QString& hostPort, bool sweep, int range, int step, int frames);
+    /// Drive the mount with one of SlopCap's own drivers (src/mounts/open_mount.hpp), connecting now; empty: INDI's.
+    void openMount(const QString& spec);
     void setNamedControl(const QString& name, double value);   ///< as if set in the UI (here, or on the server)
 
     // remote viewing (src/net): share this camera, or watch and steer another SlopCap's

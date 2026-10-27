@@ -328,6 +328,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     s.focalLengthMm = st.value("optics/focalLengthMm", 0.0).toDouble();
     if (st.contains("site/latitude") && st.contains("site/longitude"))
         s.latitude = st.value("site/latitude").toDouble(), s.longitude = st.value("site/longitude").toDouble();
+    s.mountSpec = st.value("mount/spec").toString();
+    s.mountAutoConnect = st.value("mount/autoConnect", false).toBool();
     applySettings(s);
     focus_->setOutputDir(outDir_);
     if (s.focuserAutoConnect) focus_->connectFocuser(s.indiServer);
@@ -350,7 +352,12 @@ void MainWindow::applySettings(const Settings& s) {
     qInfo().noquote() << "settings: INDI" << s.indiServer << (s.focuserAutoConnect ? "(connect at start)" : "") << "· backlash" << s.backlash
                       << (s.approachOutward ? "outward" : "inward") << "· f/" << s.focalRatio << "·" << s.micronsPerStep << "um/step ·"
                       << s.focalLengthMm << "mm · site" << (s.latitude ? QString("%1, %2").arg(*s.latitude).arg(*s.longitude) : QString("unset"))
+                      << "· mount" << (s.mountSpec.isEmpty() ? QString("INDI") : s.mountSpec) << (s.mountAutoConnect ? "(connect at start)" : "")
                       << "· folder" << outDir_;
+    std::optional<mounts::Site> site;
+    if (s.latitude && s.longitude) site = mounts::Site{*s.latitude, *s.longitude};
+    mount_->setSpec(s.mountSpec, site);   // (closes a built-in mount whose spec or site changed)
+    if (s.mountAutoConnect) mount_->openBuiltIn();
     focus_->focuser().setBacklash(s.backlash);
     focus_->focuser().setApproachOutward(s.approachOutward);
     focus_->setOptics(s.focalRatio, s.micronsPerStep);
@@ -904,6 +911,14 @@ void MainWindow::startFocuser(const QString& hostPort, bool sweep, int range, in
     focus_->connectFocuser(hostPort);
 }
 
+void MainWindow::openMount(const QString& spec) {
+    std::optional<mounts::Site> site;
+    if (settings_.latitude && settings_.longitude) site = mounts::Site{*settings_.latitude, *settings_.longitude};
+    settings_.mountSpec = spec;   // (kept, as --focuser keeps its server)
+    mount_->setSpec(spec, site);
+    mount_->openBuiltIn();
+}
+
 void MainWindow::updateAdcContext() {
     // the image scale, for arcseconds
     std::optional<double> scale;
@@ -919,7 +934,7 @@ void MainWindow::updateAdcContext() {
                 const auto p = analysis::bodyPosition(b, jd);
                 altitude = AdcPanel::Altitude{analysis::altitudeDeg(p.ra, p.dec, jd, *settings_.latitude, *settings_.longitude), analysis::bodyName(b)};
             }
-        if (!altitude && mount_->ready())
+        if (!altitude && mount_->hasCoords())
             altitude = AdcPanel::Altitude{analysis::altitudeDeg(mount_->ra(), mount_->dec(), jd, *settings_.latitude, *settings_.longitude),
                                           "The telescope"};
     }
@@ -1418,6 +1433,8 @@ void MainWindow::saveSettings() const {
     st.setValue("focuser/backlash", settings_.backlash);
     st.setValue("focuser/outward", settings_.approachOutward);
     st.setValue("mount/pulseMs", mountSection_->pulseMs());
+    st.setValue("mount/spec", settings_.mountSpec);
+    st.setValue("mount/autoConnect", settings_.mountAutoConnect);
     st.setValue("optics/focalRatio", settings_.focalRatio);
     st.setValue("optics/micronsPerStep", settings_.micronsPerStep);
     st.setValue("optics/focalLengthMm", settings_.focalLengthMm);
@@ -1597,7 +1614,7 @@ void MainWindow::writeSidecar(const QString& serPath, const CaptureStats& s, con
     if (!modes.empty()) o << "Readout=" << QString::fromStdString(modes[static_cast<std::size_t>(std::clamp(cam_->readoutMode(), 0, static_cast<int>(modes.size()) - 1))].name) << "\n";
     for (const auto& [name, val] : recControls_) o << QString::fromStdString(name) << "=" << val << "\n";
     if (focus_->focuser().ready()) o << "Focuser position=" << focus_->focuser().position() << "\n";
-    if (mount_->ready())
+    if (mount_->hasCoords())
         o << "Mount RA(JNow)=" << QString::number(mount_->ra(), 'f', 5) << " h\nMount Dec(JNow)=" << QString::number(mount_->dec(), 'f', 4) << " deg\n";
     if (!s.error.empty()) o << "Error=" << QString::fromStdString(s.error) << "\n";
 }

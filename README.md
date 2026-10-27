@@ -33,7 +33,8 @@ recording from the same summer, replayed through SlopCap as if it were the camer
 - **Focus, colour by colour**, with an electronic focuser, below.
 - **ADC:** with an atmospheric dispersion corrector, it measures how far the planet's red and blue images sit apart
   and says which way to move the levers.
-- **The mount:** nudge the planet back into the frame with guide pulses (INDI).
+- **The mount:** nudge the planet back into the frame with guide pulses, through INDI or with SlopCap's own drivers
+  (Meade LX200 and OnStep, Celestron and Sky-Watcher hand controllers, Sky-Watcher's motors direct, the SynScan app).
 - **Point-to-point video** to other computers, below.
 - **A log of the night:** every setting, recording, drop, focuser move and decision, for working out afterwards what
   happened.

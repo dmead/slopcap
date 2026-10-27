@@ -1,6 +1,28 @@
 # Mount support: every mount, one code path
 
-Design spec, 2026-10-22. Proposal only: nothing below is built yet.
+Design spec, 2026-10-22.
+
+**Status, 2026-10-23: the built-in drivers are started** (`src/mounts/`, tests in `tests/test_mounts.cpp` against
+`tests/fakes/fake_mounts.*`). Dan asked for "as much compatibility for various mounts (skywatcher, synscan, onstep,
+lx-200 protocol) into as small of an executable as possible", which settles two of the §9 questions: serial is our
+own Win32 / termios class, not Qt SerialPort (9.2), and Sky-Watcher direct is in (9.3). Built so far:
+
+- `ITransport` (serial, TCP, UDP), `CommandChannel`, `IMountDriver`, `MountWorker` (thread, queue with Stop first,
+  polling, emulated pulses, 10 s move deadman, J2000 / JNow, reconnect every 10 s), specs and `--mount` /
+  `--list-mounts`, Settings → Mount, the Mount panel's Connect.
+- `lx200` with the Meade Classic, Meade (Autostar / II / LX200GPS) and OnStep dialects, from Meade's 2007.10 protocol
+  and OnStepX's command reference; `nexstar` / `synscan` from Celestron's and Sky-Watcher's (v3.3) documents;
+  `skywatcher` (motor controller, equatorial only, home = pole with counterweights down, sync as an offset) from
+  Sky-Watcher's 2021 command set; and `synscan-app`, Sky-Watcher's SynScan App Protocol (UDP 11881, ITelescopeV3 as
+  text), which wasn't in the table below and covers any mount the app drives; `sim`.
+- The driver interface is simpler than §3.2's: `move(Dir, rateIndex)` / `stop(Dir)` over named rates instead of
+  `moveAxis(Axis, degPerSec)`, which fits the LX200 and hand-controller rates.
+
+Not yet: INDI behind `IMountDriver` (`devices::Mount` keeps its INDI code and switches to the worker for a built-in
+spec), ASCOM COM and Alpaca (phase 2), the 10Micron / Gemini / ZWO / iOptron dialects, alt-az `AxisMount`, Celestron
+AUX, the horizon check before a goto, planet-rate tracking, pier side in the panel, `slopcap-mountprobe`. None of the
+built-in drivers has been on a real mount; directions marked "to check" in the headers (Sky-Watcher's count
+direction, the hand controllers' RA motor sign) need one.
 
 Today SlopCap drives a mount only through INDI (`src/devices/mount.cpp`, the standard telescope properties). That's
 fine on Linux and macOS but leaves Windows needing an INDI server on another computer, and Windows is where most
