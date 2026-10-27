@@ -78,12 +78,7 @@ void Mount::openBuiltIn() {
     const bool wasReady = ready();
     worker_ = std::make_unique<mounts::MountWorker>(std::move(make));
     connect(worker_.get(), &mounts::MountWorker::connectedChanged, this, [this](bool ok) {
-        if (ok) {
-            const auto info = worker_->info();
-            qInfo().noquote() << "mount:" << spec_ << "is" << QString::fromStdString(info.model);
-            const auto rates = slewRates();
-            if (!rates.contains(builtInRate_)) builtInRate_ = rates.value(std::min<qsizetype>(1, rates.size() - 1));
-        }
+        if (ok) qInfo().noquote() << "mount:" << spec_ << "is" << QString::fromStdString(worker_->info().model);
         emit readyChanged(ok);
         emit stateChanged();
     });
@@ -115,7 +110,7 @@ void Mount::onWorkerStatus() {
     if (wasPulsing && !pulsing_) emit pulseDone();
 }
 
-int Mount::rateIndex() const { return std::max<qsizetype>(0, slewRates().indexOf(builtInRate_)); }
+int Mount::rateIndex() const { return std::max<qsizetype>(0, slewRates().indexOf(slewRate())); }
 
 // ---------------------------------------------------------------- state
 
@@ -337,7 +332,11 @@ QStringList Mount::slewRates() const {
 }
 
 QString Mount::slewRate() const {
-    if (worker_) return builtInRate_;
+    if (worker_) {
+        // until one is picked, the second slowest (the slowest is for guiding)
+        const auto rates = slewRates();
+        return rates.contains(builtInRate_) ? builtInRate_ : rates.value(std::min<qsizetype>(1, rates.size() - 1));
+    }
     const auto* p = client_.property(device_, kSlewRate);
     if (!p) return {};
     for (const auto& [name, e] : p->elements)
