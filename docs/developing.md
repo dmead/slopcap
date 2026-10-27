@@ -136,13 +136,17 @@ the Mac zip `SlopCap.app` from `tools/macos-app.sh`.
 `licenses/` starts from `tools/package/licenses/` (its README says what each part is; the camera SDKs' texts are
 INDI's). Linux adds the Debian copyright file of every package the bundled files come from, found with `dpkg -S`.
 Windows adds what `docker/build.sh windows-static` leaves in `build/windows-static/licenses`: Qt's license texts and
-SBOM, the MinGW runtime's licenses and the IBM Plex fonts' (the image keeps them in `/opt/licenses`). The Mac zip
-doesn't carry Qt's yet.
+SBOM, the MinGW runtime's licenses and the IBM Plex fonts' (the image keeps them in `/opt/licenses`). The Mac zip adds
+Homebrew Qt's SBOM, the license files of the Homebrew package behind every other library in `Frameworks/`, and Qt's
+license texts and the fonts' license, which Homebrew doesn't have: `SLOPCAP_MAC_LICENSES` names a folder laid out like
+`build/windows-static/licenses` (copy that one to the Mac), and the zip isn't made without it.
 
 **Releases** are zips only, never a bare exe. Tag the commit, run `tools/ci-local.sh --windows-smoke TAG` with
 `SLOPCAP_WIN_SDK_DLL_DIR` set (so the exe has the camera drivers), push the tag, then
 `tools/release.sh TAG NOTES.md`: it publishes that run's zips, unchanged, on GitHub, and only when every job passed
-and each zip holds the README, `LICENSE` and `licenses/`.
+and each zip holds the README, `LICENSE` and `licenses/`. A Mac zip goes up with them when it was made on a Mac from
+the same commit after `macos-debug`'s tests passed there, and added to the run: the zip in the run's folder, and in its
+`summary.txt` a `  macos  pass` line and the zip's `  package:` line (path and SHA-256).
 
 GitHub counts macOS minutes ten times and Windows minutes twice against a private repository's monthly allowance,
 which is why `ci.yml` only runs when started by hand and `tools/ci-local.sh` is the everyday check.

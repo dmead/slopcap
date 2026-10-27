@@ -6,7 +6,8 @@
 #                              Docker; on Windows from Git Bash with MSYS_NO_PATHCONV=1). Build linux-release first.
 #   tools/package.sh windows   build/windows-static/slopcap.exe (docker/build.sh windows-static; with
 #                              SLOPCAP_WIN_SDK_DLL_DIR set it has the camera drivers inside)
-#   tools/package.sh macos     build/macos-release/SlopCap.app (tools/macos-app.sh), on a Mac
+#   tools/package.sh macos     build/macos-release/SlopCap.app (tools/macos-app.sh), on a Mac, with
+#                              SLOPCAP_MAC_LICENSES set (Qt's and the fonts' license texts: see below)
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
@@ -117,8 +118,46 @@ windows)
 macos)
     B=build/macos-release
     [ -d $B/SlopCap.app ] || { echo "no $B/SlopCap.app: tools/macos-app.sh first" >&2; exit 1; }
+    # Homebrew has neither Qt's license texts nor the fonts': SLOPCAP_MAC_LICENSES names a folder with both, laid out as
+    # the Windows build leaves them in build/windows-static/licenses (qt/ with qtbase's LICENSES/, ibm-plex-fonts.txt)
+    L=${SLOPCAP_MAC_LICENSES:-}
+    [ -n "$L" ] && [ -f "$L/qt/LGPL-3.0-only.txt" ] && [ -f "$L/ibm-plex-fonts.txt" ] || {
+        echo "SLOPCAP_MAC_LICENSES must name a folder with qt/ (qtbase's LICENSES/) and ibm-plex-fonts.txt," \
+             "as build/windows-static/licenses has them" >&2; exit 1; }
+    BREW=$(brew --prefix)
+    QTB=$BREW/opt/qtbase
     ditto $B/SlopCap.app "$OUT/SlopCap.app"
-    echo "warning: Qt's licenses aren't gathered for the Mac zip yet (only SlopCap's and the camera SDKs')" >&2
+    FW=$OUT/SlopCap.app/Contents/Frameworks
+    for fw in "$FW"/Qt*.framework; do   # (the SBOM below is qtbase's)
+        [ -e "$QTB/lib/$(basename "$fw")" ] || { echo "$(basename "$fw") isn't qtbase's: add its module's SBOM" >&2; exit 1; }
+    done
+    mkdir -p "$OUT/licenses/qt" "$OUT/licenses/homebrew"
+    cp "$L"/qt/*.txt "$QTB"/share/qt/sbom/qtbase-*.spdx "$OUT/licenses/qt/"
+    cp "$L/ibm-plex-fonts.txt" "$OUT/licenses/"
+    # every license this Qt's SBOM names needs its text (the texts can come from another Qt version)
+    missing=
+    for id in $(grep -hE '^(PackageLicenseConcluded|PackageLicenseDeclared|LicenseConcluded|LicenseInfoInFile):' \
+                    "$OUT"/licenses/qt/qtbase-*.spdx | cut -d: -f2- | tr -d '\r' | tr '() ' '\n\n\n' |
+                    { grep -vxE 'AND|OR|WITH|NOASSERTION|NONE' || true; } | sort -u); do
+        [ -f "$OUT/licenses/qt/$id.txt" ] || grep -qx "LicenseID: $id" "$OUT"/licenses/qt/qtbase-*.spdx || missing="$missing $id"
+    done
+    [ -z "$missing" ] || { echo "no license text for$missing in $L/qt" >&2; exit 1; }
+    # The other libraries macdeployqt copied in are Homebrew's: the license files of each one's formula, which Homebrew
+    # keeps at the top of the keg. (The camera SDKs' are in camera-sdks/.)
+    for lib in "$FW"/*.dylib; do
+        name=$(basename "$lib")
+        case $name in libASICamera2.dylib | libqhyccd.dylib | libPlayerOneCamera.dylib | libtoupcam.dylib | libmallincam.dylib) continue ;; esac
+        keg=
+        for f in "$BREW"/opt/*/lib/"$name"; do
+            if [ -e "$f" ]; then keg=$(readlink -f "$f"); keg=${keg%/lib/*}; break; fi
+        done
+        [ -n "$keg" ] || { echo "$name: no Homebrew formula has it" >&2; exit 1; }
+        formula=$(basename "$(dirname "$keg")")
+        mkdir -p "$OUT/licenses/homebrew/$formula"
+        n=$(find "$keg" -maxdepth 1 -type f \( -iname 'LICEN[CS]E*' -o -iname 'COPYING*' -o -iname 'COPYRIGHT*' -o -iname '*GPL*' \) \
+                -exec cp {} "$OUT/licenses/homebrew/$formula/" \; -print | wc -l | tr -d ' ')
+        [ "$n" -gt 0 ] || { echo "$formula ($name): no license file in $keg" >&2; exit 1; }
+    done
     ;;
 esac
 

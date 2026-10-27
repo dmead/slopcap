@@ -2,7 +2,9 @@
 # Publish a GitHub release of a tag from its local CI run (tools/ci-local.sh --windows-smoke TAG, every job passed):
 #   tools/release.sh TAG NOTES.md
 # Only that run's zips go up, unchanged (their hashes are in the run's summary), and each must hold the README, the
-# LICENSE and licenses/: no bare exe, nothing else. The SHA-256 of each is added to the notes. The tag must already be
+# LICENSE and licenses/: no bare exe, nothing else. A Mac zip made from the same commit after its tests passed on a Mac
+# goes up too when it was added to the run (a "  macos  pass" line and its "  package:" line in summary.txt; see
+# docs/developing.md). The SHA-256 of each is added to the notes. The tag must already be
 # on GitHub (the `github` remote), and the release must not exist yet. With .git/leak-patterns present (the pre-push
 # guard's), the zips' contents are searched for those too. On Windows run it from Git Bash with MSYS_NO_PATHCONV=1.
 set -euo pipefail
@@ -36,6 +38,9 @@ zips=()
 while read -r zip hash; do
     [ -f "$zip" ] || { echo "$zip is gone (a later CI run replaced it): run CI on $TAG again" >&2; exit 1; }
     [ "$(sha256sum < "$zip" | cut -c1-64)" = "$hash" ] || { echo "$zip isn't the one $run made: run CI on $TAG again" >&2; exit 1; }
+    case $(basename "$zip") in
+        slopcap-macos-*) grep -qE '^  macos +pass' "$run/summary.txt" || { echo "$zip: no passing macos line in the run" >&2; exit 1; } ;;
+    esac
     "$py" - "$(native "$zip")" <<'CHECK' || exit 1
 import sys, zipfile
 path = sys.argv[1]
