@@ -45,3 +45,8 @@ Windows asks the first time you share; allow it on **Private networks**.
 `docs\` has the whole guide: [a night at the telescope](docs/user-guide.md), [remote viewing](docs/remote-viewing.md),
 [files, settings and logs](docs/files-and-logs.md) and [troubleshooting](docs/troubleshooting.md). Recordings go to
 `Videos\SlopCap` unless you pick another folder; each night's log is in `%LOCALAPPDATA%\SlopCap\SlopCap\logs`.
+
+## License
+
+SlopCap is free software under the GNU General Public License, version 3 (`LICENSE`). The camera drivers, Qt and the
+fonts built into `slopcap.exe` are under their own licenses, in `licenses\`.

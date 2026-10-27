@@ -1,5 +1,6 @@
 #!/bin/bash
-# A zip of SlopCap for one system, with a README and the observer documentation: build/package/slopcap-<os>-<arch>.zip
+# A zip of SlopCap for one system, with a README, the LICENSE, the third-party licenses (licenses/) and the observer
+# documentation: build/package/slopcap-<os>-<arch>.zip
 #   tools/package.sh linux     the linux-release build with the Qt libraries and plugins it uses, the camera SDKs and a
 #                              launcher, so it runs without Qt installed (in the build image: run it from anywhere with
 #                              Docker; on Windows from Git Bash with MSYS_NO_PATHCONV=1). Build linux-release first.
@@ -30,6 +31,8 @@ OUT=build/package/$NAME
 rm -rf "$OUT" "$OUT.zip"
 mkdir -p "$OUT/docs"
 cp "tools/package/README-$OS.md" "$OUT/README.md"
+cp LICENSE "$OUT/"
+cp -r tools/package/licenses "$OUT/"
 for f in README.md install.md user-guide.md remote-viewing.md files-and-logs.md troubleshooting.md; do cp "docs/$f" "$OUT/docs/"; done
 cp -r docs/images "$OUT/docs/"
 
@@ -56,12 +59,15 @@ linux)
     system+='|libexpat|libz|libudev|libsystemd|libdbus-1|libglib-2\.0|libgthread-2\.0|libgobject-2\.0|libgio-2\.0|libgmodule-2\.0'
     system+='|libmount|libblkid|libselinux|libffi|libpcre2-8|libcap|libgcrypt|libgpg-error|liblzma|liblz4|libzstd|libbz2|libbrotli.*'
     system+='|libpng16|libharfbuzz|libgraphite2|libuuid)\.so'   # (libjpeg goes in: its name differs between distros)
-    for elf in "$OUT/bin/slopcap" $(find "$OUT/plugins" -name '*.so'); do
-        ldd "$elf" | awk '/=> \//{print $3}'
-    done | sort -u | while read -r lib; do
+    sources=(/usr/share/fonts/truetype/ibm-plex/*)   # what the zip carries from the system (the fonts: inside the program)
+    for f in $(cd "$OUT/plugins" && find . -type f); do sources+=("$QT/${f#./}"); done
+    for lib in $(for elf in "$OUT/bin/slopcap" $(find "$OUT/plugins" -name '*.so'); do
+                     ldd "$elf" | awk '/=> \//{print $3}'
+                 done | sort -u); do
         base=$(basename "$lib")
         [[ $base =~ $system ]] && continue
         cp -L "$lib" "$OUT/lib/$base"
+        sources+=("$lib")
     done
     # the camera SDKs are opened by the program, not linked by the plugins: make sure they're there
     for l in libASICamera2.so libqhyccd.so libPlayerOneCamera.so libtoupcam.so libmallincam.so; do
@@ -78,6 +84,23 @@ here=$(dirname "$(readlink -f "$0")")
 LD_LIBRARY_PATH="$here/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" exec "$here/bin/slopcap" "$@"
 LAUNCHER
     chmod +x "$OUT/slopcap"
+    # Their licenses: the copyright file of each Ubuntu package they come from, and the license texts those point to
+    # (/usr/share/common-licenses isn't on every system). INDI's covers only INDI's code: the camera SDKs' own are in
+    # licenses/camera-sdks.
+    mkdir -p "$OUT/licenses/debian/common-licenses"
+    for f in "${sources[@]}"; do
+        f=$(readlink -f "$f")
+        dpkg -S "$f" 2>/dev/null || dpkg -S "${f/#\/usr\/lib\//\/lib\/}" 2>/dev/null || echo "warning: no package has $f" >&2
+    done | { grep -v '^diversion' || true; } | cut -d: -f1 | sort -u | while read -r pkg; do
+        if [ -f "/usr/share/doc/$pkg/copyright" ]; then
+            cp -L "/usr/share/doc/$pkg/copyright" "$OUT/licenses/debian/$pkg.txt"
+        else
+            echo "warning: $pkg has no copyright file" >&2
+        fi
+    done
+    { grep -ho '/usr/share/common-licenses/[A-Za-z0-9.+_-]*[A-Za-z0-9]' "$OUT"/licenses/debian/*.txt || true; } | sort -u | while read -r l; do
+        if [ -f "$l" ]; then cp "$l" "$OUT/licenses/debian/common-licenses/"; fi
+    done
     # nothing the bundle needs may be missing (the system's own libraries aside)
     if LD_LIBRARY_PATH="$OUT/lib" ldd "$OUT/bin/slopcap" "$OUT"/plugins/platforms/libqxcb.so | grep 'not found'; then
         echo "missing libraries" >&2
@@ -87,12 +110,15 @@ LAUNCHER
 windows)
     B=build/windows-static
     [ -f $B/slopcap.exe ] || { echo "no $B/slopcap.exe: docker/build.sh windows-static first" >&2; exit 1; }
+    [ -d $B/licenses/qt ] || { echo "no $B/licenses: docker/build.sh windows-static puts them there" >&2; exit 1; }
     cp $B/slopcap.exe "$OUT/"
+    cp -r $B/licenses/. "$OUT/licenses/"
     ;;
 macos)
     B=build/macos-release
     [ -d $B/SlopCap.app ] || { echo "no $B/SlopCap.app: tools/macos-app.sh first" >&2; exit 1; }
     ditto $B/SlopCap.app "$OUT/SlopCap.app"
+    echo "warning: Qt's licenses aren't gathered for the Mac zip yet (only SlopCap's and the camera SDKs')" >&2
     ;;
 esac
 

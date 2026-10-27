@@ -547,8 +547,11 @@ M2 status (2026-10-16):
 
 0. ~~Platform~~: both Linux and Windows. Linux device testing on the observatory machine runs in WSL2 + usbipd-win (§8).
 1. ~~GUI~~: Qt Widgets + QOpenGLWidget (M2).
-2. SlopCap's own license (GPL-3.0 like INDI/KStars, or MIT/Apache)? Check that the ZWO SDK's license allows
-   distributing builds that link it.
+2. ~~SlopCap's own license~~: GPL-3.0, like INDI and KStars (2026-10-27, `LICENSE`); it also lets the Windows exe link
+   Qt statically. Every zip carries it and the third-party licenses (`tools/package.sh`). ZWO's SDK is MIT, ToupTek's
+   and MallinCam's LGPL-2.1; Player One's is its own permissive notice and QHY publishes none. Still open before the
+   repository goes public: an additional permission (GPL-3.0 §7) for loading the proprietary camera SDKs, and whether
+   the vendors' DLLs may be embedded in the exe at all.
 3. ~~Which camera SDK comes after ZWO?~~ QHY, alongside ZWO from M1. After those: Player One, then the ToupTek family, then SVBony (§5b).
 4. File formats beyond SER: FITS cubes? AVI is probably not worth it.
 5. Should the FireCapture skill and plugin be retired once SlopCap reaches M6, or kept as a fallback?

@@ -32,7 +32,16 @@ RUN curl -fsSL "https://download.qt.io/official_releases/qt/${QT_VERSION%.*}/${Q
       -DFEATURE_system_libb2=OFF \
  && cmake --build /tmp/qtbuild \
  && cmake --install /tmp/qtbuild \
+ && mkdir -p /opt/licenses/qt \
+ && cp /tmp/qtbase-everywhere-src-${QT_VERSION}/LICENSES/* /opt/qt6-mingw-static/sbom/*.spdx /opt/licenses/qt/ \
  && rm -rf /tmp/qtbase-everywhere-src-${QT_VERSION} /tmp/qtbuild
+
+# The licenses of what goes into slopcap.exe besides SlopCap's own code, for the zip (docker/build.sh copies them to
+# build/windows-static/licenses): Qt's above, the compiler's runtimes here, the fonts' below. libgcc's are libstdc++'s.
+RUN mkdir -p /opt/licenses/mingw-runtime \
+ && cp -r /usr/share/licenses/mingw64-libstdc++ /opt/licenses/mingw-runtime/gcc \
+ && cp -r /usr/share/licenses/mingw64-winpthreads /opt/licenses/mingw-runtime/winpthreads \
+ && cp -r /usr/share/licenses/mingw64-crt /opt/licenses/mingw-runtime/mingw-w64-crt
 
 COPY --from=ubuntu /usr/include/libasi /usr/include/libasi
 COPY --from=ubuntu /usr/include/libqhy /usr/include/libqhy
@@ -40,6 +49,7 @@ COPY --from=ubuntu /usr/include/libplayerone /usr/include/libplayerone
 COPY --from=ubuntu /usr/include/libtoupcam /usr/include/libtoupcam
 COPY --from=ubuntu /usr/include/libmallincam /usr/include/libmallincam
 COPY --from=ubuntu /usr/share/fonts/truetype/ibm-plex /usr/share/fonts/truetype/ibm-plex
+COPY --from=ubuntu /usr/share/doc/fonts-ibm-plex/copyright /opt/licenses/ibm-plex-fonts.txt
 
 ENV HOME=/tmp
 ENV LANG=C.UTF-8

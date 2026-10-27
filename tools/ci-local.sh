@@ -129,7 +129,9 @@ done
 
 [ $coverage_ok = 1 ] &&
     echo "  coverage: $(grep '^TOTAL' "$WT/build/linux-coverage/coverage.txt" | awk '{print $NF}') of src/ lines" | tee -a "$SUMMARY"
-for z in "$WT"/build/package/*.zip; do [ -f "$z" ] && echo "  package: $z" | tee -a "$SUMMARY"; done
+for z in "$WT"/build/package/*.zip; do   # (the hash lets tools/release.sh check that it publishes this run's zip)
+    [ -f "$z" ] && echo "  package: $z  sha256 $(sha256sum < "$z" | cut -c1-64)" | tee -a "$SUMMARY"
+done
 echo "  logs: $RUN" | tee -a "$SUMMARY"
 [ $failed = 0 ] && echo "all jobs passed" | tee -a "$SUMMARY" || echo "SOME JOBS FAILED" | tee -a "$SUMMARY"
 

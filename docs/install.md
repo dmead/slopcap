@@ -5,14 +5,15 @@ doesn't need one to record: without it the preview stays blank and says why, and
 
 ## Windows
 
-SlopCap for Windows is a single file, `slopcap.exe`. There is no installer and nothing else to copy: Qt is built
-into it, and so are the camera drivers (ZWO, QHY, Player One, ToupTek, MallinCam) when it was built with them, as the
-releases are. An exe built without them looks for the vendors' DLLs next to `slopcap.exe`: copy `ASICamera2.dll`,
-`qhyccd.dll`, `PlayerOneCamera.dll`, `toupcam.dll` or `mallincam.dll` there, from SharpCap's folder for example
-(SharpCap calls the last two `ToupCam.dll` and `MallinCam.dll`; either name works).
+SlopCap for Windows comes as `slopcap-windows-x64.zip`, and the program in it is a single file, `slopcap.exe`. There
+is no installer and nothing else it needs: Qt is built into it, and so are the camera drivers (ZWO, QHY, Player One,
+ToupTek, MallinCam) when it was built with them, as the releases are. An exe built without them looks for the vendors'
+DLLs next to `slopcap.exe`: copy `ASICamera2.dll`, `qhyccd.dll`, `PlayerOneCamera.dll`, `toupcam.dll` or
+`mallincam.dll` there, from SharpCap's folder for example (SharpCap calls the last two `ToupCam.dll` and
+`MallinCam.dll`; either name works).
 
-1. Copy `slopcap.exe` anywhere, for example `C:\Users\<you>\slopcap\`.
-2. Double-click it.
+1. Unzip it anywhere, for example to `C:\Users\<you>\slopcap\`.
+2. Double-click `slopcap.exe`.
 
 The first time a camera is used, SlopCap unpacks the camera drivers to `%LOCALAPPDATA%\SlopCap\SlopCap\sdk\`. To try a
 newer driver, put its DLL next to `slopcap.exe`; a file there wins.

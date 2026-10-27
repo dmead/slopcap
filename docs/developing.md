@@ -127,10 +127,22 @@ once. The zips, the `.dmg` and the Windows exe can be downloaded from each run's
 ## Packages
 
 `tools/package.sh linux|windows|macos` makes `build/package/slopcap-<system>-<arch>.zip`: the program, a README for
-that system (`tools/package/README-*.md`) and the observer pages of `docs/`. The Linux zip carries the Qt libraries and
-plugins and the camera SDKs with a launcher, so it runs without Qt installed (it needs glibc 2.43, Ubuntu 26.04 or
-newer); build `linux-release` first. The Windows zip takes `build/windows-static/slopcap.exe` (with the camera drivers
-inside when it was built with `SLOPCAP_WIN_SDK_DLL_DIR`), the Mac zip `SlopCap.app` from `tools/macos-app.sh`.
+that system (`tools/package/README-*.md`), `LICENSE`, the third-party licenses in `licenses/` and the observer pages of
+`docs/`. The Linux zip carries the Qt libraries and plugins and the camera SDKs with a launcher, so it runs without Qt
+installed (it needs glibc 2.43, Ubuntu 26.04 or newer); build `linux-release` first. The Windows zip takes
+`build/windows-static/slopcap.exe` (with the camera drivers inside when it was built with `SLOPCAP_WIN_SDK_DLL_DIR`),
+the Mac zip `SlopCap.app` from `tools/macos-app.sh`.
+
+`licenses/` starts from `tools/package/licenses/` (its README says what each part is; the camera SDKs' texts are
+INDI's). Linux adds the Debian copyright file of every package the bundled files come from, found with `dpkg -S`.
+Windows adds what `docker/build.sh windows-static` leaves in `build/windows-static/licenses`: Qt's license texts and
+SBOM, the MinGW runtime's licenses and the IBM Plex fonts' (the image keeps them in `/opt/licenses`). The Mac zip
+doesn't carry Qt's yet.
+
+**Releases** are zips only, never a bare exe. Tag the commit, run `tools/ci-local.sh --windows-smoke TAG` with
+`SLOPCAP_WIN_SDK_DLL_DIR` set (so the exe has the camera drivers), push the tag, then
+`tools/release.sh TAG NOTES.md`: it publishes that run's zips, unchanged, on GitHub, and only when every job passed
+and each zip holds the README, `LICENSE` and `licenses/`.
 
 GitHub counts macOS minutes ten times and Windows minutes twice against a private repository's monthly allowance,
 which is why `ci.yml` only runs when started by hand and `tools/ci-local.sh` is the everyday check.

@@ -53,3 +53,8 @@ indiserver indi_myfocuserpro2_focus indi_lx200classic
 `docs/` has the whole guide: [a night at the telescope](docs/user-guide.md), [remote viewing](docs/remote-viewing.md),
 [files, settings and logs](docs/files-and-logs.md) and [troubleshooting](docs/troubleshooting.md). Recordings go to
 `~/Videos/SlopCap` unless you pick another folder; each night's log is in `~/.local/share/SlopCap/SlopCap/logs`.
+
+## License
+
+SlopCap is free software under the GNU General Public License, version 3 (`LICENSE`). The camera drivers, Qt and the
+other libraries in `lib/` and `plugins/` are under their own licenses, in `licenses/`.

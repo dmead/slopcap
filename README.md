@@ -139,12 +139,13 @@ Linux or Mac, can be either end.
 
 | | |
 |---|---|
-| **Windows** | `slopcap.exe`: one file, no installer, the camera drivers inside |
+| **Windows** | `slopcap-windows-x64.zip`: the program is one file, `slopcap.exe`, with no installer and the camera drivers inside |
 | **Linux** | `slopcap-linux-x64.zip`: unzip and run, Qt and the camera drivers included (Ubuntu 26.04 or newer) |
-| **macOS** | `SlopCap.app` (Apple silicon, macOS 15 or newer), with the camera drivers inside |
+| **macOS** | `slopcap-macos-arm64.zip`: `SlopCap.app` (Apple silicon, macOS 15 or newer), with the camera drivers inside |
 
-Builds are on the [Releases](../../releases) page, and each comes from one build command (see the
-[build notes](docs/developing.md)). A Windows exe built without the vendors' DLLs at hand looks for them beside it
+Builds are on the [Releases](../../releases) page, always as zips with a README for that system, the license and the
+third-party licenses, and each comes from one build command (see the [build notes](docs/developing.md)). A Windows exe
+built without the vendors' DLLs at hand looks for them beside it
 instead (SharpCap's folder has them all). [Installing SlopCap](docs/install.md) covers each system: first launch, camera
 drivers, the focuser and the mount.
 
@@ -160,3 +161,9 @@ drivers, the focuser and the mount.
 
 **Build notes** (building from source on each system, the tests, local CI, the packages, how the code is laid out):
 [docs/developing.md](docs/developing.md). The design and what's still to come: [PLAN.md](PLAN.md).
+
+## License
+
+SlopCap is free software under the [GNU General Public License, version 3](LICENSE). Copyright (C) 2026 Daniel Mead.
+The camera SDKs, Qt and the IBM Plex fonts that come with it are other people's work under their own licenses; each
+download has them in `licenses/` ([what's there](tools/package/licenses/README.md)).

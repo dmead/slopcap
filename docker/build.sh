@@ -86,7 +86,9 @@ presets=("$@")
 if needs_mingw "${presets[@]}"; then
     [ ${#presets[@]} -eq 1 ] || { echo "run windows-static on its own (it uses the Windows build image)" >&2; exit 2; }
     ensure_image slopcap-build-mingw "$MINGW_TAG" "$REPO/docker/Dockerfile.mingw" --build-arg "UBUNTU_IMAGE=$IMAGE"
-    exec "${run[@]}" "$MINGW_IMAGE" bash -c "set -e; cmake --preset windows-static; cmake --build --preset windows-static"
+    # beside the exe, the licenses of the image's parts built into it (Qt, the compiler runtime, the fonts), for the zip
+    exec "${run[@]}" "$MINGW_IMAGE" bash -c "set -e; cmake --preset windows-static; cmake --build --preset windows-static
+        rm -rf build/windows-static/licenses; cp -r /opt/licenses build/windows-static/licenses"
 fi
 # ThreadSanitizer turns off address-space randomisation at startup via personality(2), which Docker's default seccomp
 # profile blocks. Relax seccomp for TSan runs only (a local, short-lived build container).

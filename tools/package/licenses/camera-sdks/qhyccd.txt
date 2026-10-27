@@ -1,0 +1,5 @@
+QHYCCD camera SDK (libqhyccd, qhyccd.dll)
+Copyright (C) QHYCCD. All rights reserved.
+
+QHYCCD publishes no license text with its SDK. SlopCap ships it as INDI distributes it (indi-3rdparty, libqhy) and, on
+Windows, QHYCCD's own DLL. It is QHYCCD's software and is not covered by SlopCap's license.
