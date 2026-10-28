@@ -44,7 +44,7 @@ def labelled(items):
 def load_serinfo(files):
     rows = {}
     for machine, path in files.items():
-        with open(path, newline="") as f:
+        with open(path, newline="", encoding="utf-8-sig") as f:
             for r in csv.DictReader(f):
                 rows[(machine, os.path.basename(r["file"].replace("\\", "/")))] = r
     return rows
@@ -53,7 +53,7 @@ def load_serinfo(files):
 def load_perfmon(files):
     samples = defaultdict(list)   # machine -> [(utc, name, cpu_pct, cores, rss_mb, write_mb, sys_pct, pid)]
     for machine, path in files.items():
-        with open(path, newline="") as f:
+        with open(path, newline="", encoding="utf-8-sig") as f:
             for r in csv.DictReader(f):
                 samples[machine].append((when(r["utc"]), r["name"], float(r["cpu_pct"]), float(r["cpu_cores"]),
                                          float(r["rss_mb"]), float(r["write_mb"]), float(r["sys_cpu_pct"]), r["pid"]))
@@ -122,7 +122,8 @@ def main():
     os.makedirs(a.out, exist_ok=True)
 
     results = []
-    with open(a.runs, newline="") as f:
+    # utf-8-sig: Windows tools often write a byte-order mark
+    with open(a.runs, newline="", encoding="utf-8-sig") as f:
         for r in csv.DictReader(f):
             if not r.get("file"):
                 continue

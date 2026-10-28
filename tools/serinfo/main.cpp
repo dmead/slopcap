@@ -29,7 +29,12 @@ std::string iso(std::chrono::system_clock::time_point tp) {
 std::string isoTicks(int64_t ticks) { return ticks > 0 ? iso(ser::fromTicks(ticks)) : ""; }
 
 std::string modified(const std::filesystem::path& p) {
-    return iso(std::chrono::file_clock::to_sys(std::filesystem::last_write_time(p)));
+    const auto t = std::filesystem::last_write_time(p);
+#if defined(__cpp_lib_chrono) && __cpp_lib_chrono >= 201907L
+    return iso(std::chrono::clock_cast<std::chrono::system_clock>(t));   // MSVC's file_clock has no to_sys
+#else
+    return iso(std::chrono::file_clock::to_sys(t));
+#endif
 }
 
 std::string csvField(const std::string& s) {
