@@ -13,7 +13,8 @@ laptop by a projector, on a desktop indoors. SlopCap can share its camera with o
 On the computer with the camera: click **⇄ Remote** at the top and choose **Share this camera on the network**.
 A badge over the picture says **SHARED WITH …** and lists who's watching.
 
-From a command line: `slopcap --camera qhy --serve`.
+From a command line: `slopcap --camera qhy --serve`. `--listen ADDRESS` instead of `--serve` shares on that one
+network address only.
 
 ## Watch a camera
 

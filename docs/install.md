@@ -5,18 +5,18 @@ doesn't need one to record: without it the preview stays blank and says why, and
 
 ## Windows
 
-SlopCap for Windows comes as `slopcap-windows-x64.zip`, and the program in it is a single file, `slopcap.exe`. There
-is no installer and nothing else it needs: Qt is built into it, and so are the camera drivers (ZWO, QHY, Player One,
-ToupTek, MallinCam) when it was built with them, as the releases are. An exe built without them looks for the vendors'
-DLLs next to `slopcap.exe`: copy `ASICamera2.dll`, `qhyccd.dll`, `PlayerOneCamera.dll`, `toupcam.dll` or
-`mallincam.dll` there, from SharpCap's folder for example (SharpCap calls the last two `ToupCam.dll` and
-`MallinCam.dll`; either name works).
+SlopCap for Windows (64-bit Windows 10 or 11) comes as `slopcap-windows-x64.zip`, and the program in it is a single
+file, `slopcap.exe`. There is no installer and nothing else to install: Qt and the camera drivers (ZWO, QHY, Player
+One, ToupTek, MallinCam) are built into it.
 
 1. Unzip it anywhere, for example to `C:\Users\<you>\slopcap\`.
-2. Double-click `slopcap.exe`.
+2. Double-click `slopcap.exe`. The first time, Windows may say it protected your PC from an unknown app (SlopCap isn't
+   signed): choose **More info**, then **Run anyway**.
 
 The first time a camera is used, SlopCap unpacks the camera drivers to `%LOCALAPPDATA%\SlopCap\SlopCap\sdk\`. To try a
-newer driver, put its DLL next to `slopcap.exe`; a file there wins.
+newer driver, put its DLL next to `slopcap.exe` (`ASICamera2.dll`, `qhyccd.dll`, `PlayerOneCamera.dll`, `toupcam.dll`
+or `mallincam.dll`); a file there wins. An exe you build yourself without the drivers looks for them there too:
+SharpCap's folder has them all (it calls the last two `ToupCam.dll` and `MallinCam.dll`; either name works).
 
 The camera itself still needs the vendor's USB driver (the one SharpCap and FireCapture use too). If the camera works
 in SharpCap, it works in SlopCap.
@@ -58,24 +58,28 @@ focuser's and mount's serial ports.
 
 ## macOS
 
-SlopCap for Mac is `SlopCap.app`, usually inside `SlopCap.dmg`.
+SlopCap for Mac comes as `slopcap-macos-arm64.zip`, with `SlopCap.app` inside. It needs a Mac with Apple silicon on
+**macOS 27 or newer**: the app runs on the macOS version it was built on and newer, and the releases are built on
+macOS 27.
 
-1. Open the `.dmg` and drag **SlopCap** onto **Applications**.
+1. Unzip it (double-click the zip) and drag **SlopCap.app** onto **Applications**.
 2. The first time, right-click SlopCap in Applications and choose **Open**, then **Open** again. (SlopCap isn't
    notarized by Apple, so a plain double-click is refused the first time. *System Settings → Privacy & Security →
    Open Anyway* does the same.)
 3. The first time SlopCap shares a camera, watches one, or talks to an INDI server on another computer, macOS asks
    whether it may use the local network. Choose **Allow**.
 
-The app needs the macOS version it was built on, or newer.
+**Cameras:** the ZWO, QHY, Player One, ToupTek and MallinCam drivers are inside the app (none has been tried with a
+real camera on a Mac yet). QHY cameras on a Mac start up without their firmware: SlopCap sends it when it starts, and
+the camera then reconnects by itself, which takes a few seconds. Wait a moment after launching before you open the
+camera list.
 
-**Cameras:** ZWO and QHY drivers are inside the app, and Player One, ToupTek and MallinCam drivers when it was built
-with them (not yet tried on a Mac). QHY cameras on a Mac start up without their firmware: SlopCap
-sends it when it starts, and the camera then reconnects by itself, which takes a few seconds. Wait a moment after
-launching before you open the camera list.
+**The mount** needs nothing else: SlopCap drives it itself over its USB serial port (`/dev/cu.…`) or the network (see
+[the mount](user-guide.md#8-the-mount-optional) in the user guide), or through INDI like the focuser.
 
-**Focuser and mount:** there's no ready-made INDI package for macOS, so INDI is built from source once with
-`tools/macos-indi.sh` from the SlopCap source (it installs into `~/indi`). Then, for a Gemini EAF:
+**The focuser** goes through INDI. There's no ready-made INDI package for macOS, so INDI is built from source once
+with `tools/macos-indi.sh` from the SlopCap source (it installs into `~/indi`), or SlopCap uses an INDI server on
+another computer (Settings → INDI server). For a Gemini EAF on this Mac:
 
 ```bash
 PATH=~/indi/bin:$PATH indiserver indi_myfocuserpro2_focus

@@ -144,10 +144,8 @@ Linux or Mac, can be either end.
 | **macOS** | `slopcap-macos-arm64.zip`: `SlopCap.app` (Apple silicon, macOS 27 or newer), with the camera drivers inside |
 
 Builds are on the [Releases](../../releases) page, always as zips with a README for that system, the license and the
-third-party licenses, and each comes from one build command (see the [build notes](docs/developing.md)). A Windows exe
-built without the vendors' DLLs at hand looks for them beside it
-instead (SharpCap's folder has them all). [Installing SlopCap](docs/install.md) covers each system: first launch, camera
-drivers, the focuser and the mount.
+third-party licenses. [Installing SlopCap](docs/install.md) covers each system: first launch, camera drivers, the
+focuser and the mount.
 
 ## Documentation
 

@@ -8,7 +8,7 @@ ready for it: collimation, focus, and knowing what you are pointed at. It runs o
 | Page | Read it when |
 |---|---|
 | [Installing SlopCap](install.md) | you want SlopCap on a computer (Windows, Linux or Mac) |
-| [A night at the telescope](user-guide.md) | you're about to observe: the screen, the camera, collimating, focusing, recording |
+| [A night at the telescope](user-guide.md) | you're about to observe: the screen, the camera, collimating, focusing, the ADC, recording, the mount |
 | [Remote viewing](remote-viewing.md) | you want other people to watch the telescope's camera on another computer or a projector |
 | [Files, settings and logs](files-and-logs.md) | you're looking for your recordings, or want to know what happened during a night |
 | [Troubleshooting](troubleshooting.md) | something doesn't work |
@@ -26,6 +26,6 @@ ready for it: collimation, focus, and knowing what you are pointed at. It runs o
 1. Plug in the camera and start SlopCap. Click the camera name at the top right and pick your camera.
 2. Set the exposure and gain on the left until the planet looks right and the histogram shows little or no clipping.
 3. Collimate on a star (**Collimate** tab), then focus (**Focus** tab: a focus sweep finds the best position for each
-   colour).
+   colour). With an ADC, line up red and blue on the **ADC** tab.
 4. Press **Record** (Ctrl+R). Each recording is a `.ser` file named after the time and the planet, ready for
    AutoStakkert!, PIPP or WinJUPOS, with a `.txt` of the settings next to it.

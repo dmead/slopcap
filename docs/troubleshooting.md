@@ -7,8 +7,8 @@ When something goes wrong, the [session log](files-and-logs.md#session-logs) usu
 - **Is it in use?** Only one program can have a camera open. Close SharpCap, FireCapture, NINA or another SlopCap
   first. A camera that's busy may be listed but fail to open with "in use by another program?".
 - **"ZWO support not built"** (or QHY, Player One, ToupTek, MallinCam): this copy of SlopCap was built without that
-  vendor's driver (see [Building and testing](developing.md)). The released Windows `slopcap.exe` and Linux zip include
-  all five.
+  vendor's driver (see [Building and testing](developing.md)). The released downloads for Windows, Linux and Mac
+  include all five.
 - **"ZWO SDK not found (ASICamera2.dll)"** (Windows; or `qhyccd.dll`, `PlayerOneCamera.dll`, `toupcam.dll`,
   `mallincam.dll`): the driver couldn't be unpacked or loaded. Put that DLL next to `slopcap.exe`; SharpCap's program
   folder has copies (its `ToupCam.dll` and `MallinCam.dll` are the last two).
@@ -36,7 +36,9 @@ There are two kinds, and the session log's stats lines (`dropped camera … disk
 - **Dropped by the disk:** the disk didn't keep up. Record to a faster disk (an internal SSD), use a smaller ROI or
   8-bit, or close other programs that use the disk. The session log's stats lines show the disk speed.
 
-## The focuser (or mount) won't connect
+## The focuser or mount won't connect
+
+Through INDI:
 
 - The Focuser panel needs an **INDI server** running with the focuser's driver (for a Gemini EAF,
   `indi_myfocuserpro2_focus`). Check Settings → INDI server (normally `localhost:7624`).
@@ -46,6 +48,18 @@ There are two kinds, and the session log's stats lines (`dropped camera … disk
   (see [Installing SlopCap](install.md)). On Linux, the `/dev/serial/by-id/…` name of the port never changes, unlike
   `/dev/ttyUSB0`.
 - **Linux:** permission denied on the port means you're not in the `dialout` group.
+
+A mount on SlopCap's own driver (Settings → Mount, or `--mount`):
+
+- The session log says why, on a `mount: failed:` line. *Access is denied* (Windows) or *Device or resource busy*
+  means another program has the port: close NINA, PHD2, an INDI driver or anything else using it. Two programs
+  talking to one mount over one serial port confuse it, even where the system lets both open it.
+- `slopcap --list-mounts` lists the serial ports this computer has; the mount's USB adapter should appear and
+  disappear as you plug and unplug it.
+- A port that opens but never answers is usually the wrong speed (add `@9600` or the mount's own, as in
+  `lx200:COM3@9600`) or the wrong kind of mount in the spec. For an LX200 that's recognised wrongly, name it:
+  `lx200-classic`, `lx200-meade` or `lx200-onstep`.
+- **Linux:** permission denied means you're not in the `dialout` group, as above.
 
 ## The automatic target says "undecided"
 
@@ -67,3 +81,5 @@ from the list yourself.
 
 SlopCap isn't notarized by Apple. Right-click it in Applications, choose **Open**, then **Open** again; or *System
 Settings → Privacy & Security → Open Anyway*. You only need to do this once.
+
+If it won't start at all, check the macOS version: the Mac download needs macOS 27 or newer.

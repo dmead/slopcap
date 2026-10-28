@@ -86,8 +86,10 @@ maintained; the MinGW static build above is the one that's used.
 
 **Screenshots for the docs:** the README's Focus tab picture comes from a hidden test that sweeps INDI's focuser
 simulator with a test camera whose colours focus apart: `SLOPCAP_DOCS_DIR=DIR slopcap-app-tests "[docs]"` (under
-Xvfb in the build image) writes `DIR/focus.png` (the README's `docs/images/focus-sweep.png`), and `DIR/capture-sweep.png`,
-the Capture tab halfway through with the curves over the preview.
+Xvfb in the build image) writes `DIR/focus.png` (the README's `docs/images/focus-sweep.png`), and
+`DIR/capture-sweep.png`, the Capture tab halfway through with the curves over the preview. The Capture, ADC and
+full-view pictures are a real 2022 Jupiter recording replayed as the camera (`--camera sim:FILE.ser`); the recording
+isn't in the repository.
 
 **Coverage:** `tools/coverage.sh [MIN]` builds the `linux-coverage` preset (gcov) in the Docker image, runs every
 test and prints line coverage of `src/` per file and folder (`build/linux-coverage/coverage.txt`; it exits 1 below
@@ -103,12 +105,12 @@ Linux and Windows jobs below on this machine, in Docker, for a commit (default `
 tested). It checks the commit out into its own worktree, `build/ci/src`, and keeps that worktree's build folders, so
 only the first run builds everything. Each job is logged under `build/ci/runs/<time>-<commit>/` with a `summary.txt`;
 the script exits 1 if any job failed. `--jobs "linux-debug coverage"` runs a subset; `--windows-smoke` also starts the
-Windows exe on this desktop as the windows-smoke job does (a window opens for about ten seconds). `--upload DEST` copies
-the zips and the summary to an [rclone](https://rclone.org) destination (for example `drive:slopcap-builds`) after a run
-in which every job passed; settings for one machine, such as a default destination, go in `build/ci/settings.sh`, which
-git ignores (see the script's header). The Linux zip's start
-in a bare Ubuntu container needs an `ubuntu:26.04` image (`docker pull ubuntu:26.04`); without one it is skipped. The
-macos job needs a Mac: follow [Natively](#natively) there and run `ctest --preset macos-debug`.
+Windows exe on this desktop as the windows-smoke job does (a window opens for about ten seconds). `--upload DEST`
+copies the zips and the summary to an [rclone](https://rclone.org) destination (for example `drive:slopcap-builds`)
+after a run in which every job passed; settings for one machine, such as a default destination, go in
+`build/ci/settings.sh`, which git ignores (see the script's header). The Linux zip's start in a bare Ubuntu container
+needs an `ubuntu:26.04` image (`docker pull ubuntu:26.04`); without one it is skipped. The macos job needs a Mac:
+follow [Natively](#natively) there and run `ctest --preset macos-debug`.
 
 **On GitHub:** `.github/workflows/ci.yml` runs the same jobs, plus macOS, only when started by hand (*Actions → ci →
 Run workflow*), because each run costs a private repository's minutes:
@@ -141,8 +143,9 @@ Homebrew Qt's SBOM, the license files of the Homebrew package behind every other
 license texts and the fonts' license, which Homebrew doesn't have: `SLOPCAP_MAC_LICENSES` names a folder laid out like
 `build/windows-static/licenses` (copy that one to the Mac), and the zip isn't made without it.
 
-**Releases** are zips only, never a bare exe. Tag the commit, run `tools/ci-local.sh --windows-smoke TAG` with
-`SLOPCAP_WIN_SDK_DLL_DIR` set (so the exe has the camera drivers), push the tag, then
+**Releases** are zips only, never a bare exe. Raise the version in `CMakeLists.txt` (the Mac app shows it), tag the
+commit, run `tools/ci-local.sh --windows-smoke TAG` with `SLOPCAP_WIN_SDK_DLL_DIR` set (so the exe has the camera
+drivers), push the commit and the tag, then
 `tools/release.sh TAG NOTES.md`: it publishes that run's zips, unchanged, on GitHub, and only when every job passed
 and each zip holds the README, `LICENSE` and `licenses/`. A Mac zip goes up with them when it was made on a Mac from
 the same commit after `macos-debug`'s tests passed there, and added to the run: the zip in the run's folder, and in its
@@ -163,11 +166,10 @@ Built next to `slopcap` (`build/<preset>/`):
 | `slopcap-diag [--png OUT/] FILE.ser…` | optical diagnostics from planetary recordings: stacks the best frames and reports dispersion, limb sharpness per colour and side, halo and jitter |
 | `slopcap-focusbench FILE.ser [frames] [metric]` | times the focus scorer on a recording |
 
-`slopcap` itself takes `--camera SPEC` (`asi[:N]`, `qhy[:N]`, `playerone[:N]`, `touptek[:N]`, `mallincam[:N]`,
-`sim:FILE.ser`, `sim-loop:FILE.ser`), `--out`, `--record`,
-`--tab`, `--serve` / `--listen ADDRESS` / `--connect HOST`, `--fullscreen`, `--set NAME=VALUE[@SECONDS]`, `--snapshot
-SECONDS:FILE`, `--screenshot FILE --quit-after SECONDS` and `--settings DIR` (an INI file instead of the user's
-settings): handy for scripted screenshots and smoke tests. `slopcap --help` lists them all.
+`slopcap` itself takes the options in [the user guide](user-guide.md#starting-slopcap-from-a-command-line), and for
+scripted screenshots and smoke tests also `--listen ADDRESS`, `--set NAME=VALUE[@SECONDS]`,
+`--snapshot SECONDS:FILE`, `--screenshot FILE --quit-after SECONDS` and `--settings DIR` (an INI file instead of the
+user's settings). `slopcap --help` lists them all.
 
 ## Platform notes
 
@@ -176,21 +178,24 @@ image instead of building it, and an environment that changed is pushed when it'
 --push` to retry). `.devcontainer/` opens the same environment in VS Code. The checkout is mounted at the same path as
 on the host, so `build/<preset>/` and compile errors read the same from either side.
 
-**Windows.** `windows-static` builds in its own image (`docker/Dockerfile.mingw`: Fedora's MinGW-w64 GCC and a statically
-built Qt 6). With `SLOPCAP_WIN_SDK_DLL_DIR`, the camera SDK DLLs found there are embedded in the exe; on first use
-they're written to `%LOCALAPPDATA%\SlopCap\SlopCap\sdk\<hash>\` and loaded from there (a DLL placed next to the exe
-wins, to try a newer SDK). The SDKs are delay-loaded, so without them SlopCap still starts and the camera menu says
-which is missing. Settings live in the registry (`HKCU\Software\SlopCap`). The preview needs OpenGL 3.3; without it
-(Windows' own OpenGL 1.1, some Remote Desktop sessions) capture still works and the preview says why it's blank. The
-focuser is INDI-only for now; the mount has SlopCap's own drivers as well (no ASCOM yet).
+**Windows.** `windows-static` builds in its own image (`docker/Dockerfile.mingw`: Fedora's MinGW-w64 GCC and a
+statically built Qt 6). With `SLOPCAP_WIN_SDK_DLL_DIR`, the camera SDK DLLs found there are embedded in the exe; on
+first use they're written to `%LOCALAPPDATA%\SlopCap\SlopCap\sdk\<hash>\` and loaded from there (a DLL placed next to
+the exe wins, to try a newer SDK). The SDKs are delay-loaded, so without them SlopCap still starts and the camera menu
+says which is missing. Settings live in the registry (`HKCU\Software\SlopCap\SlopCap`). The preview needs OpenGL 3.3;
+without it (Windows' own OpenGL 1.1, some Remote Desktop sessions) capture still works and the preview says why it's
+blank. The focuser is INDI-only for now; the mount has SlopCap's own drivers as well (no ASCOM yet).
 
 **macOS.** `tools/macos-sdks.sh` takes the ZWO (1.41), QHY (26.7.21), Player One (3.10.1), ToupTek and MallinCam
-(60.32226) SDKs from INDI's indi-3rdparty repository, the same source as the Linux packages, every file hash-checked; the build copies them and Homebrew's libusb into
-SlopCap.app. QHY cameras start without firmware on a Mac: SlopCap uploads it from the SDK in the background at launch
-and the camera reappears on USB a few seconds later. Homebrew has no INDI, so `tools/macos-indi.sh` builds indiserver
-and the drivers into `~/indi`. Recording uses `F_NOCACHE` where Linux uses `O_DIRECT`; App Nap is off for SlopCap so
-capture and sharing keep full speed in the background. `-DSLOPCAP_FONT_DIR=<folder>` embeds IBM Plex from wherever its
-TTFs are. The app is signed ad hoc, not notarized, and runs on the macOS version Homebrew's Qt was built for and newer.
+(60.32226) SDKs from INDI's indi-3rdparty repository, the same source as the Linux packages, every file hash-checked;
+the build copies them and Homebrew's libusb into SlopCap.app. QHY cameras start without firmware on a Mac: SlopCap
+uploads it from the SDK in the background at launch and the camera reappears on USB a few seconds later. Homebrew has
+no INDI, so `tools/macos-indi.sh` builds indiserver and the drivers into `~/indi`. Recording uses `F_NOCACHE` where
+Linux uses `O_DIRECT`; App Nap is off for SlopCap so capture and sharing keep full speed in the background.
+`-DSLOPCAP_FONT_DIR=<folder>` embeds IBM Plex from wherever its TTFs are. The app is signed ad hoc, not notarized, and
+runs on the macOS version Homebrew's Qt and libraries were built for and newer: Homebrew builds them for the macOS
+they're installed on, so an app made on macOS 27 needs 27. Reaching older versions would take Qt built with a lower
+deployment target.
 
 **Remote viewing.** The protocol is described at the top of `src/net/protocol.hpp`. `tools/remote-test.sh FILE.ser`
 runs it end to end in three containers on one Docker network: an observatory server, a desktop viewer and a projector

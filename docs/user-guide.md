@@ -167,8 +167,11 @@ of the chosen length to nudge the planet back into the ROI; **Stop** halts every
   | Sky-Watcher through the SynScan app (phone, tablet or PC) | `synscan-app` (this computer) or `synscan-app:udp://HOST` |
   | A simulated mount, to try things out | `sim` |
 
-  Serial ports take `@BAUD` when the mount isn't at its usual speed (`lx200:COM3@19200`). `slopcap --list-mounts`
-  prints these and the computer's serial ports. Mounts without guide pulses of their own (the LX200 Classic, the
+  On a Mac the serial port is `/dev/cu.usbserial-…` (or similar). Serial ports take `@BAUD` when the mount isn't at
+  its usual speed (`lx200:COM3@19200`). `lx200` asks the mount which kind it is; `lx200-classic`, `lx200-meade` or
+  `lx200-onstep` skip the question. `slopcap --list-mounts` prints the specs and the computer's serial ports. The port
+  belongs to SlopCap while it's connected, so close any other program using it (an INDI server, by contrast, can be
+  shared). Mounts without guide pulses of their own (the LX200 Classic, the
   hand controllers) get timed slow moves instead. A Sky-Watcher on its own motors needs Settings → Site to know where
   it points, starts from its home position (pointing at the pole, counterweights down), and a sync on a known object
   puts it right. These drivers are written from the makers' published protocols and tested against simulations of
@@ -203,7 +206,12 @@ Everything is in the window, but SlopCap can also be started ready to go, which 
 | `--out DIR` | recording folder |
 | `--record` | start recording as soon as the camera is connected |
 | `--focuser HOST:PORT` | connect the focuser through this INDI server |
+| `--sweep` | with `--focuser`: run a focus sweep once the focuser is ready (`--sweep-range STEPS`, `--sweep-step STEPS`, `--sweep-frames N`) |
+| `--mount SPEC` | drive the mount with SlopCap's own driver ([section 8](#8-the-mount-optional)) |
+| `--list-mounts` | print the mount specs and this computer's serial ports, then quit |
 | `--tab capture` / `focus` / `collimate` / `adc` | open on this tab |
 | `--serve`, `--connect HOST` / `auto` | share the camera, or watch another SlopCap ([remote viewing](remote-viewing.md)) |
 | `--fullscreen` | start in full view |
 | `--window WxH` | window size |
+
+`slopcap --help` lists every option, including the ones for scripts and tests.

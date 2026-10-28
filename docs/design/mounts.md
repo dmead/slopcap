@@ -2,10 +2,11 @@
 
 Design spec, 2026-10-22.
 
-**Status, 2026-10-23: the built-in drivers are started** (`src/mounts/`, tests in `tests/test_mounts.cpp` against
+**Status, 2026-10-27: the built-in drivers are built and released (v0.1.1)**, not yet tried on a real mount, and
+there's no iOptron driver yet (`src/mounts/`, tests in `tests/test_mounts.cpp` against
 `tests/fakes/fake_mounts.*`). Dan asked for "as much compatibility for various mounts (skywatcher, synscan, onstep,
 lx-200 protocol) into as small of an executable as possible", which settles two of the §9 questions: serial is our
-own Win32 / termios class, not Qt SerialPort (9.2), and Sky-Watcher direct is in (9.3). Built so far:
+own Win32 / termios class, not Qt SerialPort (9.2), and Sky-Watcher direct is in (9.3). Built:
 
 - `ITransport` (serial, TCP, UDP), `CommandChannel`, `IMountDriver`, `MountWorker` (thread, queue with Stop first,
   polling, emulated pulses, 10 s move deadman, J2000 / JNow, reconnect every 10 s), specs and `--mount` /

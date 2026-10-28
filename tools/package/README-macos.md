@@ -27,15 +27,19 @@ seconds, so wait a moment after launching before you open the camera list.
 
 ## Focuser and mount
 
-They go through INDI. There's no ready-made INDI package for macOS: build it once with `tools/macos-indi.sh` from the
-SlopCap source, or point SlopCap at an INDI server on another computer (**Settings**, the gear at the top right). See
-[Installing SlopCap](docs/install.md) for the Gemini EAF focuser.
+SlopCap drives the common mounts itself, over their USB serial port (`/dev/cu.…`) or the network: LX200 and OnStep,
+Celestron NexStar, Sky-Watcher SynScan and direct, and the SynScan app (see `docs/user-guide.md`, section 8).
+
+The focuser, and any other mount, go through INDI. There's no ready-made INDI package for macOS: build it once with
+`tools/macos-indi.sh` from the SlopCap source, or point SlopCap at an INDI server on another computer (**Settings**,
+the gear at the top right). See [Installing SlopCap](docs/install.md) for the Gemini EAF focuser.
 
 ## More
 
 `docs/` has the whole guide: [a night at the telescope](docs/user-guide.md), [remote viewing](docs/remote-viewing.md),
 [files, settings and logs](docs/files-and-logs.md) and [troubleshooting](docs/troubleshooting.md). Recordings go to
-`Movies/SlopCap` unless you pick another folder; each night's log is in `~/Library/Application Support/SlopCap/SlopCap/logs`.
+`~/Movies/SlopCap` unless you pick another folder; each night's log is in
+`~/Library/Application Support/SlopCap/SlopCap/logs`.
 
 ## License
 

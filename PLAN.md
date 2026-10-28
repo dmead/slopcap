@@ -470,7 +470,7 @@ M2 status (2026-10-16):
       The "neutral colour" rule had ruled Mars out. Colour now only separates the (blue) ice giants. On all 25
       recordings: 5 correct (4 Saturns, the crescent), 20 undecided with the truth among the candidates (Mars and
       Jupiter both read "Mars or Jupiter" without the focal length), 0 wrong.
-  - **Session log** (README, "At the telescope"), one file per run, flushed line by line. It is also where to look
+  - **Session log** (docs/files-and-logs.md), one file per run, flushed line by line. It is also where to look
     first if the Gemini EAF won't connect: INDI driver messages, including the `message` attribute on property
     updates (where drivers put "can't open port"), and Alerts are logged.
   - **Laptop (2026-10-16):** SlopCap is built natively at ~/projects/slopcap/build/linux-release on the
@@ -481,7 +481,7 @@ M2 status (2026-10-16):
     target judges the sky (the Moon's phase) as it was. The Target combo's drop-down arrow is drawn again: the theme had
     styled `::drop-down` away. Installs from before Auto keep their saved Target (e.g. "Saturn"); choose Auto.
   - **Remote viewing (2026-10-20)**, for outreach nights: one SlopCap shares its camera, others watch and steer it
-    (README, "Remote viewing"; `src/net/`). Own TCP protocol with JSON control messages and UDP broadcast discovery,
+    (docs/remote-viewing.md; `src/net/`). Own TCP protocol with JSON control messages and UDP broadcast discovery,
     not the REST API of §7: it needs a low-latency frame stream with acks for flow control. The stream stays raw, so
     the client's preview, histograms and analysis run unchanged; `RemoteCamera` is an `ICamera`. Two codecs: lossless
     (per CFA plane, the JPEG-LS median edge predictor, zigzagged residuals split into low / high byte blocks, padding
@@ -509,16 +509,20 @@ M2 status (2026-10-16):
   - Real-camera check of the GUI **on the laptop** (cameras, EAF and LX200 plugged into it), before the Saturn night.
     Check that the LX200 driver takes guide pulses (the classic LX200 has no pulse command; INDI then times moves at
     the guide rate) and which way N / E move the target on screen.
-  - Mount next: hold-to-move at a slew rate, `/v1/mount` in the REST API, and the Align mode's drift measurement.
-  - Settings → optics: enter the focal ratio and the EAF's µm per step, so the sweep shows the critical focus zone.
+  - Mount next: SlopCap's own drivers are built (docs/design/mounts.md) but untried on a real mount; still to do:
+    hold-to-move at a slew rate, `/v1/mount` in the REST API, and the Align mode's drift measurement.
+  - ~~Settings → optics: enter the focal ratio and the EAF's µm per step, so the sweep shows the critical focus
+    zone.~~ Done.
   - Upload through a PBO if texture upload shows up in profiles.
   - ASCOM focuser on Windows (INDI only today).
   - Align (drift guide outline) and Sequence modes from the design.
-  - More camera brands: specced in §5b, **parked**.
+  - More camera brands: Player One, ToupTek and MallinCam done 2026-10-27 (§5b), untried on real cameras; SVBony next.
   - macOS: the GUI on a real screen (only checked over SSH so far: tests, a replay recorded through `F_NOCACHE`, a
     server and viewer on loopback, an offscreen screenshot; the GL preview needs the Mac's OpenGL 4.1 core profile);
-    a real ZWO / QHY camera and the Gemini EAF on a Mac (SDKs and INDI build and load, but no hardware has been
-    plugged into one; watch the QHY firmware upload and CloseQHYCCD, which PHD2 once found crashing on macOS); an app icon.
+    a real camera and the Gemini EAF on a Mac (all five SDKs and INDI build and load, but no hardware has been
+    plugged into one; watch the QHY firmware upload and CloseQHYCCD, which PHD2 once found crashing on macOS); an app
+    icon; a Mac build for macOS older than the one it's built on (Homebrew's Qt can't: Qt built with a lower
+    deployment target).
 
 **Saturn night checklist (laptop):**
 1. Plug the camera and the Gemini EAF into the laptop. `systemctl --user status indiserver` should show

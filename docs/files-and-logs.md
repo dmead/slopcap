@@ -35,7 +35,8 @@ a night:
 | Linux | `~/.local/share/SlopCap/SlopCap/logs/` |
 | macOS | `~/Library/Application Support/SlopCap/SlopCap/logs/` |
 
-One file per run, named by the start time in UTC (`slopcap-2026-10-17-020512.log`). It records:
+One file per run, named by the start time in UTC (`slopcap-2026-10-17-020512.log`); SlopCap keeps the newest 100 and
+deletes older ones. It records:
 
 - the SlopCap version, the computer, and the settings at start;
 - the camera and its controls, and every change to them;

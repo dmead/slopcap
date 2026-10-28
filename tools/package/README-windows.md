@@ -22,11 +22,10 @@ choose a `.ser` file: it plays as if it were a camera.
 
 ## Cameras
 
-The ZWO, QHY, Player One, ToupTek and MallinCam camera drivers are built into `slopcap.exe` when it was made with them
-(the camera menu says "SDK not found" for a brand it doesn't have). The camera itself still needs the vendor's USB
-driver, the one SharpCap and FireCapture use too: if the camera works in SharpCap, it works in SlopCap. To try a newer
-driver, put its DLL (`ASICamera2.dll`, `qhyccd.dll`, `PlayerOneCamera.dll`, `toupcam.dll` or `mallincam.dll`) next to
-`slopcap.exe`.
+The ZWO, QHY, Player One, ToupTek and MallinCam camera drivers are built into `slopcap.exe`. The camera itself still
+needs the vendor's USB driver, the one SharpCap and FireCapture use too: if the camera works in SharpCap, it works in
+SlopCap. To try a newer driver, put its DLL (`ASICamera2.dll`, `qhyccd.dll`, `PlayerOneCamera.dll`, `toupcam.dll` or
+`mallincam.dll`) next to `slopcap.exe`; a file there wins.
 
 ## Focuser and mount
 
