@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstring>
 #include <format>
 
@@ -85,6 +86,34 @@ int64_t toTicks(std::chrono::system_clock::time_point t) {
 std::chrono::system_clock::time_point fromTicks(int64_t ticks) {
     std::chrono::duration<int64_t, std::ratio<1, kTicksPerSecond>> d(ticks - kUnixEpochTicks);
     return std::chrono::system_clock::time_point(std::chrono::duration_cast<std::chrono::system_clock::duration>(d));
+}
+
+Timing timing(std::span<const int64_t> utcTicks) {
+    Timing t;
+    t.frames = static_cast<int64_t>(utcTicks.size());
+    if (utcTicks.size() < 2) return t;
+    std::vector<int64_t> d(utcTicks.size() - 1);
+    for (std::size_t i = 1; i < utcTicks.size(); ++i) d[i - 1] = utcTicks[i] - utcTicks[i - 1];
+    const double span = static_cast<double>(utcTicks.back() - utcTicks.front());
+    t.spanSeconds = span / kTicksPerSecond;
+    if (span > 0) t.fps = static_cast<double>(d.size()) * kTicksPerSecond / span;
+    t.backwards = std::ranges::count_if(d, [](int64_t x) { return x <= 0; });
+    t.maxGapMs = static_cast<double>(std::ranges::max(d)) / 1e4;
+    std::vector<int64_t> sorted = d;
+    const auto p99 = sorted.begin() + static_cast<std::ptrdiff_t>((sorted.size() - 1) * 99 / 100);
+    std::ranges::nth_element(sorted, p99);
+    t.p99Ms = static_cast<double>(*p99) / 1e4;
+
+    // median frame period over windows of m intervals (about ten windows or more)
+    const std::size_t m = std::clamp<std::size_t>(d.size() / 10, 1, 100);
+    std::vector<double> periods;
+    for (std::size_t i = 0; i + m < utcTicks.size(); i += m) periods.push_back(static_cast<double>(utcTicks[i + m] - utcTicks[i]) / static_cast<double>(m));
+    const auto mid = periods.begin() + static_cast<std::ptrdiff_t>(periods.size() / 2);
+    std::ranges::nth_element(periods, mid);
+    if (*mid <= 0) return t;
+    t.periodMs = *mid / 1e4;
+    t.missing = std::max<int64_t>(0, std::llround(span / *mid) + 1 - t.frames);
+    return t;
 }
 
 std::size_t Header::frameBytes() const {

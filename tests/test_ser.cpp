@@ -84,6 +84,54 @@ TEST_CASE(".NET ticks convert to and from UTC") {
     CHECK(ser::toTicks(std::chrono::system_clock::time_point{}) == ser::kUnixEpochTicks);
 }
 
+TEST_CASE("SER timing gives the frame rate and the frames lost") {
+    const int64_t t0 = 639270383770360000, ms = ser::kTicksPerSecond / 1000;
+    std::vector<int64_t> ts;
+    for (int i = 0; i < 101; ++i) ts.push_back(t0 + i * 10 * ms);   // 100 fps, 1 s
+    auto t = ser::timing(ts);
+    CHECK(t.frames == 101);
+    CHECK(t.spanSeconds == 1.0);
+    CHECK(t.fps == 100.0);
+    CHECK(t.periodMs == 10.0);
+    CHECK(t.missing == 0);
+    CHECK(t.p99Ms == 10.0);
+
+    // two frames lost after frame 50: a 30 ms gap
+    ts.erase(ts.begin() + 51, ts.begin() + 53);
+    t = ser::timing(ts);
+    CHECK(t.periodMs == 10.0);
+    CHECK(t.missing == 2);
+    CHECK(t.maxGapMs == 30.0);
+
+    // a 1 ms clock at 400 fps: 2 and 3 ms intervals are ordinary, and a 5 ms one is one lost frame
+    ts.clear();
+    for (int i = 0; i < 400; ++i) ts.push_back(t0 + (i * 5 / 2) * ms);
+    ts.push_back(ts.back() + 5 * ms);
+    t = ser::timing(ts);
+    CHECK(t.periodMs == 2.5);
+    CHECK(t.missing == 1);
+
+    ts = {t0, t0 + 10 * ms, t0 + 10 * ms, t0 + 30 * ms};   // a repeated timestamp
+    CHECK(ser::timing(ts).backwards == 1);
+    CHECK(ser::timing(std::vector<int64_t>{t0}).fps == 0);
+}
+
+TEST_CASE("SER timing isn't fooled by frames stamped in bursts") {
+    // 166.7 fps where every tenth frame is stamped 6 ms late, so the intervals around it are 12 ms and 0 ms, as in
+    // FireCapture recordings: nothing is lost
+    const int64_t t0 = 639270383770360000, ms = ser::kTicksPerSecond / 1000;
+    std::vector<int64_t> ts;
+    for (int i = 0; i < 1001; ++i) ts.push_back(t0 + (i * 6 + (i % 10 == 5 ? 6 : 0)) * ms);
+    auto t = ser::timing(ts);
+    CHECK(t.periodMs == 6.0);
+    CHECK(t.missing == 0);
+    CHECK(t.maxGapMs == 12.0);
+    CHECK(t.backwards == 100);
+
+    ts.erase(ts.begin() + 500, ts.begin() + 503);   // three really lost
+    CHECK(ser::timing(ts).missing == 3);
+}
+
 TEST_CASE("SER writer and reader round-trip 8-bit Bayer frames with timestamps") {
     TempDir dir;
     const auto path = dir / "rt8.ser";

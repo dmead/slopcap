@@ -67,6 +67,25 @@ struct FormatError : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
 
+/// Frame timing from a recording's timestamps: the real frame rate, and an estimate of the frames lost on the way.
+/// Works the same on any program's SER files, so recordings from different capture programs can be compared.
+///
+/// Some programs stamp frames in bursts (FireCapture: a 12 ms interval, then 0 ms, at 168 fps), so a long interval
+/// on its own doesn't mean a lost frame. The camera's frame period is the median over windows of up to 100 frames,
+/// where the bursts average out, and the lost frames are what the whole span should have held at that period minus
+/// what's there: bursts cancel out, lost frames don't.
+struct Timing {
+    int64_t frames = 0;        ///< timestamps looked at
+    double spanSeconds = 0;    ///< first to last
+    double fps = 0;            ///< (frames - 1) / span
+    double periodMs = 0;       ///< the camera's frame period, as above
+    int64_t missing = 0;       ///< round(span / period) + 1 - frames, if positive
+    double maxGapMs = 0;       ///< longest interval
+    double p99Ms = 0;          ///< 99th percentile interval: how bursty the timestamps are
+    int64_t backwards = 0;     ///< intervals <= 0: a clock step, or bursty or coarse timestamps
+};
+Timing timing(std::span<const int64_t> utcTicks);
+
 /// Read-only access to a SER file. Frames are read on demand; nothing but the header and timestamps is loaded.
 class Reader {
 public:
