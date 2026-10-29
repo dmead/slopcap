@@ -103,6 +103,15 @@
       }
     },
     {
+      "name": "windows-tests",
+      "inherits": "windows-static",
+      "displayName": "Windows x64: the release build plus every test program, run on Windows by tools/windows-tests.sh",
+      "cacheVariables": {
+        "SLOPCAP_BUILD_TESTS": "ON",
+        "CMAKE_PREFIX_PATH": "/opt/qt6-mingw-static;/opt/catch2-mingw"
+      }
+    },
+    {
       "name": "windows-cross",
       "inherits": "base",
       "displayName": "Windows x64 cross-build from Linux (MinGW-w64)",
@@ -126,7 +135,8 @@
     {"name": "macos-asan", "configurePreset": "macos-asan"},
     {"name": "windows-msvc", "configurePreset": "windows-msvc", "configuration": "Release"},
     {"name": "windows-cross", "configurePreset": "windows-cross"},
-    {"name": "windows-static", "configurePreset": "windows-static"}
+    {"name": "windows-static", "configurePreset": "windows-static"},
+    {"name": "windows-tests", "configurePreset": "windows-tests"}
   ],
   "testPresets": [
     {"name": "linux-debug", "configurePreset": "linux-debug", "output": {"outputOnFailure": true}},

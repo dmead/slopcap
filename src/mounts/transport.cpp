@@ -9,8 +9,7 @@
 #include <filesystem>
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+#include "mounts/serial_win32.hpp"
 #else
 #include <fcntl.h>
 #include <poll.h>
@@ -35,14 +34,26 @@ std::string lastError() {
     return s;
 }
 
+const SerialApi kWin32Serial{
+    [](const char* path) { return CreateFileA(path, GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr); },
+    [](HANDLE h, DCB* dcb) { return GetCommState(h, dcb); },
+    [](HANDLE h, DCB* dcb) { return SetCommState(h, dcb); },
+    [](HANDLE h, COMMTIMEOUTS* t) { return SetCommTimeouts(h, t); },
+    [](HANDLE h, DWORD flags) { return PurgeComm(h, flags); },
+    [](HANDLE h, const void* data, DWORD size, DWORD* written) { return WriteFile(h, data, size, written, nullptr); },
+    [](HANDLE h, void* data, DWORD size, DWORD* got) { return ReadFile(h, data, size, got, nullptr); },
+    [](HANDLE h) { return CloseHandle(h); },
+};
+const SerialApi* g_serial = &kWin32Serial;
+
 class SerialPort : public ITransport {
 public:
-    SerialPort(const std::string& path, int baud) : name_(path + " at " + std::to_string(baud) + " baud") {
-        h_ = CreateFileA(("\\\\.\\" + path).c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    SerialPort(const std::string& path, int baud) : api_(*g_serial), name_(path + " at " + std::to_string(baud) + " baud") {
+        h_ = api_.open(("\\\\.\\" + path).c_str());
         if (h_ == INVALID_HANDLE_VALUE) throw MountError("can't open " + path + ": " + lastError());
         DCB dcb{};
         dcb.DCBlength = sizeof dcb;
-        GetCommState(h_, &dcb);
+        api_.getState(h_, &dcb);
         dcb.BaudRate = static_cast<DWORD>(baud);
         dcb.ByteSize = 8;
         dcb.Parity = NOPARITY;
@@ -53,18 +64,19 @@ public:
         dcb.fDtrControl = DTR_CONTROL_DISABLE;   // DTR rising resets an Arduino (OnStep)
         dcb.fRtsControl = RTS_CONTROL_DISABLE;
         dcb.fOutX = dcb.fInX = dcb.fNull = dcb.fAbortOnError = FALSE;
-        if (!SetCommState(h_, &dcb)) {
-            CloseHandle(h_);
-            throw MountError("can't set up " + path + ": " + lastError());
+        if (!api_.setState(h_, &dcb)) {
+            const std::string why = lastError();
+            api_.close(h_);
+            throw MountError("can't set up " + path + ": " + why);
         }
-        PurgeComm(h_, PURGE_RXCLEAR | PURGE_TXCLEAR);
+        api_.purge(h_, PURGE_RXCLEAR | PURGE_TXCLEAR);
     }
-    ~SerialPort() override { CloseHandle(h_); }
+    ~SerialPort() override { api_.close(h_); }
 
     void write(std::string_view bytes) override {
         timeouts(1);
         DWORD n = 0;
-        if (!WriteFile(h_, bytes.data(), static_cast<DWORD>(bytes.size()), &n, nullptr) || n != bytes.size())
+        if (!api_.write(h_, bytes.data(), static_cast<DWORD>(bytes.size()), &n) || n != bytes.size())
             throw MountError("the link went away (" + name_ + ")");
     }
     std::string read(int ms) override {
@@ -72,19 +84,20 @@ public:
         timeouts(std::max(1, ms));
         char buf[512];
         DWORD n = 0;
-        if (!ReadFile(h_, buf, sizeof buf, &n, nullptr)) throw MountError("the link went away (" + name_ + ")");
+        if (!api_.read(h_, buf, sizeof buf, &n)) throw MountError("the link went away (" + name_ + ")");
         return std::string(buf, n);
     }
-    void drain() override { PurgeComm(h_, PURGE_RXCLEAR); }
+    void drain() override { api_.purge(h_, PURGE_RXCLEAR); }
     std::string name() const override { return name_; }
 
 private:
     void timeouts(int readMs) {
         if (readMs == readMs_) return;
         COMMTIMEOUTS t{MAXDWORD, MAXDWORD, static_cast<DWORD>(readMs), 0, 2000};
-        SetCommTimeouts(h_, &t);
+        api_.setTimeouts(h_, &t);
         readMs_ = readMs;
     }
+    const SerialApi& api_;   // as when the port was opened
     HANDLE h_ = INVALID_HANDLE_VALUE;
     int readMs_ = -1;
     std::string name_;
@@ -216,6 +229,10 @@ private:
 };
 
 }  // namespace
+
+#ifdef _WIN32
+void setSerialApi(const SerialApi* api) { g_serial = api ? api : &kWin32Serial; }
+#endif
 
 std::unique_ptr<ITransport> openTransport(const std::string& where, int baud, int port) {
     for (const char* scheme : {"tcp://", "udp://"}) {

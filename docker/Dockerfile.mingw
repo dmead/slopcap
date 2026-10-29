@@ -26,7 +26,7 @@ RUN curl -fsSL "https://download.qt.io/official_releases/qt/${QT_VERSION%.*}/${Q
       -DQT_BUILD_EXAMPLES=OFF -DQT_BUILD_TESTS=OFF -DQT_BUILD_BENCHMARKS=OFF \
       -DFEATURE_static_runtime=ON -DINPUT_opengl=desktop \
       -DFEATURE_icu=OFF -DFEATURE_dbus=OFF -DFEATURE_openssl=OFF -DFEATURE_sql=OFF -DFEATURE_printsupport=OFF \
-      -DFEATURE_concurrent=OFF -DFEATURE_testlib=OFF -DFEATURE_zstd=OFF \
+      -DFEATURE_concurrent=OFF -DFEATURE_zstd=OFF \
       -DFEATURE_system_zlib=OFF -DFEATURE_system_pcre2=OFF -DFEATURE_system_png=OFF -DFEATURE_system_jpeg=OFF \
       -DFEATURE_system_freetype=OFF -DFEATURE_system_harfbuzz=OFF -DFEATURE_system_doubleconversion=OFF \
       -DFEATURE_system_libb2=OFF \
@@ -35,6 +35,20 @@ RUN curl -fsSL "https://download.qt.io/official_releases/qt/${QT_VERSION%.*}/${Q
  && mkdir -p /opt/licenses/qt \
  && cp /tmp/qtbase-everywhere-src-${QT_VERSION}/LICENSES/* /opt/qt6-mingw-static/sbom/*.spdx /opt/licenses/qt/ \
  && rm -rf /tmp/qtbase-everywhere-src-${QT_VERSION} /tmp/qtbuild
+
+# Catch2 for the Windows unit tests (the windows-tests preset), the release the Linux image's package has. Qt Test
+# above is for the application tests; neither goes into slopcap.exe.
+ARG CATCH2_VERSION=3.7.1
+ARG CATCH2_SHA256=c991b247a1a0d7bb9c39aa35faf0fe9e19764213f28ffba3109388e62ee0269c
+RUN curl -fsSL -o /tmp/catch2.tar.gz "https://github.com/catchorg/Catch2/archive/refs/tags/v${CATCH2_VERSION}.tar.gz" \
+ && echo "${CATCH2_SHA256}  /tmp/catch2.tar.gz" | sha256sum -c - \
+ && tar -xzf /tmp/catch2.tar.gz -C /tmp \
+ && cmake -S /tmp/Catch2-${CATCH2_VERSION} -B /tmp/catch2build -G Ninja \
+      -DCMAKE_TOOLCHAIN_FILE=/usr/share/mingw/toolchain-mingw64.cmake -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/opt/catch2-mingw -DBUILD_TESTING=OFF -DCATCH_INSTALL_DOCS=OFF -DCATCH_INSTALL_EXTRAS=ON \
+ && cmake --build /tmp/catch2build \
+ && cmake --install /tmp/catch2build \
+ && rm -rf /tmp/catch2.tar.gz /tmp/Catch2-${CATCH2_VERSION} /tmp/catch2build
 
 # The licenses of what goes into slopcap.exe besides SlopCap's own code, for the zip (docker/build.sh copies them to
 # build/windows-static/licenses): Qt's above, the compiler's runtimes here, the fonts' below. libgcc's are libstdc++'s.

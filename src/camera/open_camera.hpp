@@ -22,4 +22,9 @@ std::vector<std::string> listCameras();
 /// seconds). listCameras() and openCamera() wait for it if it is still running. Does nothing on other platforms.
 void prepareCameras();
 
+/// Windows: before calling into a camera SDK, its DLL must load (LoadLibrary), or the delay-loaded call crashes. The
+/// tests' fake SDKs live in the test program itself, so they replace that check. nullptr restores it.
+using SdkLoadCheck = bool (*)(const char* dll);
+void setSdkLoadCheck(SdkLoadCheck check);
+
 }  // namespace slopcap

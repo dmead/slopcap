@@ -24,10 +24,13 @@ namespace slopcap {
 
 namespace {
 
+SdkLoadCheck g_sdkLoadCheck = nullptr;
+
 /// On Windows the SDK DLLs are delay-loaded (cmake/DelayImport.cmake): calling into one that can't be loaded would
 /// crash, so check first. A DLL the GUI already loaded from its embedded copy is found by name.
 /// (Both helpers go unused in a build with no camera SDK at all, e.g. macOS without the vendor SDKs.)
 [[maybe_unused]] bool sdkLoads([[maybe_unused]] const char* dll) {
+    if (g_sdkLoadCheck) return g_sdkLoadCheck(dll);
 #ifdef _WIN32
     return LoadLibraryA(dll) != nullptr;   // the loader keeps one reference per module; this just bumps it
 #else
@@ -133,5 +136,7 @@ void prepareCameras() {
     if (sdkLoads("qhyccd.dll")) QhyCamera::prepare();
 #endif
 }
+
+void setSdkLoadCheck(SdkLoadCheck check) { g_sdkLoadCheck = check; }
 
 }  // namespace slopcap

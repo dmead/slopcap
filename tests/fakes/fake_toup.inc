@@ -2,6 +2,7 @@
 // own name: fake_touptek.cpp (Toupcam_...) and fake_mallincam.cpp (Mallincam_...) define FN / TY / CO / HANDLE /
 // EVENT_CB / STATE, include their brand's header, then this.
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <deque>
@@ -24,9 +25,25 @@ int failed(const char* fn) {
 
 constexpr int kNotImpl = static_cast<int>(0x80004001u), kUnexpected = static_cast<int>(0x8000ffffu), kTimeout = static_cast<int>(0x8001011fu);
 
+// The SDK's model names, display names and ids are wide strings on Windows (the tests' are ASCII).
+#ifdef _WIN32
+using SdkString = std::wstring;
+#else
+using SdkString = std::string;
+#endif
+SdkString sdkString(const std::string& s) { return SdkString(s.begin(), s.end()); }
+
+template <std::size_t N>
+void copyName(typename SdkString::value_type (&dst)[N], const std::string& s) {
+    const SdkString w = sdkString(s);
+    const std::size_t n = std::min(w.size(), N - 1);
+    std::copy_n(w.begin(), n, dst);
+    dst[n] = 0;
+}
+
 /// The models and names EnumV2 hands out stay put until the next EnumV2, as the SDK's do for the whole run.
 std::deque<TY(ModelV2)> g_models;
-std::deque<std::string> g_names;
+std::deque<SdkString> g_names;
 
 int bin() {
     const auto& o = STATE().options;
@@ -50,7 +67,7 @@ unsigned FN(EnumV2)(TY(DeviceV2) arr[CO(MAX)]) {
     for (const auto& c : s.cams) {
         if (n >= CO(MAX)) break;
         TY(ModelV2) m{};
-        g_names.push_back(c.name);
+        g_names.push_back(sdkString(c.name));
         m.name = g_names.back().c_str();
         m.flag = c.flags;
         m.maxspeed = static_cast<unsigned>(c.maxSpeed);
@@ -62,8 +79,8 @@ unsigned FN(EnumV2)(TY(DeviceV2) arr[CO(MAX)]) {
         g_models.push_back(m);
         if (arr) {
             arr[n] = TY(DeviceV2){};
-            std::strncpy(arr[n].displayname, c.name.c_str(), sizeof arr[n].displayname - 1);
-            std::strncpy(arr[n].id, c.id.c_str(), sizeof arr[n].id - 1);
+            copyName(arr[n].displayname, c.name);
+            copyName(arr[n].id, c.id);
             arr[n].model = &g_models.back();
         }
         ++n;
@@ -71,7 +88,7 @@ unsigned FN(EnumV2)(TY(DeviceV2) arr[CO(MAX)]) {
     return n;
 }
 
-HANDLE FN(Open)(const char* id) {
+HANDLE FN(Open)(const SdkString::value_type* id) {
     auto& s = STATE();
     if (s.openFails || !id) return nullptr;
     s.open = true;

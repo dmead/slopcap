@@ -2,8 +2,10 @@
 // snapshots, one copy sharing while others watch, a focus sweep at start, --help.
 #include "app_harness.hpp"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QRegularExpression>
 
 #include <catch2/catch_test_macros.hpp>
@@ -17,10 +19,17 @@ struct Run {
     QString out, err;
 };
 
+/// The program the build made, or the one next to this test program: the Windows tests run on another machine than the
+/// one that built them.
+QString program() {
+    if (QFile::exists(SLOPCAP_PROGRAM)) return SLOPCAP_PROGRAM;
+    return QCoreApplication::applicationDirPath() + "/" + QFileInfo(SLOPCAP_PROGRAM).fileName();
+}
+
 /// Run the program to its end (or kill it after `ms`).
 Run runProgram(const QStringList& args, int ms = 60000) {
     QProcess p;
-    p.start(SLOPCAP_PROGRAM, args);
+    p.start(program(), args);
     Run r;
     if (!p.waitForStarted(10000)) return r;
     if (!p.waitForFinished(ms)) {
@@ -54,7 +63,7 @@ TEST_CASE("program: one copy shares, others watch (--listen, --connect HOST:PORT
     TempDir dir;
     const QString ser = makeSer(dir.file("saturn.ser"));
     QProcess server;
-    server.start(SLOPCAP_PROGRAM, {"--settings", dir.file("a"), "--camera", "sim-loop:" + ser, "--out", dir.file("rec"), "--listen",
+    server.start(program(), {"--settings", dir.file("a"), "--camera", "sim-loop:" + ser, "--out", dir.file("rec"), "--listen",
                                     "127.0.0.1", "--quit-after", "14"});
     REQUIRE(server.waitForStarted(10000));
     QString log;

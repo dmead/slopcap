@@ -4,8 +4,12 @@
 # between runs (later runs are incremental), and every job runs there in turn, also after one has failed.
 #   tools/ci-local.sh [--jobs "JOB ..."] [--windows-smoke] [--upload DEST] [REF]
 #     REF                  the commit to test (default HEAD; uncommitted changes are not tested)
-#     --jobs               a subset of: linux-debug linux-asan linux-tsan linux-release coverage windows-exe
+#     --jobs               a subset of: linux-debug linux-asan linux-tsan linux-release coverage windows-exe windows-tests
 #     --windows-smoke      also start the Windows exe on this desktop (Windows only; a window opens for about 10 s)
+# windows-tests builds the Windows release with every test program and runs them here when this is Windows (their
+# windows open on this desktop for a few minutes); elsewhere it builds them and fails as not run. It needs
+# SLOPCAP_WIN_SDK_DLL_DIR (the release's camera DLLs: without them the camera backends aren't built, so go untested)
+# and SLOPCAP_INDI_WSL (a WSL distro with indi-bin, for the INDI tests); both can go in build/ci/settings.sh.
 #     --upload DEST        when every job passed, copy the zips and summary.txt to DEST/<time>-<commit>/ with rclone
 #                          (DEST is an rclone remote and folder, e.g. drive:slopcap-builds; no share links are made)
 # Machine-local settings, not in git, go in build/ci/settings.sh (read first): SLOPCAP_CI_UPLOAD (the default for
@@ -22,7 +26,7 @@ CI=${SLOPCAP_CI_DIR:-$REPO/build/ci}
 WT=$CI/src
 # shellcheck source=/dev/null
 [ -f "$CI/settings.sh" ] && . "$CI/settings.sh"
-JOBS="linux-debug linux-asan linux-tsan linux-release coverage windows-exe"
+JOBS="linux-debug linux-asan linux-tsan linux-release coverage windows-exe windows-tests"
 SMOKE=0
 UPLOAD=${SLOPCAP_CI_UPLOAD:-}
 partial=0
@@ -100,6 +104,16 @@ windows_exe() {
     docker/build.sh windows-static && tools/package.sh windows
 }
 
+windows_tests() {   # every test program for Windows, run here when this is Windows (tools/windows-tests.sh)
+    [ -n "${SLOPCAP_WIN_SDK_DLL_DIR:-}" ] ||
+        { echo "set SLOPCAP_WIN_SDK_DLL_DIR (the release's camera DLLs): without them the camera backends go untested"; return 1; }
+    docker/build.sh windows-tests || return 1
+    case $(uname -s) in
+        MINGW* | MSYS* | CYGWIN*) tools/windows-tests.sh build/windows-tests ;;
+        *) echo "built, but this isn't Windows: run tools/windows-tests.sh build/windows-tests on a Windows machine"; return 3 ;;
+    esac
+}
+
 windows_smoke() {   # as CI's windows-smoke: replay a generated recording, record it, quit; check the log and the file
     case $(uname -s) in MINGW* | MSYS* | CYGWIN*) ;; *) echo "not on Windows: skipped"; return 0 ;; esac
     local tmp log py
@@ -129,6 +143,7 @@ for j in $JOBS; do
         linux-release) job "$j" linux_release ;;
         coverage) job "$j" tools/coverage.sh 90 ;;
         windows-exe) job "$j" windows_exe ;;
+        windows-tests) job "$j" windows_tests ;;
         *) echo "  unknown job: $j" | tee -a "$SUMMARY"; failed=1 ;;
     esac
 done

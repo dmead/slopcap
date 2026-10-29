@@ -256,3 +256,35 @@ const char* POAGetErrorString(POAErrors err) {
         default: return "error";
     }
 }
+
+#ifdef _WIN32
+// The SDK's header declares its functions dllexport, and GCC calls such functions through __imp_ pointers. Pointing
+// those at the fakes keeps the linker from taking the delay-loaded DLL's (and finding every name twice).
+#define FAKE_IMP(f) decltype(&f) __imp_##f = &f;
+extern "C" {
+FAKE_IMP(POACloseCamera)
+FAKE_IMP(POAGetCameraCount)
+FAKE_IMP(POAGetCameraProperties)
+FAKE_IMP(POAGetConfig)
+FAKE_IMP(POAGetConfigAttributes)
+FAKE_IMP(POAGetConfigsCount)
+FAKE_IMP(POAGetDroppedImagesCount)
+FAKE_IMP(POAGetErrorString)
+FAKE_IMP(POAGetGainsAndOffsets)
+FAKE_IMP(POAGetImageData)
+FAKE_IMP(POAGetSensorMode)
+FAKE_IMP(POAGetSensorModeCount)
+FAKE_IMP(POAGetSensorModeInfo)
+FAKE_IMP(POAInitCamera)
+FAKE_IMP(POAOpenCamera)
+FAKE_IMP(POASetConfig)
+FAKE_IMP(POASetImageBin)
+FAKE_IMP(POASetImageFormat)
+FAKE_IMP(POASetImageSize)
+FAKE_IMP(POASetImageStartPos)
+FAKE_IMP(POASetSensorMode)
+FAKE_IMP(POAStartExposure)
+FAKE_IMP(POAStopExposure)
+}
+#undef FAKE_IMP
+#endif

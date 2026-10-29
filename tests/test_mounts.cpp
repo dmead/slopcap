@@ -26,7 +26,13 @@
 #include <future>
 #include <thread>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include "mounts/serial_win32.hpp"
+
+#include <condition_variable>
+#include <cstring>
+#include <mutex>
+#else
 #include <fcntl.h>
 #include <unistd.h>
 #endif
@@ -494,7 +500,7 @@ TEST_CASE("mounts: specs, and the Mount the app uses, with a built-in driver", "
 }
 
 #ifndef _WIN32
-TEST_CASE("mounts: a serial port (a pseudo-terminal), TCP and UDP", "[mounts]") {
+TEST_CASE("mounts: a serial port (a pseudo-terminal)", "[mounts]") {
     // serial: the driver's end is the pseudo-terminal's, the test's the master
     const int master = posix_openpt(O_RDWR | O_NOCTTY);
     REQUIRE(master >= 0);
@@ -525,7 +531,138 @@ TEST_CASE("mounts: a serial port (a pseudo-terminal), TCP and UDP", "[mounts]") 
     ::close(master);   // unplugged: the far end goes away
     CHECK_THROWS_AS(openTransport("/dev/no-such-port", 9600, 0), MountError);
     CHECK_THROWS_AS(openTransport("/dev/null", 9600, 0), MountError);   // not a terminal
+}
+#else
+namespace {
 
+/// One fake COM port, "COM42", behind the Win32 calls the serial transport makes: what it was set up with, and a
+/// device that answers each write.
+struct FakeCom {
+    Device device;
+    std::mutex m;
+    std::condition_variable cv;
+    std::string pending;   // the device's replies, not read yet
+    DCB dcb{};
+    COMMTIMEOUTS timeouts{};
+    std::vector<DWORD> purges;
+    bool unplugged = false;
+    int opens = 0, closes = 0;
+    void unplug() {
+        std::lock_guard lock(m);
+        unplugged = true;
+        cv.notify_all();
+    }
+};
+FakeCom* g_com = nullptr;
+
+const mounts::SerialApi kFakeCom{
+    [](const char* path) -> HANDLE {
+        if (std::string_view(path) != "\\\\.\\COM42") {
+            SetLastError(ERROR_FILE_NOT_FOUND);
+            return INVALID_HANDLE_VALUE;
+        }
+        ++g_com->opens;
+        return reinterpret_cast<HANDLE>(static_cast<std::intptr_t>(0x42));
+    },
+    [](HANDLE, DCB* dcb) -> BOOL {
+        *dcb = g_com->dcb;
+        return TRUE;
+    },
+    [](HANDLE, DCB* dcb) -> BOOL {
+        if (dcb->BaudRate == 12345) {   // a speed the port can't do
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return FALSE;
+        }
+        g_com->dcb = *dcb;
+        return TRUE;
+    },
+    [](HANDLE, COMMTIMEOUTS* t) -> BOOL {
+        g_com->timeouts = *t;
+        return TRUE;
+    },
+    [](HANDLE, DWORD flags) -> BOOL {
+        std::lock_guard lock(g_com->m);
+        g_com->purges.push_back(flags);
+        if (flags & PURGE_RXCLEAR) g_com->pending.clear();
+        return TRUE;
+    },
+    [](HANDLE, const void* data, DWORD size, DWORD* written) -> BOOL {
+        std::lock_guard lock(g_com->m);
+        if (g_com->unplugged) return FALSE;
+        g_com->pending += g_com->device(std::string_view(static_cast<const char*>(data), size));
+        g_com->cv.notify_all();
+        *written = size;
+        return TRUE;
+    },
+    [](HANDLE, void* data, DWORD size, DWORD* got) -> BOOL {
+        // read interval and multiplier MAXDWORD: back with whatever has arrived, else after the constant
+        std::unique_lock lock(g_com->m);
+        g_com->cv.wait_for(lock, std::chrono::milliseconds(g_com->timeouts.ReadTotalTimeoutConstant),
+                           [] { return !g_com->pending.empty() || g_com->unplugged; });
+        if (g_com->unplugged) return FALSE;
+        const std::size_t n = std::min<std::size_t>(size, g_com->pending.size());
+        std::memcpy(data, g_com->pending.data(), n);
+        g_com->pending.erase(0, n);
+        *got = static_cast<DWORD>(n);
+        return TRUE;
+    },
+    [](HANDLE) -> BOOL {
+        ++g_com->closes;
+        return TRUE;
+    },
+};
+
+}  // namespace
+
+// Windows' serial code (CreateFile on \\.\COMn, the DCB, the timeouts) against a fake port: without hardware or a
+// virtual-port driver there is no COM port to test with.
+TEST_CASE("mounts: a COM port (Windows: a fake port behind the Win32 calls)", "[mounts]") {
+    FakeCom com;
+    g_com = &com;
+    mounts::setSerialApi(&kFakeCom);
+    com.device = [](std::string_view in) { return in == ":GR#" ? std::string("12:34:56#") : std::string(); };
+    CHECK_THROWS_AS(openTransport("COM41", 9600, 0), MountError);         // no such port
+    CHECK_THROWS_AS(openTransport("COM42@12345", 9600, 0), MountError);   // a speed it refuses
+    CHECK(com.closes == com.opens);                                       // and let go of again
+    {
+        auto port = openTransport("COM42@115200", 9600, 0);
+        CHECK(port->name().find("115200") != std::string::npos);
+        CHECK(com.dcb.BaudRate == 115200);
+        CHECK(com.dcb.ByteSize == 8);
+        CHECK(com.dcb.Parity == NOPARITY);
+        CHECK(com.dcb.StopBits == ONESTOPBIT);
+        CHECK(com.dcb.fDtrControl == DTR_CONTROL_DISABLE);   // DTR rising resets an Arduino (OnStep)
+        CHECK(com.dcb.fRtsControl == RTS_CONTROL_DISABLE);
+        CHECK(com.dcb.fOutxCtsFlow == FALSE);
+        CHECK(com.purges.back() == static_cast<DWORD>(PURGE_RXCLEAR | PURGE_TXCLEAR));
+        CommandChannel ch(std::move(port), "test");
+        CHECK(ch.until(":GR#", '#', 3000) == "12:34:56");
+        CHECK(com.timeouts.ReadIntervalTimeout == MAXDWORD);
+        CHECK(com.timeouts.ReadTotalTimeoutMultiplier == MAXDWORD);
+        CHECK_FALSE(ch.tryUntil(":GD#", '#', 200));   // nothing: a timeout
+        com.unplug();
+        CHECK_THROWS_AS(ch.until(":GR#", '#', 500), MountError);   // the link went away
+    }
+    CHECK(com.closes == com.opens);
+
+    // a mount on it: LX200 (OnStep), end to end
+    com.unplugged = false;
+    auto sim = quickSim();
+    com.device = fakeLx200(sim, Lx200Dialect::OnStep);
+    {
+        Lx200Driver d([] { return openTransport("COM42@9600", 9600, 0); }, Lx200Dialect::Auto);
+        CHECK(d.connect().model.find("On-Step") != std::string::npos);
+        sim->place(3.0, 4.0);
+        CHECK(d.poll().dec == Approx(4.0).margin(0.001));
+    }
+    CHECK(com.dcb.BaudRate == 9600);
+    mounts::setSerialApi(nullptr);
+    g_com = nullptr;
+    CHECK_THROWS_AS(openTransport("COM255", 9600, 0), MountError);   // the real calls again, and no such port here
+}
+#endif
+
+TEST_CASE("mounts: TCP and UDP", "[mounts]") {
     // TCP: an LX200 (OnStep) on its Wi-Fi bridge
     auto sim = quickSim();
     const auto lx = fakeLx200(sim, Lx200Dialect::OnStep);
@@ -590,7 +727,6 @@ TEST_CASE("mounts: a serial port (a pseudo-terminal), TCP and UDP", "[mounts]") 
     CHECK_THROWS_AS(openTransport("tcp://127.0.0.1:1", 0, 0), MountError);   // nothing listens there
     CHECK(listSerialPorts().size() < 1000);
 }
-#endif
 
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);

@@ -14,6 +14,7 @@ the same on any machine with Docker; on Windows run it from Git Bash with `MSYS_
 docker/build.sh                          # linux-debug: build + tests
 docker/build.sh linux-asan linux-tsan    # sanitizer builds + tests
 docker/build.sh windows-static           # Windows: one self-contained build/windows-static/slopcap.exe
+docker/build.sh windows-tests            # the same plus every test program, to run on Windows (below)
 docker/build.sh --shell                  # a shell in the build environment
 ```
 
@@ -60,6 +61,7 @@ maintained; the MinGW static build above is the one that's used.
 | `linux-asan`, `linux-tsan` | AddressSanitizer + UBSan; ThreadSanitizer |
 | `macos-debug`, `macos-release`, `macos-asan` | Apple clang, Homebrew Qt |
 | `windows-static` | the self-contained Windows exe (MinGW cross-build in Docker) |
+| `windows-tests` | the same exe plus every test program, run on Windows by `tools/windows-tests.sh` |
 | `windows-cross` | Windows command-line tools (MinGW cross-build) |
 | `windows-msvc` | native MSVC |
 
@@ -74,6 +76,9 @@ maintained; the MinGW static build above is the one that's used.
   such as over SSH on a Mac.
 - **indi-devices:** the INDI client, focuser and mount against INDI's simulators on a private `indiserver`. Skipped
   when INDI isn't installed.
+- **mounts:** the built-in mount drivers against fakes that speak each protocol, over memory, TCP and UDP, a serial
+  port (a pseudo-terminal; on Windows a fake COM port behind the Win32 calls, as there is no other to test with), and
+  the Mount they sit behind.
 - **remote:** remote viewing: protocol, lossless and JPEG frame coding, discovery, rate control, a server and a
   client on loopback.
 - **app:** the application, driven the way a user drives it (`tests/test_app_*.cpp`, needs a screen or Xvfb): the
@@ -95,6 +100,13 @@ isn't in the repository.
 test and prints line coverage of `src/` per file and folder (`build/linux-coverage/coverage.txt`; it exits 1 below
 `MIN` percent). CI requires 90 %.
 
+**On Windows** the same test programs run natively: `docker/build.sh windows-tests` builds them with the release's
+settings (with `SLOPCAP_WIN_SDK_DLL_DIR`, as for a release, so the camera backends are built and tested against their
+fakes), and `tools/windows-tests.sh` runs them from Git Bash on a Windows desktop (the GL and application tests open
+windows for a few minutes). There is no `indiserver` for Windows, so the INDI tests run INDI's simulators in WSL:
+set `SLOPCAP_INDI_WSL` to a WSL distro with `indi-bin` installed. A program that skips everything counts as failed
+there, since that is how a missing screen, OpenGL or INDI shows.
+
 `SLOPCAP_TEST_SER=/path/to/recording.ser ctest …` also replays a real recording. `tools/remote-test.sh FILE.ser` tests
 remote viewing end to end with three SlopCaps in containers (an observatory, a desktop, a projector in full view).
 
@@ -104,7 +116,9 @@ remote viewing end to end with three SlopCaps in containers (an observatory, a d
 Linux and Windows jobs below on this machine, in Docker, for a commit (default `HEAD`; uncommitted changes aren't
 tested). It checks the commit out into its own worktree, `build/ci/src`, and keeps that worktree's build folders, so
 only the first run builds everything. Each job is logged under `build/ci/runs/<time>-<commit>/` with a `summary.txt`;
-the script exits 1 if any job failed. `--jobs "linux-debug coverage"` runs a subset; `--windows-smoke` also starts the
+the script exits 1 if any job failed. The windows-tests job builds the Windows test programs and, on Windows, runs them
+with `tools/windows-tests.sh` (it needs `SLOPCAP_WIN_SDK_DLL_DIR` and `SLOPCAP_INDI_WSL`; elsewhere it builds them and
+fails as not run). `--jobs "linux-debug coverage"` runs a subset; `--windows-smoke` also starts the
 Windows exe on this desktop as the windows-smoke job does (a window opens for about ten seconds). `--upload DEST`
 copies the zips and the summary to an [rclone](https://rclone.org) destination (for example `drive:slopcap-builds`)
 after a run in which every job passed; settings for one machine, such as a default destination, go in
@@ -120,7 +134,8 @@ Run workflow*), because each run costs a private repository's minutes:
 | **linux** (4 jobs) | `docker/build.sh` with `linux-debug`, `linux-asan`, `linux-tsan` (build + tests) and `linux-release`, in the same image as above; the release build is packed into `slopcap-linux-x64.zip` and started in a bare Ubuntu container. |
 | **coverage** | `tools/coverage.sh 90`: every test on a gcov build; fails below 90 % of `src/`; the report is on the run's summary page. |
 | **windows-exe** | builds `slopcap.exe` in the MinGW image (no camera drivers: they aren't in the repository) and keeps it, and `slopcap-windows-x64.zip`, as artifacts. |
-| **windows-smoke** | starts that exe on a real Windows runner, replays a small generated recording, records it, and checks the session log and the file. |
+| **windows-tests** | builds every test program for Windows next to that exe and runs them on a real Windows runner (`tools/windows-tests.sh`); without the camera DLLs the backends' tests aren't built there, and the runner has no GPU or WSL for the GL and INDI ones, which the local run does. |
+| **windows-smoke** | starts that exe on a real Windows runner, replays a small generated recording, records it, and checks the session log (including the CPU it used) and the file. |
 | **macos** | Apple silicon: Homebrew Qt, the SDKs (`tools/macos-sdks.sh`) and INDI (`tools/macos-indi.sh`, cached), `macos-debug` with every test, then `SlopCap.app`, `SlopCap.dmg` and `slopcap-macos-arm64.zip` as artifacts, and a run of the packed app. |
 
 The Docker images are cached in GitHub's Actions cache, so the slow parts (Qt for Windows, about an hour) happen

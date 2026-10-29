@@ -137,7 +137,11 @@ Header Header::decode(std::span<const std::byte, kHeaderSize> b) {
 
 Reader::Reader(const std::filesystem::path& path) : path_(path), in_(path, std::ios::binary) {
     if (!in_) throw std::system_error(errno, std::generic_category(), "cannot open " + path.string());
-    fileSize_ = std::filesystem::file_size(path);
+    // From the open file, not the directory: Windows doesn't update a file's size there while another program (a
+    // recording still being written) has it open.
+    in_.seekg(0, std::ios::end);
+    fileSize_ = static_cast<std::uintmax_t>(std::max<std::streamoff>(0, in_.tellg()));
+    in_.seekg(0);
     if (fileSize_ < kHeaderSize) throw FormatError("file shorter than a SER header");
     std::array<std::byte, kHeaderSize> raw;
     in_.read(reinterpret_cast<char*>(raw.data()), kHeaderSize);

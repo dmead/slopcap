@@ -7,6 +7,9 @@
 #   windows-exe    the self-contained slopcap.exe (MinGW + static Qt, docker/Dockerfile.mingw), and
 #                  slopcap-windows-x64.zip. The camera DLLs are proprietary and not in the repository, so this exe has
 #                  no ZWO / QHY support.
+#   windows-tests  the same build with every test program (windows-tests preset), run on a real Windows runner by
+#                  tools/windows-tests.sh; without the camera DLLs the camera backends' tests aren't built here, and the
+#                  runner can't do the GL and INDI ones (tools/ci-local.sh runs them all, with the DLLs).
 #   windows-smoke  starts that exe on a real Windows runner: replays a generated recording and records it.
 #   macos          Apple silicon: Homebrew Qt, the camera SDKs (tools/macos-sdks.sh), INDI (tools/macos-indi.sh,
 #                  cached), macos-debug with every test, then SlopCap.app, SlopCap.dmg and slopcap-macos-arm64.zip,
@@ -126,6 +129,17 @@ jobs:
           name: slopcap-windows-x64-no-camera-sdks
           path: build/windows-static/slopcap.exe
           if-no-files-found: error
+      - name: Build the Windows test programs
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:$PWD" -w "$PWD" slopcap-build-mingw:ci \
+            bash -c "cmake --preset windows-tests && cmake --build --preset windows-tests"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slopcap-windows-tests
+          path: |
+            build/windows-tests/*.exe
+            tools/windows-tests.sh
+          if-no-files-found: error
       - name: Package (slopcap-windows-x64.zip)
         run: tools/package.sh windows
       - uses: actions/upload-artifact@v4
@@ -133,6 +147,20 @@ jobs:
           name: slopcap-windows-x64-zip-no-camera-sdks
           path: build/package/slopcap-windows-x64.zip
           if-no-files-found: error
+
+  windows-tests:
+    needs: windows-exe
+    runs-on: windows-2025
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: slopcap-windows-tests
+      - name: Run every test program
+        shell: bash
+        env:
+          # the runner has no GPU (OpenGL 1.1 only) and no WSL with INDI: those programs may skip here, not locally
+          SLOPCAP_ALLOW_SKIP: slopcap-gl-tests slopcap-qt-tests
+        run: tools/windows-tests.sh build/windows-tests
 
   windows-smoke:
     needs: windows-exe

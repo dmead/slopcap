@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QProcess>
 #include <QStandardPaths>
+#include <QTcpSocket>
 
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -29,6 +30,9 @@ bool waitFor(F done, int ms) {
     return done();
 }
 
+/// INDI's indiserver with simulator drivers on a private port. Windows has no indiserver: there it runs in WSL
+/// (SLOPCAP_INDI_WSL names the distro; tools/windows-tests.sh sets it), reached over localhost the way SlopCap reaches
+/// an INDI server on another machine.
 struct SimServer {
     QProcess proc;
     quint16 port = 0;
@@ -36,36 +40,73 @@ struct SimServer {
     bool ok = false;
     /// `later`: drivers that must be installed but are started afterwards, with start().
     explicit SimServer(const QStringList& drivers, const QStringList& later = {}) {
+#ifdef _WIN32
+        if (distro_.isEmpty()) return;
+        const QString need = "for p in indiserver " + (drivers + later).join(' ') + "; do command -v $p >/dev/null || exit 1; done";
+        if (QProcess::execute("wsl.exe", inWsl({"sh", "-c", need})) != 0) return;
+#else
         if (QStandardPaths::findExecutable("indiserver").isEmpty()) return;
         for (const auto& d : drivers + later)
             if (QStandardPaths::findExecutable(d).isEmpty()) return;
+#endif
         std::random_device rd;
         port = static_cast<quint16>(20000 + rd() % 20000);
         const QString sock = QString("/tmp/slopcap-indi-test-%1").arg(port);
         QStringList args{"-p", QString::number(port)};
-#ifdef __linux__
-        // Linux indiserver also listens on a local socket; a private one keeps clear of a running server's. Elsewhere
-        // (macOS) indiserver has no -u and quits with its usage text.
+#if defined(__linux__) || defined(_WIN32)
+        // Linux indiserver (also WSL's) listens on a local socket too; a private one keeps clear of a running
+        // server's. Elsewhere (macOS) indiserver has no -u and quits with its usage text.
         args = QStringList{"-u", sock} + args;
 #endif
         if (!later.isEmpty()) {   // a control FIFO, so drivers can be started in a known order
             fifo = sock + ".fifo";
+#ifdef _WIN32
+            if (QProcess::execute("wsl.exe", inWsl({"mkfifo", fifo})) != 0) return;
+#else
             if (QProcess::execute("mkfifo", {fifo}) != 0) return;
+#endif
             args << "-f" << fifo;
         }
+#ifdef _WIN32
+        proc.start("wsl.exe", inWsl(QStringList{"indiserver"} + args + drivers));
+        ok = proc.waitForStarted(10000) && listening(20000);   // WSL may have to start up first
+#else
         proc.start("indiserver", args + drivers);
         ok = proc.waitForStarted(3000);
         waitFor([] { return false; }, 700);   // let it bind
+#endif
     }
     void start(const QString& driver) {
+#ifdef _WIN32
+        QProcess::execute("wsl.exe", inWsl({"sh", "-c", QString("echo 'start %1' > %2").arg(driver, fifo)}));
+#else
         QFile f(fifo);
         if (f.open(QIODevice::WriteOnly)) f.write(QString("start %1\n").arg(driver).toUtf8());
+#endif
     }
     ~SimServer() {
         proc.kill();
         proc.waitForFinished(2000);
+#ifdef _WIN32
+        if (port) QProcess::execute("wsl.exe", inWsl({"pkill", "-f", QString("indiserver -u /tmp/slopcap-indi-test-%1").arg(port)}));
+        if (!fifo.isEmpty()) QProcess::execute("wsl.exe", inWsl({"rm", "-f", fifo}));
+#else
         if (!fifo.isEmpty()) QFile::remove(fifo);
+#endif
     }
+
+private:
+#ifdef _WIN32
+    QString distro_ = qEnvironmentVariable("SLOPCAP_INDI_WSL");
+    QStringList inWsl(const QStringList& cmd) const { return QStringList{"-d", distro_, "-e"} + cmd; }
+    bool listening(int ms) const {
+        return waitFor([this] {
+            QTcpSocket s;
+            s.connectToHost("127.0.0.1", port);
+            return s.waitForConnected(300);
+        }, ms);
+    }
+#endif
 };
 
 }  // namespace

@@ -16,6 +16,7 @@
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -534,7 +535,9 @@ TEST_CASE("window: full view", "[app]") {
     REQUIRE(p.waitForFrames(2));
 
     w.setMode(MainWindow::Focus);
-    button(&w, "Full screen")->click();   // one screen: straight to full view (back to Capture: it's the live view)
+    // one screen: straight to full view (back to Capture: it's the live view); several: a menu asks which
+    if (QGuiApplication::screens().size() > 1) m.pickMenu("(this window's screen)");
+    button(&w, "Full screen")->click();
     REQUIRE(p.fullView);
     CHECK(p.mode == MainWindow::Capture);
     CHECK_FALSE(p.cameraPill->isVisible());

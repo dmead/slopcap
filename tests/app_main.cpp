@@ -3,6 +3,7 @@
 #include "app/session_log.hpp"
 #include "app/theme.hpp"
 #include "app_harness.hpp"
+#include "camera/open_camera.hpp"
 #include "preview/preview_widget.hpp"
 
 #include <QApplication>
@@ -25,6 +26,9 @@ int main(int argc, char** argv) {
     for (const char* v : {"XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"}) qputenv(v, (home.q() + "/" + v).toUtf8());
 #endif
     QSurfaceFormat::setDefaultFormat(slopcap::preview::surfaceFormat());   // the program's own
+#if defined(_WIN32) && defined(SLOPCAP_FAKE_SDKS)
+    slopcap::setSdkLoadCheck([](const char*) { return true; });   // the fake SDKs are in this program, not in DLLs
+#endif
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     QApplication app(argc, argv);
     if (!QGuiApplication::primaryScreen()) {

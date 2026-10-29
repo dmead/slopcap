@@ -25,6 +25,7 @@ void handler(QtMsgType type, const QMessageLogContext&, const QString& msg) {
         file->flush();
     }
     std::fwrite(line.constData(), 1, static_cast<std::size_t>(line.size()), stderr);
+    std::fflush(stderr);   // Windows buffers stderr into a pipe: whatever reads it would see nothing until the end
     if (type == QtFatalMsg) std::abort();
 }
 

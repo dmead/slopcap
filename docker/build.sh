@@ -4,6 +4,7 @@
 #   docker/build.sh linux-asan linux-tsan  # any presets from CMakePresets.json; tests run where the preset has them
 #   docker/build.sh windows-cross          # Windows command-line tools; set SLOPCAP_WIN_SDK_DLL_DIR to also build camprobe
 #   docker/build.sh windows-static         # Windows GUI as one self-contained slopcap.exe (own image: MinGW + static Qt)
+#   docker/build.sh windows-tests          # the same plus every test program; run them on Windows: tools/windows-tests.sh
 #   docker/build.sh --shell                # interactive shell in the build environment
 #   docker/build.sh --push                 # push the current environment image to the registry (docker/registry)
 # Output goes to build/<preset>/ in the repo, owned by you. Images are rebuilt only when their Dockerfile changes.
@@ -52,7 +53,7 @@ REMOTE=${REGISTRY:+$REGISTRY/slopcap-build}
 # (hash the contents only: sha256sum's output would also carry the checkout's path, giving each machine its own tag)
 MINGW_TAG=$( (sha256sum < "$REPO/docker/Dockerfile.mingw"; echo "$TAG") | sha256sum | cut -c1-12)
 MINGW_IMAGE="slopcap-build-mingw:$MINGW_TAG"
-needs_mingw() { for p in "$@"; do [ "$p" = windows-static ] && return 0; done; return 1; }
+needs_mingw() { for p in "$@"; do case $p in windows-static | windows-tests) return 0 ;; esac; done; return 1; }
 
 if [ "${1:-}" = "--push" ]; then
     [ -n "$REMOTE" ] || { echo "no registry configured (docker/registry or SLOPCAP_REGISTRY)" >&2; exit 2; }
@@ -82,13 +83,14 @@ fi
 
 presets=("$@")
 [ ${#presets[@]} -eq 0 ] && presets=(linux-debug)
-# windows-static runs in its own image; build it on its own.
+# windows-static and windows-tests run in their own image; build them on their own.
 if needs_mingw "${presets[@]}"; then
-    [ ${#presets[@]} -eq 1 ] || { echo "run windows-static on its own (it uses the Windows build image)" >&2; exit 2; }
+    [ ${#presets[@]} -eq 1 ] || { echo "run ${presets[0]} on its own (it uses the Windows build image)" >&2; exit 2; }
     ensure_image slopcap-build-mingw "$MINGW_TAG" "$REPO/docker/Dockerfile.mingw" --build-arg "UBUNTU_IMAGE=$IMAGE"
+    p=${presets[0]}
     # beside the exe, the licenses of the image's parts built into it (Qt, the compiler runtime, the fonts), for the zip
-    exec "${run[@]}" "$MINGW_IMAGE" bash -c "set -e; cmake --preset windows-static; cmake --build --preset windows-static
-        rm -rf build/windows-static/licenses; cp -r /opt/licenses build/windows-static/licenses"
+    exec "${run[@]}" "$MINGW_IMAGE" bash -c "set -e; cmake --preset $p; cmake --build --preset $p
+        rm -rf build/$p/licenses; cp -r /opt/licenses build/$p/licenses"
 fi
 # ThreadSanitizer turns off address-space randomisation at startup via personality(2), which Docker's default seccomp
 # profile blocks. Relax seccomp for TSan runs only (a local, short-lived build container).

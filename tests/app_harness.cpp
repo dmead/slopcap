@@ -18,6 +18,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QTcpSocket>
 
 #include <algorithm>
 #include <cmath>
@@ -164,25 +165,50 @@ void Modals::clear() {
 
 // ---------------------------------------------------------------- INDI
 
+#ifdef _WIN32
+namespace {
+// No indiserver for Windows: INDI's own runs in WSL (SLOPCAP_INDI_WSL names the distro), reached over localhost.
+QStringList inWsl(const QStringList& cmd) { return QStringList{"-d", qEnvironmentVariable("SLOPCAP_INDI_WSL"), "-e"} + cmd; }
+}  // namespace
+#endif
+
 SimServer::SimServer(const QStringList& drivers) {
+#ifdef _WIN32
+    if (qEnvironmentVariable("SLOPCAP_INDI_WSL").isEmpty()) return;
+    const QString need = "for p in indiserver " + drivers.join(' ') + "; do command -v $p >/dev/null || exit 1; done";
+    if (QProcess::execute("wsl.exe", inWsl({"sh", "-c", need})) != 0) return;
+#else
     if (QStandardPaths::findExecutable("indiserver").isEmpty()) return;
     for (const auto& d : drivers)
         if (QStandardPaths::findExecutable(d).isEmpty()) return;
+#endif
     std::random_device rd;
     port = static_cast<quint16>(20000 + rd() % 20000);
     QStringList args{"-p", QString::number(port)};
-#ifdef __linux__
-    // Linux indiserver also listens on a local socket: a private one keeps clear of a running server's
+#if defined(__linux__) || defined(_WIN32)
+    // Linux indiserver (also WSL's) listens on a local socket too: a private one keeps clear of a running server's
     args = QStringList{"-u", QString("/tmp/slopcap-app-test-%1").arg(port)} + args;
 #endif
+#ifdef _WIN32
+    proc.start("wsl.exe", inWsl(QStringList{"indiserver"} + args + drivers));
+    ok = proc.waitForStarted(10000) && waitFor([this] {   // WSL may have to start up first
+        QTcpSocket s;
+        s.connectToHost("127.0.0.1", port);
+        return s.waitForConnected(300);
+    }, 20000);
+#else
     proc.start("indiserver", args + drivers);
     ok = proc.waitForStarted(3000);
     pump(700);   // let it bind
+#endif
 }
 
 SimServer::~SimServer() {
     proc.kill();
     proc.waitForFinished(2000);
+#ifdef _WIN32
+    if (port) QProcess::execute("wsl.exe", inWsl({"pkill", "-f", QString("indiserver -u /tmp/slopcap-app-test-%1").arg(port)}));
+#endif
 }
 
 // ---------------------------------------------------------------- files and settings
