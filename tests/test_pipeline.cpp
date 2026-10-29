@@ -3,6 +3,8 @@
 #include "pipeline/capture_session.hpp"
 #include "pipeline/frame_ring.hpp"
 #include "test_util.hpp"
+#include "util/cpu_time.hpp"
+#include "util/nap.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -83,6 +85,52 @@ TEST_CASE("FrameRing passes 200k frames between threads without loss or reorderi
     CHECK(ordered);
     CHECK(expect == kFrames);
     CHECK(ring.highWater() <= 8);
+}
+
+// Regression (2026-10-29): next() polled with 200 us naps, which in a mingw build on Windows don't sleep at all, so
+// the writer spun a whole core whenever it waited: SlopCap used 1.1 cores at 640x480 where SharpCap used 0.2.
+TEST_CASE("FrameRing: next() sleeps while it waits, and a publish or close wakes it at once") {
+    FrameRing ring(4, 64);
+    const auto cpu0 = threadCpuTime();
+    const auto t0 = std::chrono::steady_clock::now();
+    CHECK_FALSE(ring.next(400ms));
+    CHECK(std::chrono::steady_clock::now() - t0 >= 350ms);
+    CHECK(threadCpuTime() - cpu0 < 50ms);   // spinning: ~400 ms
+
+    std::thread producer([&] {
+        std::this_thread::sleep_for(50ms);
+        ring.publish(*ring.acquire());
+    });
+    auto t1 = std::chrono::steady_clock::now();
+    const auto s = ring.next(5s);
+    CHECK(std::chrono::steady_clock::now() - t1 < 1s);
+    producer.join();
+    REQUIRE(s);
+    ring.release(*s);
+
+    std::thread closer([&] {
+        std::this_thread::sleep_for(50ms);
+        ring.close();
+    });
+    t1 = std::chrono::steady_clock::now();
+    CHECK_FALSE(ring.next(5s));
+    CHECK(std::chrono::steady_clock::now() - t1 < 1s);
+    closer.join();
+}
+
+// Regression (2026-10-29): std::this_thread::sleep_for under 1 ms returns at once in a mingw build on Windows, and
+// 1 ms takes ~16 ms; polling code (the QHY backend, the simulated camera) naps with nap() instead.
+TEST_CASE("nap sleeps about as long as asked, without spinning") {
+    const auto cpu0 = threadCpuTime();
+    const auto t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < 200; ++i) nap(500us);
+    const auto wall = std::chrono::steady_clock::now() - t0;
+    const auto cpu = threadCpuTime() - cpu0;
+    const double wallMs = std::chrono::duration<double>(wall).count() * 1e3, cpuMs = std::chrono::duration<double>(cpu).count() * 1e3;
+    INFO("200 naps of 0.5 ms: " << wallMs << " ms, CPU " << cpuMs << " ms");
+    CHECK(wall >= 80ms);      // 100 ms asked for
+    CHECK(wall < 1600ms);     // under 8 ms a nap, not a 16 ms timer tick each
+    CHECK(cpu < wall / 4);    // spinning: all of it
 }
 
 namespace {
@@ -334,6 +382,33 @@ TEST_CASE("CaptureSession with no output is a live view: frames reach the previe
     CHECK(s.ringDropped == 0);
     CHECK(seen >= 1);
     CHECK(std::distance(std::filesystem::directory_iterator(dir.path()), {}) == 1);   // only the source file
+}
+
+// Regression (2026-10-29), end to end: a session waiting for a slow camera, in live view or recording the way the
+// window does (direct I/O), must cost next to nothing. One spinning thread is the whole 600 ms.
+TEST_CASE("CaptureSession: waiting for a slow camera costs next to no CPU, in live view and while recording") {
+    TempDir dir;
+    const auto src = makeSer(dir, 64, 32, 20, 1'000'000);   // frames 100 ms apart: 10 fps
+    for (const bool record : {false, true}) {
+        SimCamera cam(src, {SimPace::Realtime, true});
+        CaptureOptions opt;
+        opt.ringBytes = 64 * 4096;
+        if (record) {
+            opt.output = dir / "slow.ser";
+            opt.directIO = true;
+        }
+        CaptureSession session(cam, opt);
+        const auto cpu0 = processCpuTime();
+        session.start();
+        std::this_thread::sleep_for(600ms);
+        session.stop();
+        const auto cpu = processCpuTime() - cpu0;
+        const double cpuMs = std::chrono::duration<double>(cpu).count() * 1e3;
+        INFO((record ? "recording" : "live view") << ": " << cpuMs << " ms CPU in 600 ms, " << session.stats().delivered << " frames");
+        CHECK(session.stats().error.empty());
+        CHECK(session.stats().delivered >= 3);
+        CHECK(cpu < 150ms);
+    }
 }
 
 TEST_CASE("CaptureSession runs posted actions on the capture thread and reports their errors as notices") {

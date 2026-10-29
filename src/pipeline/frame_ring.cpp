@@ -5,7 +5,6 @@
 #include <cstring>
 #include <new>
 #include <stdexcept>
-#include <thread>
 
 namespace slopcap {
 
@@ -64,23 +63,37 @@ void FrameRing::publish(uint32_t slot) {
     std::size_t hw = highWater_.load(std::memory_order_relaxed);
     while (q > hw && !highWater_.compare_exchange_weak(hw, q, std::memory_order_relaxed)) {
     }
+    wake(false);
 }
 
+// Sleep, don't poll: a polling nap of 200 us didn't sleep at all on Windows (mingw's sleep_for returns at once
+// under 1 ms), so the writer spun a whole core whenever it waited.
 std::optional<uint32_t> FrameRing::next(std::chrono::milliseconds timeout) {
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-    for (;;) {
-        if (auto s = filled_.pop()) return s;
-        if (closed_.load(std::memory_order_acquire)) return filled_.pop();   // drain a final publish
-        if (std::chrono::steady_clock::now() >= deadline) return std::nullopt;
-        // Poll: std::atomic::wait has no timeout. At 168 fps a frame is ~6 ms, so a 200 us nap costs nothing.
-        std::this_thread::sleep_for(std::chrono::microseconds(200));
+    if (auto s = filled_.pop()) return s;
+    {
+        std::unique_lock lock(waitMutex_);
+        // publish() and close() change the state before taking the mutex to notify, so checking under it can't
+        // miss a wake-up
+        waitCv_.wait_for(lock, timeout, [this] { return filled_.size() > 0 || closed_.load(std::memory_order_acquire); });
     }
+    return filled_.pop();   // nullopt on timeout, or once closed and drained
 }
 
 void FrameRing::release(uint32_t slot) { free_.push(slot); }
 
 void FrameRing::close() {
     closed_.store(true, std::memory_order_release);
+    wake(true);
+}
+
+void FrameRing::wake(bool all) {
+    {
+        std::lock_guard lock(waitMutex_);
+    }
+    if (all)
+        waitCv_.notify_all();
+    else
+        waitCv_.notify_one();
 }
 
 std::size_t FrameRing::queued() const { return filled_.size(); }

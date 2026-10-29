@@ -293,3 +293,25 @@ TEST_CASE("QHY: streaming", "[qhy]") {
     CHECK_FALSE(f.live);   // destroyed while streaming
     CHECK_FALSE(f.open);
 }
+
+// Regression (2026-10-29): the SDK has no blocking read, so readFrame polls; it napped with sleep_for(500 us), which
+// in a mingw build on Windows doesn't sleep at all: a QHY camera waiting for its next frame spun a whole core.
+TEST_CASE("QHY: waiting for a frame polls about every half millisecond, not in a busy loop", "[qhy]") {
+    auto& f = fake::qhy();
+    f.reset();
+    QhyCamera c;
+    c.setRoi({0, 0, 320, 240, 1});
+    std::vector<std::byte> buf(c.frameBytes());
+    FrameInfo fi;
+    c.startStream();
+    constexpr int kNever = 1'000'000'000;
+    f.notReady = kNever;
+    const auto t0 = std::chrono::steady_clock::now();
+    CHECK(c.readFrame(buf, fi, 300ms) == ReadResult::Timeout);
+    const int polls = kNever - f.notReady;
+    const double ms = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() * 1e3;
+    INFO(polls << " polls in " << ms << " ms");
+    CHECK(polls < 3000);   // spinning: millions
+    CHECK(polls > 30);     // often enough for a fast camera: not one poll per 16 ms timer tick
+    f.notReady = 0;
+}

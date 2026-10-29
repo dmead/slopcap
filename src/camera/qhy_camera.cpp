@@ -1,4 +1,5 @@
 #include "camera/qhy_camera.hpp"
+#include "util/nap.hpp"
 
 #include <qhyccd.h>
 
@@ -325,7 +326,7 @@ ReadResult QhyCamera::readFrame(std::span<std::byte> dst, FrameInfo& out, std::c
             return ReadResult::Ok;
         }
         if (std::chrono::steady_clock::now() >= deadline) return ReadResult::Timeout;
-        std::this_thread::sleep_for(std::chrono::microseconds(500));
+        nap(std::chrono::microseconds(500));   // the SDK has no blocking read; sleep_for here spun a core on Windows
     }
 }
 

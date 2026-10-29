@@ -170,6 +170,13 @@ jobs:
           $ser = Get-ChildItem $out -Filter *.ser
           if (-not $ser) { throw "no recording written" }
           $ser | Format-Table Name, Length
+          # The recording must leave the CPU mostly idle: a thread spinning while it waits costs a whole core
+          # (2026-10-29: sub-millisecond sleeps don't sleep in a mingw build).
+          $stop = Select-String -Path $log.FullName -Pattern "record: stop.*cpu ([0-9.]+) cores" | Select-Object -Last 1
+          if (-not $stop) { throw "no CPU figure on the 'record: stop' line" }
+          $cores = [double]::Parse($stop.Matches[0].Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture)
+          "recording used $cores cores"
+          if ($cores -ge 0.7) { throw "the recording used $cores cores (limit 0.7): something spins" }
           if (-not (Select-String -Path $log.FullName -Pattern "preview: The preview needs OpenGL 3.3" -Quiet)) {
             Write-Warning "no 'preview needs OpenGL 3.3' line: this runner has a GL 3.3 context after all?"
           }

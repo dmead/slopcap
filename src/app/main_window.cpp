@@ -1533,6 +1533,8 @@ void MainWindow::startSession(bool record) {
                           << r.width << "x" << r.height << "+" << r.x << "," << r.y << "bin" << r.bin << "·" << cam_->bitDepth() << "-bit ·"
                           << "target" << targetName() << "· filter" << filter_->currentText() << "·" << controls.join(' ');
         statsLogTick_ = 0;
+        sessionCpu_.start();
+        statsCpu_.start();
         preview_->setSource(&tap_, cam_->info().bayer);
     }
     for (auto* w : std::initializer_list<QWidget*>{roiPreset_, roiCentreBtn_, roiMax_, bitsBox_, highSpeed_, readout_}) w->setEnabled(!recording_);
@@ -1550,9 +1552,10 @@ void MainWindow::stopSession() {
     const auto s = session_->stats();
     qInfo().noquote() << (recording_ ? "record: stop" : "preview: stop") << QString::fromStdString(std::format(
                              "· {} delivered, {} written, {:.1f} s, {:.1f} fps, dropped camera {} disk {}, ring peak {}/{}, {:.0f} MB/s, "
-                             "write p50 {} us p99 {} us max {} us{}",
+                             "write p50 {} us p99 {} us max {} us, cpu {:.2f} cores{}",
                              s.delivered, s.written, s.seconds, s.captureFps, s.cameraDropped, s.ringDropped, s.ringHighWater,
-                             s.ringCapacity, s.writeMBps, s.writeP50Us, s.writeP99Us, s.writeMaxUs, s.error.empty() ? "" : " · error: " + s.error));
+                             s.ringCapacity, s.writeMBps, s.writeP50Us, s.writeP99Us, s.writeMaxUs, sessionCpu_.cores(),
+                             s.error.empty() ? "" : " · error: " + s.error));
     if (recording_ && s.written > 0) {
         // WinJUPOS wants the mid-capture time in the name: rename now that the length is known.
         const QDateTime mid = recStartUtc_.addMSecs(static_cast<qint64>(s.seconds * 500));
@@ -1670,12 +1673,14 @@ void MainWindow::updateStats() {
         const auto& l = focus_->live();
         qInfo().noquote() << QString::fromStdString(std::format(
                                  "stats: {} {:.0f} s · {:.1f} fps · display {:.0f} fps · {} written · dropped camera {} disk {} · ring {}/{} "
-                                 "(peak {}) · {:.0f} MB/s · write p99 {} us",
+                                 "(peak {}) · {:.0f} MB/s · write p99 {} us · cpu {:.2f} cores",
                                  recording_ ? "recording" : "preview", s.seconds, s.captureFps, preview_->displayFps(), s.written,
-                                 s.cameraDropped, s.ringDropped, s.ringQueued, s.ringCapacity, s.ringHighWater, s.writeMBps, s.writeP99Us))
+                                 s.cameraDropped, s.ringDropped, s.ringQueued, s.ringCapacity, s.ringHighWater, s.writeMBps, s.writeP99Us,
+                                 statsCpu_.cores()))
                           << "·" << freeText << "· focuser" << (focus_->focuser().ready() ? QString::number(focus_->focuser().position()) : "-")
                           << "· sharpness R/G/B" << QString("%1/%2/%3").arg(l.median[0], 0, 'g', 4).arg(l.median[1], 0, 'g', 4).arg(l.median[2], 0, 'g', 4)
                           << "· target" << targetName();
+        statsCpu_.start();
     }
     theme::reserveWidth(fRing_, recording_ ? "buffer 100% · 99,999 / 99,999" : "");
     theme::reserveWidth(fDisk_, recording_ ? "disk 9999 MB/s · 9.9 TB free · 9999 min" : "");

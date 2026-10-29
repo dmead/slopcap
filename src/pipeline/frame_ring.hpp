@@ -1,20 +1,23 @@
 // Fixed pool of pre-allocated, page-aligned frame slots handed between exactly one producer (the capture thread)
-// and one consumer (the writer) without locks or copies:
+// and one consumer (the writer) through lock-free queues, without copies:
 //
 //   capture: slot = acquire()  ->  camera writes pixels into slot  ->  publish(slot)
 //   writer:  slot = next()     ->  write slot to disk               ->  release(slot)
 //
 // If every slot is in use the producer gets nullopt and must drop the frame (counted by the caller); capture never
-// waits for the disk. Slots are page-aligned so they can later go straight to O_DIRECT / io_uring writes.
+// waits for the disk. A consumer with nothing to do sleeps on a condition variable until publish() or close().
+// Slots are page-aligned so they can later go straight to O_DIRECT / io_uring writes.
 #pragma once
 
 #include "camera/camera.hpp"
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <vector>
@@ -80,6 +83,9 @@ private:
     std::vector<Slot> slots_;
     Spsc free_;     // writer -> capture
     Spsc filled_;   // capture -> writer
+    void wake(bool all);
+    std::mutex waitMutex_;               // only for the consumer's sleep; the queues don't use it
+    std::condition_variable waitCv_;
     std::atomic<bool> closed_{false};
     std::atomic<std::size_t> highWater_{0};
 };

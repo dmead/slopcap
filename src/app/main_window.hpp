@@ -11,6 +11,7 @@
 #include "camera/camera.hpp"
 #include "pipeline/capture_session.hpp"
 #include "preview/latest_frame.hpp"
+#include "util/cpu_time.hpp"
 
 #include <QDateTime>
 #include <QElapsedTimer>
@@ -168,6 +169,7 @@ private:
     RawHistogramSection* rawHist_ = nullptr;
     QElapsedTimer rawHistClock_;
     int statsLogTick_ = 0;   // stats lines go to the session log every 40 ticks
+    CpuMeter sessionCpu_, statsCpu_;   // the program's CPU use, in the session summary and each stats line
     // the automatic target (Target: Auto)
     QElapsedTimer identifyClock_;
     QString autoName_, pendingAutoName_, autoDetail_, autoNotes_;

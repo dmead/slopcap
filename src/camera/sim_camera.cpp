@@ -1,4 +1,5 @@
 #include "camera/sim_camera.hpp"
+#include "util/nap.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -133,7 +134,7 @@ ReadResult SimCamera::readFrame(std::span<std::byte> dst, FrameInfo& out, std::c
                 std::this_thread::sleep_for(timeout);
                 return ReadResult::Timeout;
             }
-            std::this_thread::sleep_until(due);
+            nap(std::chrono::duration_cast<std::chrono::microseconds>(due - now));   // sleep_until spins near the end on Windows
         }
     }
 

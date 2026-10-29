@@ -113,6 +113,13 @@ windows_smoke() {   # as CI's windows-smoke: replay a generated recording, recor
     cat "$log"
     grep -q "record: start" "$log" || { echo "the recording didn't start"; return 1; }
     ls -l "$tmp"/rec/*.ser || { echo "no recording written"; return 1; }
+    # The recording must leave the CPU mostly idle: a thread spinning while it waits costs a whole core (2026-10-29:
+    # sub-millisecond sleeps don't sleep in a mingw build).
+    local cores
+    cores=$(grep "record: stop" "$log" | grep -o "cpu [0-9.]* cores" | awk '{print $2}' | tail -1)
+    [ -n "$cores" ] || { echo "no CPU figure on the 'record: stop' line"; return 1; }
+    echo "recording used $cores cores"
+    awk -v c="$cores" 'BEGIN { exit !(c < 0.7) }' || { echo "the recording used $cores cores (limit 0.7): something spins"; return 1; }
     rm -rf "$tmp"
 }
 
