@@ -3,6 +3,7 @@
 #include "app/session_log.hpp"
 #include "app/theme.hpp"
 #include "app_harness.hpp"
+#include "preview/preview_widget.hpp"
 
 #include <QApplication>
 #include <QDir>
@@ -23,10 +24,7 @@ int main(int argc, char** argv) {
     qputenv("HOME", home.q().toUtf8());
     for (const char* v : {"XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"}) qputenv(v, (home.q() + "/" + v).toUtf8());
 #endif
-    QSurfaceFormat fmt;
-    fmt.setVersion(3, 3);
-    fmt.setProfile(QSurfaceFormat::CoreProfile);
-    QSurfaceFormat::setDefaultFormat(fmt);
+    QSurfaceFormat::setDefaultFormat(slopcap::preview::surfaceFormat());   // the program's own
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     QApplication app(argc, argv);
     if (!QGuiApplication::primaryScreen()) {

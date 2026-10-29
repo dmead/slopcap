@@ -100,8 +100,9 @@ struct TempDir {
     QString file(const QString& name) const { return q() + "/" + name; }
 };
 
-/// A SER recording of a disc on a dark sky (RGGB, 8-bit, 25 fps), for sim: cameras.
-QString makeSer(const QString& path, int width = 320, int height = 240, int frames = 50);
+/// A SER recording of a disc on a dark sky (RGGB, 8-bit, 25 fps unless tickStep, 100 ns ticks between frames, says
+/// otherwise), for sim: cameras.
+QString makeSer(const QString& path, int width = 320, int height = 240, int frames = 50, int64_t tickStep = 400'000);
 
 /// Fresh settings (an INI file in a temporary folder, set up by app_main.cpp), with nothing in them.
 void clearSettings();

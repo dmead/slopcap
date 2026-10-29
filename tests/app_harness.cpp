@@ -198,7 +198,7 @@ TempDir::~TempDir() {
     std::filesystem::remove_all(path, ec);
 }
 
-QString makeSer(const QString& path, int width, int height, int frames) {
+QString makeSer(const QString& path, int width, int height, int frames, int64_t tickStep) {
     ser::Header hd;
     hd.colorId = ser::ColorId::BayerRGGB;
     hd.width = width;
@@ -215,7 +215,7 @@ QString makeSer(const QString& path, int width, int height, int frames) {
                 const int v = d < r ? 150 + ((x / 4 + y / 4) % 2) * 40 : 12;   // a chequered disc: detail to focus on
                 f[static_cast<std::size_t>(y * width + x)] = static_cast<std::byte>(v);
             }
-        wr.writeFrame(f, 639270383770360000 + int64_t{i} * 400'000);   // 25 fps
+        wr.writeFrame(f, 639270383770360000 + int64_t{i} * tickStep);
     }
     return path;
 }

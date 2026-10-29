@@ -10,6 +10,7 @@
 #include <QOpenGLFunctions>
 #include <QOpenGLWidget>
 #include <QPainter>
+#include <QScreen>
 #include <QSurfaceFormat>
 #include <QWheelEvent>
 
@@ -49,6 +50,23 @@ QString glMissing() {
 }
 
 }  // namespace
+
+QSurfaceFormat surfaceFormat() {
+    QSurfaceFormat fmt;
+    fmt.setVersion(3, 3);
+    fmt.setProfile(QSurfaceFormat::CoreProfile);
+#ifdef Q_OS_WIN
+    // No vsync: Intel's Windows OpenGL driver busy-waits for each vertical blank, which kept a whole core busy at any
+    // frame size (2026-10-29, UHD 630: 1.03 cores at 60 paints/s with vsync, 0.11 without). Windows composites every
+    // window, so it doesn't tear; the preview paces its own painting (PreviewWidget::poll).
+    int swap = 0;
+#else
+    int swap = 1;
+#endif
+    if (qEnvironmentVariableIsSet("SLOPCAP_SWAP_INTERVAL")) swap = qEnvironmentVariableIntValue("SLOPCAP_SWAP_INTERVAL");
+    fmt.setSwapInterval(swap);
+    return fmt;
+}
 
 /// The GPU view: a QOpenGLWidget covering the preview, there only when OpenGL 3.3 is. Input goes through to the
 /// PreviewWidget (transparent for mouse events); the GL hooks call back into it.
@@ -108,6 +126,11 @@ PreviewWidget::~PreviewWidget() {
     }
 }
 
+void PreviewWidget::makeCurrent() {
+    ++ownContextSwitches_;
+    gl_->makeCurrent();
+}
+
 void PreviewWidget::refresh() {
     if (gl_) gl_->update();   // paintGL also repaints the overlays
     else overlayLayer_->update();
@@ -116,6 +139,9 @@ void PreviewWidget::refresh() {
 void PreviewWidget::setSource(LatestFrame* source, Bayer bayer) {
     source_ = source;
     bayer_ = bayer;
+    shownClock_.invalidate();   // show the new source's first frame at once, balanced at once
+    wbClock_.invalidate();
+    peakWhite_ = 0;
     if (source_) {
         source_->request();
         timer_.start(8);   // poll faster than the display so a frame waits at most ~8 ms
@@ -138,7 +164,7 @@ void PreviewWidget::setLevels(const Levels& lv) {
     levels_ = lv;
     levels_.wb = wb;
     if (glReady_ && !timer_.isActive()) {   // paused: re-stretch the frame on screen
-        gl_->makeCurrent();
+        makeCurrent();
         renderer_.reprocess(levels_);
         gl_->doneCurrent();
         refresh();
@@ -146,14 +172,31 @@ void PreviewWidget::setLevels(const Levels& lv) {
 }
 
 void PreviewWidget::setOverlay(const QString& key, Overlay overlay) {
+    if (!overlay && !overlays_.contains(key)) return;   // nothing to remove (the target box is cleared every frame without a target)
     if (overlay) overlays_[key] = std::move(overlay);
     else overlays_.erase(key);
-    refresh();
+    overlayDirty_ = true;
+    if (!timer_.isActive()) updateOverlays();   // not previewing: no poll to do it
 }
 
 void PreviewWidget::setCrosshair(bool on) {
     crosshair_ = on;
-    refresh();
+    overlayDirty_ = true;
+    if (!timer_.isActive()) updateOverlays();
+}
+
+void PreviewWidget::updateOverlays() {
+    // Only the overlay layer: the picture under it hasn't changed. At most once per screen refresh while previewing, as
+    // the target box moves with every frame.
+    if (timer_.isActive() && overlayClock_.isValid() && static_cast<double>(overlayClock_.elapsed()) < refreshMs() - 2.0) return;
+    overlayClock_.start();
+    overlayDirty_ = false;
+    overlayLayer_->update();
+}
+
+double PreviewWidget::refreshMs() const {
+    const double hz = screen() && screen()->refreshRate() > 1 ? screen()->refreshRate() : 60.0;
+    return 1000.0 / hz;
 }
 
 void PreviewWidget::fitToWindow() {
@@ -183,10 +226,11 @@ void PreviewWidget::initializeGL() {
         disconnect(glLost_);
         glLost_ = connect(gl_->context(), &QOpenGLContext::aboutToBeDestroyed, this, [this] {
             if (!glReady_) return;
-            gl_->makeCurrent();
+            makeCurrent();
             renderer_.destroy();
             gl_->doneCurrent();
             glReady_ = false;
+            pending_ = false;
         });
     } catch (const std::exception& e) {
         // The probe said 3.3, but the renderer can't start (shaders, framebuffers): capture still works
@@ -199,47 +243,54 @@ void PreviewWidget::poll() {
     // Without a GL context frames still flow (histogram, focus, collimation); only the picture is missing. A GPU view
     // that is on screen but not started yet gets a moment; a hidden one (the window opened on the Focus tab) may not
     // start for a long time, and focus sweeps can't wait for it.
+    if (overlayDirty_) updateOverlays();
     if (!source_ || (!glReady_ && glError_.isEmpty() && isVisible())) return;
     // take() swaps buffers, so the frame is only valid until the next take(): use it right here.
     const LatestFrame::Frame* f = source_->take();
     if (!f) return;
-    const auto& fi = f->info;
+    // Every frame goes to the analyses (focus, collimation, ...); the display work only to one per screen refresh, and
+    // not while the last one still waits for its paint (unless no paint has come for 100 ms: minimised). Done for every
+    // frame, up to 125 a second, it kept SlopCap's window thread busy (2026-10-29).
+    const bool waiting = pending_ && shownClock_.elapsed() < 100;
+    if (!waiting && (!shownClock_.isValid() || static_cast<double>(shownClock_.elapsed()) >= refreshMs() - 2.0)) present(*f);
+    emit rawFrame(*f);
+}
+
+void PreviewWidget::present(const LatestFrame::Frame& f) {
+    shownClock_.start();
+    const auto& fi = f.info;
+    const auto pixels = std::span(f.pixels).first(fi.bytes);
     const auto px = static_cast<std::size_t>(fi.roi.width) * static_cast<std::size_t>(fi.roi.height);
     const int stride = static_cast<int>(std::max<std::size_t>(1, px / 500'000));
-    const auto hist = histogram(std::span(f->pixels).first(fi.bytes), fi.bitDepth, stride);
+    const auto hist = histogram(pixels, fi.bitDepth, stride);
     if (auto_) {
         const auto wb = levels_.wb;
         levels_ = autoLevels(hist);
         levels_.wb = wb;
     }
     if (autoWb_ && bayer_ != Bayer::None) {
-        // smoothed so seeing and noise don't make the colour flicker
-        const auto g = autoWhiteBalance(std::span(f->pixels).first(fi.bytes), fi.roi.width, fi.roi.height, fi.bitDepth, bayer_);
-        for (std::size_t c = 0; c < 3; ++c) levels_.wb[c] = levels_.wb[c] == 1.0 && c != 1 ? g[c] : 0.85 * levels_.wb[c] + 0.15 * g[c];
-        // the gains apply before the levels: keep the white point above the balanced planet, so the gains don't paint its
-        // bright zones white (the raw histogram that set it doesn't know about them)
-        if (auto_)
-            levels_.white = std::clamp(balancedPeak(std::span(f->pixels).first(fi.bytes), fi.roi.width, fi.roi.height, fi.bitDepth, bayer_,
-                                                    levels_.wb) * 1.02,
-                                       levels_.white, 1.0);
+        // ten times a second: smoothed anyway, so seeing and noise don't make the colour flicker
+        if (!wbClock_.isValid() || wbClock_.elapsed() >= 100) {
+            wbClock_.start();
+            const auto g = autoWhiteBalance(pixels, fi.roi.width, fi.roi.height, fi.bitDepth, bayer_);
+            for (std::size_t c = 0; c < 3; ++c) levels_.wb[c] = levels_.wb[c] == 1.0 && c != 1 ? g[c] : 0.85 * levels_.wb[c] + 0.15 * g[c];
+            // the gains apply before the levels: keep the white point above the balanced planet, so the gains don't paint
+            // its bright zones white (the raw histogram that set it doesn't know about them)
+            if (auto_) peakWhite_ = balancedPeak(pixels, fi.roi.width, fi.roi.height, fi.bitDepth, bayer_, levels_.wb) * 1.02;
+        }
+        if (auto_) levels_.white = std::clamp(peakWhite_, levels_.white, 1.0);
     }
     if (glReady_) {
-        const QSize before = imageSize();
-        gl_->makeCurrent();
-        auto lv = levels_;
-        if (!debayer_) lv.wb = {1, 1, 1};
-        renderer_.process(f->pixels.data(), fi.roi.width, fi.roi.height, fi.bitDepth, debayer_ ? bayer_ : Bayer::None, lv);
-        gl_->doneCurrent();
-        if (imageSize() != before) centre_ = {-1, -1};   // new ROI: recentre
+        // Uploaded in paintGL, where Qt makes the context current anyway: making it current here as well, per frame, is
+        // costly on Intel's Windows driver.
+        shownPixels_.assign(pixels.begin(), pixels.end());
+        shownInfo_ = fi;
+        shownLevels_ = levels_;
+        pending_ = true;
+        gl_->update();
+    } else {
+        refresh();
     }
-    refresh();
-
-    ++fpsFrames_;
-    if (fpsClock_.elapsed() >= 1000) {
-        fps_ = fpsFrames_ * 1000.0 / static_cast<double>(fpsClock_.restart());
-        fpsFrames_ = 0;
-    }
-    emit rawFrame(*f);
     emit frameShown(hist, levels_, fi);
 }
 
@@ -261,13 +312,32 @@ void PreviewWidget::paintGL() {
         overlayLayer_->update();
         return;
     }
+    if (pending_) {
+        const auto& fi = shownInfo_;
+        const QSize before = imageSize();
+        auto lv = shownLevels_;
+        if (!debayer_) lv.wb = {1, 1, 1};
+        renderer_.process(shownPixels_.data(), fi.roi.width, fi.roi.height, fi.bitDepth, debayer_ ? bayer_ : Bayer::None, lv);
+        pending_ = false;
+        if (imageSize() != before) centre_ = {-1, -1};   // new ROI: recentre
+        ++fpsFrames_;
+        if (fpsClock_.elapsed() >= 1000) {
+            fps_ = fpsFrames_ * 1000.0 / static_cast<double>(fpsClock_.restart());
+            fpsFrames_ = 0;
+        }
+    }
     const qreal dpr = devicePixelRatioF();
     const QTransform t = imageToWidget();
     const QSize s = imageSize();
     const QRectF r = t.mapRect(QRectF(0, 0, s.width(), s.height()));
     renderer_.draw(gl_->defaultFramebufferObject(), static_cast<int>(width() * dpr), static_cast<int>(height() * dpr), r.x() * dpr,
                    r.y() * dpr, r.width() * dpr, r.height() * dpr);
-    overlayLayer_->update();
+    // The overlays sit in image coordinates: repaint them when zoom, pan, size or the image changed, not with every
+    // frame (Qt then copies the whole overlay layer into a texture, every paint).
+    if (t != overlayTransform_) {
+        overlayTransform_ = t;
+        overlayLayer_->update();
+    }
 }
 
 void PreviewWidget::resizeEvent(QResizeEvent* e) {

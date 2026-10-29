@@ -19,6 +19,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QScreen>
 #include <QSettings>
 #include <QSlider>
 #include <QSpinBox>
@@ -421,6 +422,54 @@ TEST_CASE("window: a replayed recording as the camera: preview, controls, record
     w.close();
     REQUIRE(m.done());
     CHECK_FALSE(w.isVisible());
+    CHECK(unexpectedModals() == "");
+}
+
+// Regression (2026-10-29): SlopCap's window thread kept a whole core busy on a Windows machine with Intel graphics, at
+// any frame size. That driver busy-waits for each vertical blank, so on Windows SlopCap draws without vsync; the
+// preview then has to pace itself, and every switch of GL context is costly there too.
+TEST_CASE("window: OpenGL without vsync on Windows, with it elsewhere; SLOPCAP_SWAP_INTERVAL overrides", "[app]") {
+    qunsetenv("SLOPCAP_SWAP_INTERVAL");
+    const auto f = preview::surfaceFormat();
+    CHECK(f.version() == qMakePair(3, 3));
+    CHECK(f.profile() == QSurfaceFormat::CoreProfile);
+#ifdef _WIN32
+    CHECK(f.swapInterval() == 0);
+#else
+    CHECK(f.swapInterval() == 1);
+#endif
+    qputenv("SLOPCAP_SWAP_INTERVAL", "2");
+    CHECK(preview::surfaceFormat().swapInterval() == 2);
+    qunsetenv("SLOPCAP_SWAP_INTERVAL");
+}
+
+TEST_CASE("window: the preview paints once per screen refresh at most, and leaves the GL context to painting", "[app]") {
+    clearSettings();
+    Modals::get().clear();
+    TempDir dir;
+    const QString ser = makeSer(dir.file("fast.ser"), 160, 120, 100, 25'000);   // 400 fps: faster than any screen
+    MainWindow w;
+    MainWindowProbe p(w);
+    w.resize(1000, 700);
+    w.show();
+    REQUIRE(QTest::qWaitForWindowExposed(&w));
+    w.connectCamera("sim-loop:" + ser);
+    REQUIRE(p.waitForFrames(30));
+    if (p.preview->imageSize().isEmpty()) SKIP("no OpenGL 3.3 here: the preview shows a message instead");
+    CHECK(p.preview->imageSize() == QSize(160, 120));   // frames reach the GPU
+    int raw = 0, shown = 0;
+    const auto c1 = QObject::connect(p.preview, &preview::PreviewWidget::rawFrame, p.preview, [&raw] { ++raw; });
+    const auto c2 = QObject::connect(p.preview, &preview::PreviewWidget::frameShown, p.preview, [&shown] { ++shown; });
+    QTest::qWait(2500);   // displayFps is counted over a second
+    QObject::disconnect(c1);
+    QObject::disconnect(c2);
+    const double hz = w.screen() && w.screen()->refreshRate() > 1 ? w.screen()->refreshRate() : 60;
+    INFO("screen " << hz << " Hz, preview " << p.preview->displayFps() << " fps; in 2.5 s " << raw << " frames analysed, " << shown << " shown");
+    CHECK(p.preview->displayFps() > 0);
+    CHECK(p.preview->displayFps() <= hz * 1.15 + 2);   // unpaced: a paint per 8 ms poll, 125 a second
+    CHECK(shown <= 2.5 * (hz * 1.15 + 2));             // and the display work (histogram, stretch, balance) with it
+    CHECK(raw > shown);                                // while focus, collimation, ... get every frame the preview takes
+    CHECK(p.preview->ownContextSwitches() == 0);       // no makeCurrent of its own per frame
     CHECK(unexpectedModals() == "");
 }
 

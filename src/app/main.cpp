@@ -8,6 +8,7 @@
 #include "app/theme.hpp"
 #include "camera/open_camera.hpp"
 #include "mounts/open_mount.hpp"
+#include "preview/preview_widget.hpp"
 
 #include <QApplication>
 #include <QCommandLineParser>
@@ -63,11 +64,7 @@ void prepareCameraSdks() {
 }  // namespace
 
 int main(int argc, char** argv) {
-    QSurfaceFormat fmt;
-    fmt.setVersion(3, 3);
-    fmt.setProfile(QSurfaceFormat::CoreProfile);
-    fmt.setSwapInterval(1);
-    QSurfaceFormat::setDefaultFormat(fmt);
+    QSurfaceFormat::setDefaultFormat(slopcap::preview::surfaceFormat());
 
     QApplication app(argc, argv);
     QApplication::setOrganizationName("SlopCap");

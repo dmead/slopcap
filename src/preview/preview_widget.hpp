@@ -1,5 +1,5 @@
-// The live view: polls a LatestFrame at display rate, uploads each new frame to the GPU (GlRenderer) and keeps the
-// histogram and auto-stretch levels up to date. Zoom with the wheel (around the cursor), pan by dragging, double-click
+// The live view: polls a LatestFrame faster than the display, keeps the histogram and auto-stretch levels up to date
+// for every frame it takes, and uploads the latest one to the GPU (GlRenderer) when it paints. Zoom with the wheel (around the cursor), pan by dragging, double-click
 // or F to fit, 1 for 1:1. Overlays (crosshair, focus window, collimation circles, ...) are painted on top in image
 // coordinates. Owns no camera; whoever runs the CaptureSession hands it the tap.
 #pragma once
@@ -10,6 +10,7 @@
 
 #include <QElapsedTimer>
 #include <QPointF>
+#include <QSurfaceFormat>
 #include <QTimer>
 #include <QTransform>
 #include <QWidget>
@@ -17,11 +18,16 @@
 #include <array>
 #include <functional>
 #include <map>
+#include <vector>
 
 class QOpenGLWidget;
 class QPainter;
 
 namespace slopcap::preview {
+
+/// The OpenGL format for the whole program: set it as the default before the QApplication exists. Vsync off on
+/// Windows (Intel's driver busy-waits for it), on elsewhere; SLOPCAP_SWAP_INTERVAL=N overrides.
+QSurfaceFormat surfaceFormat();
 
 /// A plain widget holding the GPU view (a QOpenGLWidget child) only when the machine has OpenGL 3.3: on an older
 /// context (Windows' own OpenGL 1.1 without a GPU driver, some Remote Desktop sessions) Qt can't even composite a
@@ -54,6 +60,9 @@ public:
     void setDebayer(bool on);                 ///< off: show the raw mosaic as grey (checks focus/hot pixels per site)
     bool fitted() const { return zoom_ == 1.0; }
     QSize imageSize() const { return {renderer_.imageWidth(), renderer_.imageHeight()}; }
+    /// Times the preview made its GL context current itself rather than in paintGL (re-stretching a paused image,
+    /// say). None per frame: on Intel's Windows driver every switch is costly. For the tests.
+    int ownContextSwitches() const { return ownContextSwitches_; }
 
 signals:
     void zoomChanged();
@@ -80,6 +89,10 @@ private:
     void paintGL();        ///< from GlView
     void refresh();        ///< repaint: the GPU view if there is one, else the overlays (the message)
     void poll();
+    void present(const LatestFrame::Frame& f);   ///< the display work for a frame the screen will show
+    void updateOverlays();                       ///< repaint the overlay layer, at most once per screen refresh
+    double refreshMs() const;                    ///< the screen's frame interval
+    void makeCurrent();                          ///< outside paintGL: counted (ownContextSwitches)
     double fitScale() const;          ///< widget px per image px at "fit"
     double scale() const { return fitScale() * zoom_; }
     QTransform imageToWidget() const;
@@ -97,6 +110,18 @@ private:
     bool glReady_ = false;
     QMetaObject::Connection glLost_;   ///< to the context's aboutToBeDestroyed
     QString glError_;   ///< why the GPU preview couldn't start (shown in the view instead of crashing)
+    // The frame on its way to the screen, for paintGL to upload: a copy, so the camera keeps flowing meanwhile.
+    std::vector<std::byte> shownPixels_;
+    FrameInfo shownInfo_;
+    Levels shownLevels_;
+    bool pending_ = false;        ///< shownPixels_ not uploaded yet
+    QElapsedTimer shownClock_;    ///< since the last frame was prepared for the screen
+    QElapsedTimer wbClock_;       ///< auto white balance and its white point: ten times a second
+    double peakWhite_ = 0;        ///< white point that keeps the balanced target's bright zones below white
+    bool overlayDirty_ = false;
+    QElapsedTimer overlayClock_;
+    QTransform overlayTransform_;   ///< the image-to-widget transform the overlays were last painted with
+    int ownContextSwitches_ = 0;
     QTimer timer_;
     QElapsedTimer fpsClock_;
     int fpsFrames_ = 0;
