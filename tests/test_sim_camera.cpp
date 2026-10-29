@@ -116,6 +116,67 @@ TEST_CASE("SimCamera converts between 8 and 16 bits") {
     }
 }
 
+namespace {
+
+unsigned adc12(std::size_t p) { return (p * 37 + 5) & 0xfff; }   // a 12-bit reading per pixel, low bits busy
+
+/// One 16x4 mono frame of 12-bit readings in 16-bit samples, `shift` bits up (0: LSB-aligned, 4: MSB-aligned), under a
+/// header that says 12.
+std::filesystem::path make12(const TempDir& dir, const char* name, int shift) {
+    const auto path = dir / name;
+    ser::Header hd;
+    hd.colorId = ser::ColorId::Mono;
+    hd.width = 16;
+    hd.height = 4;
+    hd.bitDepth = 12;
+    ser::Writer wr(path, hd);
+    std::vector<std::byte> f(hd.frameBytes());
+    for (std::size_t p = 0; p < 64; ++p) {
+        const unsigned v = adc12(p) << shift;
+        f[2 * p] = static_cast<std::byte>(v & 0xff);
+        f[2 * p + 1] = static_cast<std::byte>(v >> 8);
+    }
+    wr.writeFrame(f, 639270383770360000);   // a real time (tick 1, the year 1, overflows the system clock)
+    return path;
+}
+
+}  // namespace
+
+// The SER spec's 12 means samples up to 4095; SlopCap itself wrote 12 over MSB-aligned ZWO data until October 2026.
+// Both kinds replay as cameras deliver: MSB-aligned, and the 8-bit view is the high byte of that.
+TEST_CASE("SimCamera: 16-bit samples under a 12-bit header come out MSB-aligned, LSB-aligned or not") {
+    TempDir dir;
+    for (const int shift : {0, 4}) {
+        const auto path = make12(dir, shift ? "msb.ser" : "lsb.ser", shift);
+        INFO((shift ? "MSB" : "LSB") << "-aligned samples");
+        {
+            SimCamera cam(path, {SimCamera::Pace::AsFastAsPossible});
+            CHECK(cam.info().adcBits == 12);
+            cam.startStream();
+            std::vector<std::byte> buf(cam.frameBytes());
+            FrameInfo fi;
+            REQUIRE(cam.readFrame(buf, fi, 100ms) == ReadResult::Ok);
+            REQUIRE(fi.bitDepth == 16);
+            int wrong = 0;
+            for (std::size_t p = 0; p < 64; ++p)
+                if ((std::to_integer<unsigned>(buf[2 * p]) | (std::to_integer<unsigned>(buf[2 * p + 1]) << 8)) != adc12(p) << 4) ++wrong;
+            CHECK(wrong == 0);
+        }
+        {
+            SimCamera cam(path, {SimCamera::Pace::AsFastAsPossible});
+            cam.setBitDepth(8);
+            cam.startStream();
+            std::vector<std::byte> buf(cam.frameBytes());
+            FrameInfo fi;
+            REQUIRE(cam.readFrame(buf, fi, 100ms) == ReadResult::Ok);
+            int wrong = 0;
+            for (std::size_t p = 0; p < 64; ++p)
+                if (std::to_integer<unsigned>(buf[p]) != adc12(p) >> 4) ++wrong;
+            CHECK(wrong == 0);   // before: MSB-aligned data shifted by 4 and clipped at 255
+        }
+    }
+}
+
 TEST_CASE("SimCamera loops when asked") {
     TempDir dir;
     SimCamera cam(makeSer(dir, 8, 4, 3, 59'500), {SimCamera::Pace::AsFastAsPossible, true});

@@ -228,7 +228,7 @@ viewer in full view.
 | `src/camera/sim_camera.*` | `SimCamera`: replays a SER recording as a camera (real-time pacing, ROI, drop counting) |
 | `src/camera/open_camera.*` | opens a camera from a spec: `asi[:N]`, `qhy[:N]`, `playerone[:N]`, `touptek[:N]`, `mallincam[:N]`, `sim:FILE.ser`, `sim-loop:FILE.ser` |
 | `src/pipeline/frame_ring.*` | `FrameRing`: pre-allocated, page-aligned frame slots passed from capture to writer without locks |
-| `src/pipeline/capture_session.*` | `CaptureSession`: the capture and writer threads; counts camera drops apart from ring drops |
+| `src/pipeline/capture_session.*` | `CaptureSession`: the capture and writer threads; counts camera drops apart from ring drops; times and CPU over the capture, the writer's drain apart; the ring's size from free RAM (`recordingRingBytes`) |
 | `src/preview/` | the live view: `LatestFrame` tap, the GPU debayer and stretch (`GlRenderer`), the CPU reference, histograms |
 | `src/analysis/` | per-channel focus scoring (four metrics) and sweep fits, collimation, atmospheric dispersion, low-precision ephemerides (the Moon, Mars to Neptune), target identification |
 | `src/devices/` | a small INDI client (Qt Network), the backlash-aware focuser and the mount (guide pulses, moves, goto, park, tracking) |

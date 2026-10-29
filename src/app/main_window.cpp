@@ -17,6 +17,7 @@
 #include "net/remote_server.hpp"
 #include "preview/histogram_widget.hpp"
 #include "preview/preview_widget.hpp"
+#include "util/memory_info.hpp"
 
 #include <QButtonGroup>
 #include <QCheckBox>
@@ -245,19 +246,25 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         updateCurveInset();
     });
 
+    // The histogram strip, 10 times a second: plenty to read, and every repaint of these raster widgets has Qt copy them
+    // into a texture to compose with the GPU view. The last frame's numbers wait for the timer, so none stay stale.
+    stripTimer_.setSingleShot(true);
+    connect(&stripTimer_, &QTimer::timeout, this, &MainWindow::updateStrip);
     connect(preview_, &preview::PreviewWidget::frameShown, this, [this](const std::array<uint32_t, 256>& hist, const preview::Levels& lv, const FrameInfo&) {
-        histogram_->setData(hist, lv);
-        uint64_t total = 0;
-        int top = 0;
-        for (int b = 0; b < 256; ++b)
-            if (hist[static_cast<std::size_t>(b)]) total += hist[static_cast<std::size_t>(b)], top = b;
-        const double clipped = total ? 100.0 * hist[255] / static_cast<double>(total) : 0;
-        histInfo_->setText(QString("peak %1% · clipped %2%").arg(top * 100 / 255).arg(clipped, 0, 'f', 2));
-        theme::setStyleIfChanged(histInfo_, clipped > 0.1 ? QString("color: %1").arg(theme::kRecText.name()) : "");
+        stripHist_ = hist;
+        stripLevels_ = lv;
+        if (!stripClock_.isValid() || stripClock_.elapsed() >= 100) updateStrip();
+        else if (!stripTimer_.isActive()) stripTimer_.start(static_cast<int>(100 - stripClock_.elapsed()));
     });
     connect(preview_, &preview::PreviewWidget::rawFrame, this, [this](const LatestFrame::Frame& f) {
         if (!cam_) return;
-        focus_->onFrame(f, cam_->info().bayer);
+        // The live focus score for every frame where it's watched (the Focus tab, a sweep), else 15 a second for the
+        // readouts and the target box: on a planet it takes ~1.6 ms per 1024x768 frame on a small PC, at up to 125
+        // frames a second.
+        if (mode_ == Focus || focus_->sweeping() || !focusClock_.isValid() || focusClock_.elapsed() >= 1000 / 15) {
+            focusClock_.start();
+            focus_->onFrame(f, cam_->info().bayer);
+        }
         if (mode_ == Focus) liveInset_->showFrame(f, cam_->info().bayer, preview_->levels(), focus_->live().last);
         if (mode_ == Collimate) collim_->onFrame(f, cam_->info().bayer);
         if (mode_ == Adc) adc_->onFrame(f, cam_->info().bayer);
@@ -316,6 +323,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     target_->setCurrentText(st.value("record/target", "Auto").toString());
     filter_->setCurrentText(st.value("record/filter", "").toString());
     limit_->setCurrentIndex(std::max(0, limit_->findData(st.value("record/limit", 0).toInt())));
+    if (const int i = displayRate_->findData(st.value("preview/displayFps", preview::PreviewWidget::kDefaultDisplayLimit).toInt()); i >= 0) {
+        const QSignalBlocker block(displayRate_);
+        displayRate_->setCurrentIndex(i);
+    }
+    preview_->setDisplayLimit(displayRate_->currentData().toInt());
     mountSection_->setPulseMs(st.value("mount/pulseMs", 300).toInt());
     camSpec_ = st.value("camera/last").toString();
     Settings s;
@@ -800,6 +812,16 @@ QWidget* MainWindow::buildPreviewPage() {
             preview_->setLevels({});
         }
     });
+    displayRate_ = new QComboBox;
+    for (const auto& [text, fps] : {std::pair{"15 fps", 15}, {"30 fps", 30}, {"60 fps", 60}, {"Screen rate", 0}}) displayRate_->addItem(text, fps);
+    displayRate_->setCurrentIndex(displayRate_->findData(preview::PreviewWidget::kDefaultDisplayLimit));
+    displayRate_->setToolTip("How many frames a second the preview shows. Each costs CPU, here and in a remote desktop viewer; "
+                             "recordings still get every frame.");
+    connect(displayRate_, &QComboBox::currentIndexChanged, this, [this] {
+        preview_->setDisplayLimit(displayRate_->currentData().toInt());
+        QSettings().setValue("preview/displayFps", displayRate_->currentData().toInt());
+    });
+    bh->addWidget(displayRate_);
     auto check = [&](const QString& t, bool on) {
         auto* c = new QCheckBox(t);
         c->setChecked(on);
@@ -1513,6 +1535,7 @@ void MainWindow::startSession(bool record) {
             for (const auto& [name, box] : controlBoxes_) recControls_[name] = box->value();
             opt.output = recordingPath_.toStdString();
             opt.directIO = true;
+            opt.ringBytes = recordingRingBytes(totalRam(), availableRam());
             if (const int lim = limit_->currentData().toInt(); lim > 0) opt.duration = std::chrono::seconds(lim);
         }
     }
@@ -1531,9 +1554,9 @@ void MainWindow::startSession(bool record) {
         for (const auto& [name, box] : controlBoxes_) controls << QString("%1=%2").arg(QString::fromStdString(name)).arg(box->value());
         qInfo().noquote() << (recording_ ? "record: start" : "preview: start") << (recording_ ? recordingPath_ : QString()) << "· ROI"
                           << r.width << "x" << r.height << "+" << r.x << "," << r.y << "bin" << r.bin << "·" << cam_->bitDepth() << "-bit ·"
-                          << "target" << targetName() << "· filter" << filter_->currentText() << "·" << controls.join(' ');
+                          << "target" << targetName() << "· filter" << filter_->currentText() << "·" << controls.join(' ')
+                          << (recording_ ? QString("· buffer %1 MB").arg(opt.ringBytes >> 20) : QString());
         statsLogTick_ = 0;
-        sessionCpu_.start();
         statsCpu_.start();
         preview_->setSource(&tap_, cam_->info().bayer);
     }
@@ -1550,11 +1573,13 @@ void MainWindow::stopSession() {
     if (!session_) return;
     session_->stop();
     const auto s = session_->stats();
+    // seconds, fps and cpu cover the capture; the writer may need a while longer for what's still buffered (the drain)
     qInfo().noquote() << (recording_ ? "record: stop" : "preview: stop") << QString::fromStdString(std::format(
                              "· {} delivered, {} written, {:.1f} s, {:.1f} fps, dropped camera {} disk {}, ring peak {}/{}, {:.0f} MB/s, "
-                             "write p50 {} us p99 {} us max {} us, cpu {:.2f} cores{}",
+                             "write p50 {} us p99 {} us max {} us, cpu {:.2f} cores{}{}",
                              s.delivered, s.written, s.seconds, s.captureFps, s.cameraDropped, s.ringDropped, s.ringHighWater,
-                             s.ringCapacity, s.writeMBps, s.writeP50Us, s.writeP99Us, s.writeMaxUs, sessionCpu_.cores(),
+                             s.ringCapacity, s.writeMBps, s.writeP50Us, s.writeP99Us, s.writeMaxUs, s.cpuCores,
+                             s.drainSeconds >= 0.05 ? std::format(", drain {:.1f} s", s.drainSeconds) : "",
                              s.error.empty() ? "" : " · error: " + s.error));
     if (recording_ && s.written > 0) {
         // WinJUPOS wants the mid-capture time in the name: rename now that the length is known.
@@ -1612,6 +1637,8 @@ void MainWindow::writeSidecar(const QString& serPath, const CaptureStats& s, con
     o << "ROI=" << r.width << "x" << r.height << "\n";
     o << "ROI(Offset)=" << r.x << "x" << r.y << "\n";
     o << "BitDepth=" << cam_->bitDepth() << "\n";
+    // 16-bit samples are MSB-aligned (the SER header says 16): what the sensor's ADC really delivers
+    if (cam_->bitDepth() > 8 && info.adcBits) o << "ADCBits=" << *info.adcBits << "\n";
     o << "Bayer=" << bayerName(info.bayer) << "\n";
     const auto modes = cam_->readoutModes();
     if (!modes.empty()) o << "Readout=" << QString::fromStdString(modes[static_cast<std::size_t>(std::clamp(cam_->readoutMode(), 0, static_cast<int>(modes.size()) - 1))].name) << "\n";
@@ -1705,6 +1732,19 @@ void MainWindow::updateStats() {
         fFrames_->clear();
     }
     fDisplay_->setText(QString("preview %1 fps · GPU debayer").arg(preview_->displayFps(), 0, 'f', 0));
+}
+
+void MainWindow::updateStrip() {
+    stripClock_.start();
+    stripTimer_.stop();
+    histogram_->setData(stripHist_, stripLevels_);
+    uint64_t total = 0;
+    int top = 0;
+    for (int b = 0; b < 256; ++b)
+        if (stripHist_[static_cast<std::size_t>(b)]) total += stripHist_[static_cast<std::size_t>(b)], top = b;
+    const double clipped = total ? 100.0 * stripHist_[255] / static_cast<double>(total) : 0;
+    histInfo_->setText(QString("peak %1% · clipped %2%").arg(top * 100 / 255).arg(clipped, 0, 'f', 2));
+    theme::setStyleIfChanged(histInfo_, clipped > 0.1 ? QString("color: %1").arg(theme::kRecText.name()) : "");
 }
 
 void MainWindow::printSummary() const {

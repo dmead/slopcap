@@ -84,6 +84,35 @@ TEST_CASE("histogram bins 8-bit samples directly and 16-bit by the high byte") {
     CHECK(h[0x80] == 1);
 }
 
+// The preview histograms each shown frame for its auto-stretch levels: over every pixel of a 1024x768 frame that was
+// 7% of SlopCap's window thread on a small PC (2026-10-29). About 100k samples set the levels just as well.
+TEST_CASE("the preview's histogram stride: about 100k samples a frame, and every Bayer site in them") {
+    CHECK(histogramStride(0) == 1);
+    CHECK(histogramStride(50'000) == 1);
+    for (const std::size_t px : {std::size_t{640} * 480, std::size_t{1024} * 768, std::size_t{1920} * 1080, std::size_t{3840} * 2160,
+                                 std::size_t{6248} * 4176}) {
+        const auto s = static_cast<std::size_t>(histogramStride(px));
+        INFO(px << " pixels: stride " << s);
+        CHECK(s % 2 == 1);   // an even stride on an even width samples two of the four sites
+        CHECK(px / s >= 50'000);
+        CHECK(px / s <= 200'000);
+    }
+    // RGGB at R 40, G 120, B 220: a quarter, a half and a quarter of the samples
+    for (const auto [w, hgt] : {std::pair{640, 480}, {1920, 1080}, {3840, 2160}}) {
+        std::vector<std::byte> img(static_cast<std::size_t>(w) * static_cast<std::size_t>(hgt));
+        for (int y = 0; y < hgt; ++y)
+            for (int x = 0; x < w; ++x)
+                img[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] =
+                    std::byte{static_cast<uint8_t>(y % 2 == 0 ? (x % 2 == 0 ? 40 : 120) : (x % 2 == 0 ? 120 : 220))};
+        const auto hist = histogram(img, 8, histogramStride(img.size()));
+        const double n = hist[40] + hist[120] + hist[220];
+        INFO(w << "x" << hgt << ": R " << hist[40] << " G " << hist[120] << " B " << hist[220]);
+        CHECK(hist[40] / n == Catch::Approx(0.25).margin(0.03));
+        CHECK(hist[120] / n == Catch::Approx(0.5).margin(0.03));
+        CHECK(hist[220] / n == Catch::Approx(0.25).margin(0.03));
+    }
+}
+
 TEST_CASE("rawHistogram splits a Bayer frame by channel, in the ADC's units") {
     // 64x32 RGGB, 16-bit, from a 12-bit ADC (MSB-aligned): R = 1000, G = 2000, B saturated (4095) on half the B sites.
     const int w = 64, h = 32;

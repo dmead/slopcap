@@ -33,6 +33,11 @@ double balancedPeak(std::span<const std::byte> pixels, int width, int height, in
 /// 256-bin histogram of one frame (8-bit samples directly, 16-bit by their high byte), optionally on every Nth pixel.
 std::array<uint32_t, 256> histogram(std::span<const std::byte> pixels, int bitDepth, int stride = 1);
 
+/// The stride the preview's histogram uses for a frame of `pixels`: about 100k samples, which is plenty for the
+/// auto-stretch levels. Odd, so a Bayer mosaic's sites are all sampled (an even stride on an even-width frame would
+/// land on two of the four only).
+int histogramStride(std::size_t pixels);
+
 /// The raw readout per colour channel (R, G, B by Bayer site; one channel for mono), in the sensor's own units:
 /// 16-bit samples are MSB-aligned, so with a known ADC depth they are shifted down to 0..2^adcBits-1.
 struct RawHistogram {

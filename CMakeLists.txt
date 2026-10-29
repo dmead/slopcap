@@ -40,6 +40,7 @@ add_library(slopcap_core STATIC
   src/analysis/dispersion.cpp
   src/util/nap.cpp
   src/util/cpu_time.cpp
+  src/util/memory_info.cpp
 )
 target_sources(slopcap_core PRIVATE src/camera/open_camera.cpp)
 target_include_directories(slopcap_core PUBLIC src)

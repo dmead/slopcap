@@ -1,5 +1,6 @@
 // The main window driven as a user would: dialogs and menus, a replayed recording and the fake ZWO / QHY cameras as
 // cameras, the preview, recording, saved settings, full view.
+#include "app/focus_controller.hpp"
 #include "app/focus_views.hpp"
 #include "app/full_view_bar.hpp"
 #include "app/mount_section.hpp"
@@ -15,6 +16,7 @@
 #include <QComboBox>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QEvent>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QLabel>
@@ -30,6 +32,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <functional>
 
 using namespace slopcap;
@@ -444,7 +447,23 @@ TEST_CASE("window: OpenGL without vsync on Windows, with it elsewhere; SLOPCAP_S
     qunsetenv("SLOPCAP_SWAP_INTERVAL");
 }
 
-TEST_CASE("window: the preview paints once per screen refresh at most, and leaves the GL context to painting", "[app]") {
+namespace {
+
+class PaintCounter : public QObject {
+public:
+    int paints = 0;
+    bool eventFilter(QObject*, QEvent* e) override {
+        if (e->type() == QEvent::Paint) ++paints;
+        return false;
+    }
+};
+
+}  // namespace
+
+// Each shown frame costs CPU in SlopCap and in whatever copies the screen: with a remote viewer (here, the Claude
+// session driving the test PC) SlopCap at 60 fps cost the machine ~1 core more than at rest (2026-10-29). The preview
+// shows 30 a second unless asked otherwise; the side panel and the live focus score don't need even that.
+TEST_CASE("window: the preview shows its display rate at most (30 fps unless chosen), the strip and focus score less", "[app]") {
     clearSettings();
     Modals::get().clear();
     TempDir dir;
@@ -458,22 +477,80 @@ TEST_CASE("window: the preview paints once per screen refresh at most, and leave
     REQUIRE(p.waitForFrames(30));
     if (p.preview->imageSize().isEmpty()) SKIP("no OpenGL 3.3 here: the preview shows a message instead");
     CHECK(p.preview->imageSize() == QSize(160, 120));   // frames reach the GPU
-    int raw = 0, shown = 0;
-    const auto c1 = QObject::connect(p.preview, &preview::PreviewWidget::rawFrame, p.preview, [&raw] { ++raw; });
-    const auto c2 = QObject::connect(p.preview, &preview::PreviewWidget::frameShown, p.preview, [&shown] { ++shown; });
-    QTest::qWait(2500);   // displayFps is counted over a second
-    QObject::disconnect(c1);
-    QObject::disconnect(c2);
     const double hz = w.screen() && w.screen()->refreshRate() > 1 ? w.screen()->refreshRate() : 60;
-    INFO("screen " << hz << " Hz, preview " << p.preview->displayFps() << " fps; in 2.5 s " << raw << " frames analysed, " << shown << " shown");
+    PaintCounter strip;
+    p.histogram->installEventFilter(&strip);
+    struct Counts {
+        int raw = 0, shown = 0, scored = 0, stripPaints = 0;
+    };
+    auto measure = [&](int ms) {
+        Counts c;
+        const int paints0 = strip.paints;
+        const auto c1 = QObject::connect(p.preview, &preview::PreviewWidget::rawFrame, p.preview, [&c] { ++c.raw; });
+        const auto c2 = QObject::connect(p.preview, &preview::PreviewWidget::frameShown, p.preview, [&c] { ++c.shown; });
+        const auto c3 = QObject::connect(p.focus, &FocusController::liveUpdated, p.preview, [&c] { ++c.scored; });
+        QTest::qWait(ms);   // displayFps is counted over a second
+        QObject::disconnect(c1);
+        QObject::disconnect(c2);
+        QObject::disconnect(c3);
+        c.stripPaints = strip.paints - paints0;
+        return c;
+    };
+
+    REQUIRE(p.displayRate->currentData().toInt() == 30);
+    auto c = measure(2500);
+    double limit = std::min(30.0, hz);
+    INFO("screen " << hz << " Hz, preview " << p.preview->displayFps() << " fps; in 2.5 s " << c.raw << " frames analysed, " << c.shown
+                   << " shown, " << c.scored << " focus-scored, " << c.stripPaints << " strip repaints");
     CHECK(p.preview->displayFps() > 0);
-    CHECK(p.preview->displayFps() <= hz * 1.15 + 2);   // unpaced: a paint per 8 ms poll, 125 a second
-    CHECK(shown <= 2.5 * (hz * 1.15 + 2));             // and the display work (histogram, stretch, balance) with it
-    // focus, collimation, ... get every frame the preview takes (more than it shows when polls outpace the screen;
-    // a slow build, software OpenGL under a sanitizer, may poll no faster than it paints)
-    CHECK(raw >= shown);
+    CHECK(p.preview->displayFps() <= limit * 1.15 + 2);
+    CHECK(c.shown <= 2.5 * (limit * 1.15 + 2));        // and the display work (histogram, stretch, balance) with it
+    // collimation, ADC, ... get every frame the preview takes (more than it shows when polls outpace the display; a
+    // slow build, software OpenGL under a sanitizer, may poll no faster than it paints)
+    CHECK(c.raw >= c.shown);
+    CHECK(c.scored <= 2.5 * 15 * 1.2 + 3);             // off the Focus tab: 15 a second
+    CHECK(c.stripPaints <= 2.5 * 10 * 1.2 + 4);        // 10 a second
+    CHECK(c.stripPaints > 0);
     CHECK(p.preview->ownContextSwitches() == 0);       // no makeCurrent of its own per frame
+
+    p.displayRate->setCurrentIndex(p.displayRate->findData(15));
+    CHECK(QSettings().value("preview/displayFps").toInt() == 15);
+    measure(1200);   // the fps counter catches up
+    c = measure(1500);
+    INFO("15 fps chosen: preview " << p.preview->displayFps() << " fps, " << c.shown << " shown in 1.5 s");
+    CHECK(p.preview->displayFps() > 0);
+    CHECK(p.preview->displayFps() <= 15 * 1.15 + 2);
+    CHECK(c.shown <= 1.5 * (15 * 1.15 + 2));
+
+    p.displayRate->setCurrentIndex(p.displayRate->findData(0));   // the screen's rate
+    measure(1200);
+    c = measure(1500);
+    INFO("screen rate chosen: preview " << p.preview->displayFps() << " fps");
+    CHECK(p.preview->displayFps() <= hz * 1.15 + 2);   // unpaced it would be a paint per 8 ms poll, 125 a second
+
+    // On the Focus tab the live score takes every frame the preview takes
+    p.modes->button(MainWindow::Focus)->click();
+    c = measure(1500);
+    INFO("Focus tab: " << c.raw << " frames taken, " << c.scored << " scored in 1.5 s");
+    CHECK(c.scored >= c.raw - 2);
+    CHECK(c.scored > 0);
+    p.histogram->removeEventFilter(&strip);
     CHECK(unexpectedModals() == "");
+}
+
+TEST_CASE("window: the display rate is remembered", "[app]") {
+    clearSettings();
+    {
+        MainWindow w;
+        MainWindowProbe p(w);
+        CHECK(p.preview->displayLimit() == preview::PreviewWidget::kDefaultDisplayLimit);
+        p.displayRate->setCurrentIndex(p.displayRate->findData(60));
+        CHECK(p.preview->displayLimit() == 60);
+    }
+    MainWindow w;
+    MainWindowProbe p(w);
+    CHECK(p.displayRate->currentData().toInt() == 60);
+    CHECK(p.preview->displayLimit() == 60);
 }
 
 TEST_CASE("window: numbers that change every frame don't move the layout", "[app]") {

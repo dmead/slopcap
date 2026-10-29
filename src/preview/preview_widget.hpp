@@ -1,5 +1,6 @@
-// The live view: polls a LatestFrame faster than the display, keeps the histogram and auto-stretch levels up to date
-// for every frame it takes, and uploads the latest one to the GPU (GlRenderer) when it paints. Zoom with the wheel (around the cursor), pan by dragging, double-click
+// The live view: polls a LatestFrame faster than the display, hands every frame it takes to the analyses (rawFrame),
+// and prepares one per shown frame (histogram, auto-stretch levels; 30 a second by default) for the GPU (GlRenderer)
+// to upload when it paints. Zoom with the wheel (around the cursor), pan by dragging, double-click
 // or F to fit, 1 for 1:1. Overlays (crosshair, focus window, collimation circles, ...) are painted on top in image
 // coordinates. Owns no camera; whoever runs the CaptureSession hands it the tap.
 #pragma once
@@ -15,6 +16,7 @@
 #include <QTransform>
 #include <QWidget>
 
+#include <algorithm>
 #include <array>
 #include <functional>
 #include <map>
@@ -51,6 +53,11 @@ public:
     const Levels& levels() const { return levels_; }
     bool autoStretch() const { return auto_; }
     double displayFps() const { return fps_; }
+    /// Most frames a second the view shows; 0 = the screen's refresh rate. Every shown frame costs CPU here and in
+    /// whatever copies the screen (a remote desktop viewer); the analyses still get every frame the view takes.
+    void setDisplayLimit(int fps) { displayLimit_ = std::max(0, fps); }
+    int displayLimit() const { return displayLimit_; }
+    static constexpr int kDefaultDisplayLimit = 30;
 
     void setOverlay(const QString& key, Overlay overlay);   ///< replaces; an empty function removes it
     void setCrosshair(bool on);
@@ -90,8 +97,9 @@ private:
     void refresh();        ///< repaint: the GPU view if there is one, else the overlays (the message)
     void poll();
     void present(const LatestFrame::Frame& f);   ///< the display work for a frame the screen will show
-    void updateOverlays();                       ///< repaint the overlay layer, at most once per screen refresh
+    void updateOverlays();                       ///< repaint the overlay layer, at most once per shown frame
     double refreshMs() const;                    ///< the screen's frame interval
+    double frameMs() const;                      ///< the shown frames' interval: the screen's, or longer with a limit
     void makeCurrent();                          ///< outside paintGL: counted (ownContextSwitches)
     double fitScale() const;          ///< widget px per image px at "fit"
     double scale() const { return fitScale() * zoom_; }
@@ -118,6 +126,7 @@ private:
     QElapsedTimer shownClock_;    ///< since the last frame was prepared for the screen
     QElapsedTimer wbClock_;       ///< auto white balance and its white point: ten times a second
     double peakWhite_ = 0;        ///< white point that keeps the balanced target's bright zones below white
+    int displayLimit_ = kDefaultDisplayLimit;
     bool overlayDirty_ = false;
     QElapsedTimer overlayClock_;
     QTransform overlayTransform_;   ///< the image-to-widget transform the overlays were last painted with

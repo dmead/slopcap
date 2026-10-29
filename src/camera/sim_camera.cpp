@@ -47,6 +47,20 @@ SimCamera::SimCamera(const std::filesystem::path& serFile, Options options) : re
     roi_ = {0, 0, h.width, h.height, 1};
     for (const auto& c : kControls) controls_.emplace(c.name, *c.defaultValue);
     full_.resize(h.frameBytes());
+    // A depth below 16 can mean LSB-aligned samples (the SER spec's reading: values up to 2^depth - 1), or
+    // MSB-aligned ones under a header that gives the ADC's depth (SlopCap's own until late October 2026). The first
+    // frame tells: LSB-aligned data has noise in the low bits and nothing above the depth's range.
+    if (srcDepth_ == 16 && h.bitDepth < 16) {
+        reader_.readFrame(0, full_);
+        unsigned low = 0, top = 0;
+        const unsigned lowMask = (1u << (16 - h.bitDepth)) - 1;
+        for (std::size_t i = 0; i + 1 < full_.size(); i += 2) {
+            const unsigned v = std::to_integer<unsigned>(full_[i]) | (std::to_integer<unsigned>(full_[i + 1]) << 8);
+            low |= v & lowMask;
+            top = std::max(top, v);
+        }
+        if (low != 0 && top < (1u << h.bitDepth)) lowShift_ = 16 - h.bitDepth;
+    }
 }
 
 std::vector<ControlInfo> SimCamera::controls() const { return {std::begin(kControls), std::end(kControls)}; }
@@ -166,16 +180,21 @@ void SimCamera::copyRoi(std::span<std::byte> dst) const {
     for (int row = 0; row < roi_.height; ++row) {
         const std::byte* s = full_.data() + static_cast<std::size_t>(roi_.y + row) * srcStride + static_cast<std::size_t>(roi_.x) * srcBps;
         std::byte* d = dst.data() + static_cast<std::size_t>(row) * w * dstBps;
-        if (srcBps == dstBps) {
+        auto sample = [&](std::size_t i) {   // 16-bit, MSB-aligned
+            return (std::to_integer<unsigned>(s[2 * i]) | (std::to_integer<unsigned>(s[2 * i + 1]) << 8)) << lowShift_;
+        };
+        if (srcBps == dstBps && lowShift_ == 0) {
             std::memcpy(d, s, w * srcBps);
         } else if (srcBps == 1) {   // 8 -> 16: value in the high byte, little-endian
             for (std::size_t i = 0; i < w; ++i) { d[2 * i] = std::byte{0}; d[2 * i + 1] = s[i]; }
-        } else {                    // 16 -> 8: scale by the file's real bit depth (e.g. 12-bit data in 16-bit samples)
-            const int shift = std::max(0, reader_.header().bitDepth - 8);
+        } else if (dstBps == 2) {   // LSB-aligned 16 -> MSB-aligned 16
             for (std::size_t i = 0; i < w; ++i) {
-                const unsigned v = std::to_integer<unsigned>(s[2 * i]) | (std::to_integer<unsigned>(s[2 * i + 1]) << 8);
-                d[i] = static_cast<std::byte>(std::min(255u, v >> shift));
+                const unsigned v = sample(i);
+                d[2 * i] = static_cast<std::byte>(v & 0xff);
+                d[2 * i + 1] = static_cast<std::byte>((v >> 8) & 0xff);
             }
+        } else {                    // 16 -> 8: the high byte
+            for (std::size_t i = 0; i < w; ++i) d[i] = static_cast<std::byte>(std::min(255u, sample(i) >> 8));
         }
     }
 }

@@ -4,12 +4,15 @@
 #include "pipeline/frame_ring.hpp"
 #include "test_util.hpp"
 #include "util/cpu_time.hpp"
+#include "util/memory_info.hpp"
 #include "util/nap.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <cmath>
 #include <cstring>
+#include <string>
 #include <thread>
 
 using namespace slopcap;
@@ -340,6 +343,81 @@ TEST_CASE("CaptureSession stops at a frame limit and at a duration") {
     }
 }
 
+// A 30 s recording said "Saved 1405 frames (36.3 s)": 29.9 s of frames plus the writer emptying the ring. The file's
+// mid-time (WinJUPOS names) and the session's CPU figure were off by the same drain.
+TEST_CASE("CaptureSession: seconds, fps and CPU cover the capture; what a slow writer still has to write is the drain") {
+    TempDir dir;
+    SimCamera cam(makeSer(dir, 32, 16, 50, 59'500), {SimPace::Realtime, true});   // ~168 fps
+    CaptureOptions opt;
+    opt.output = dir / "drain.ser";
+    opt.duration = 300ms;
+    opt.beforeWrite = [] { std::this_thread::sleep_for(20ms); };   // a disk that keeps up with 50 frames a second
+    CaptureSession session(cam, opt);
+    session.start();
+    std::this_thread::sleep_for(100ms);
+    CHECK(session.stats().capturing);
+    REQUIRE(session.wait(30s));
+    const auto s = session.stats();
+    INFO(s.delivered << " frames in " << s.seconds << " s, then a drain of " << s.drainSeconds << " s; " << s.captureFps << " fps, cpu "
+                     << s.cpuCores << " cores");
+    CHECK(s.written == s.delivered);
+    CHECK(s.delivered >= 20);
+    CHECK(s.seconds >= 0.29);
+    CHECK(s.seconds < 0.8);           // the capture alone: the writer needs 20 ms a frame, 0.4 s or more in all
+    CHECK(s.drainSeconds >= 0.1);
+    CHECK(std::abs(s.captureFps * s.seconds - static_cast<double>(s.delivered)) < 0.5);
+    CHECK(s.cpuCores >= 0);
+    CHECK(s.cpuCores <= std::thread::hardware_concurrency() + 1.0);
+    CHECK_FALSE(s.capturing);
+    CHECK_FALSE(s.running);
+}
+
+TEST_CASE("recordingRingBytes: a quarter of the free RAM, at most an eighth of all of it, 1 to 4 GiB") {
+    constexpr uint64_t kGiB = uint64_t{1} << 30;
+    CHECK(recordingRingBytes(16 * kGiB, 8 * kGiB) == 2 * kGiB);      // a 16 GB mini PC: 5 s of 4K at 390 MB/s
+    CHECK(recordingRingBytes(16 * kGiB, 6 * kGiB) == 3 * kGiB / 2);  // a quarter of what's free
+    CHECK(recordingRingBytes(8 * kGiB, 6 * kGiB) == 1 * kGiB);       // an eighth of all of it
+    CHECK(recordingRingBytes(4 * kGiB, 1 * kGiB) == 1 * kGiB);       // never below the 1 GiB it always had
+    CHECK(recordingRingBytes(192 * kGiB, 150 * kGiB) == 4 * kGiB);   // nor above 4
+    CHECK(recordingRingBytes(16 * kGiB, std::nullopt) == 2 * kGiB);
+    CHECK(recordingRingBytes(std::nullopt, std::nullopt) == 1 * kGiB);
+    const auto total = totalRam(), avail = availableRam();
+    REQUIRE(total);
+    INFO("this machine: " << (*total >> 20) << " MB, " << (avail ? std::to_string(*avail >> 20) : std::string("?")) << " MB free");
+    CHECK(*total > (uint64_t{256} << 20));
+    if (avail) CHECK(*avail <= *total);
+}
+
+// The cameras' 16-bit samples are MSB-aligned. A header of 12 (the ADC's depth, as SlopCap wrote until October
+// 2026) tells readers the values end at 4095, and they reach 65520.
+TEST_CASE("CaptureSession: 16-bit recordings say 16 bits in the SER header, whatever the ADC's depth") {
+    TempDir dir;
+    const auto src = dir / "adc12.ser";
+    {
+        ser::Header hd;
+        hd.colorId = ser::ColorId::BayerRGGB;
+        hd.width = 32;
+        hd.height = 16;
+        hd.bitDepth = 12;
+        ser::Writer wr(src, hd);
+        std::vector<std::byte> f(hd.frameBytes());
+        for (int i = 0; i < 5; ++i) wr.writeFrame(f, 639270383770360000 + i * 59'500);
+    }
+    SimCamera cam(src, {SimPace::AsFastAsPossible, true});
+    REQUIRE(cam.bitDepth() == 16);
+    REQUIRE(cam.info().adcBits == 12);   // as a 12-bit ZWO sensor reports
+    for (const bool direct : {false, true}) {
+        CaptureOptions opt;
+        opt.output = dir / (direct ? "direct.ser" : "buffered.ser");
+        opt.directIO = direct;
+        opt.frameLimit = 10;
+        CaptureSession session(cam, opt);
+        session.start();
+        REQUIRE(session.wait(10s));
+        CHECK(ser::Reader(opt.output).header().bitDepth == 16);
+    }
+}
+
 TEST_CASE("CaptureSession reports a bad output path before starting the camera") {
     TempDir dir;
     SimCamera cam(makeSer(dir, 16, 8, 5, 59'500), {SimPace::AsFastAsPossible});
@@ -408,6 +486,7 @@ TEST_CASE("CaptureSession: waiting for a slow camera costs next to no CPU, in li
         CHECK(session.stats().error.empty());
         CHECK(session.stats().delivered >= 3);
         CHECK(cpu < 150ms);
+        CHECK(session.stats().cpuCores < 0.5);   // the session's own figure (the log's "cpu N cores") agrees
     }
 }
 

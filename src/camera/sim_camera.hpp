@@ -60,6 +60,7 @@ private:
     CameraInfo info_;
     int srcDepth_;            ///< 8 or 16 bytes-per-sample in the file
     int outDepth_;
+    int lowShift_ = 0;        ///< the file's 16-bit samples sit this far below MSB-aligned (shifted up, as cameras deliver)
     Roi roi_;
     std::map<std::string, double, std::less<>> controls_;
 

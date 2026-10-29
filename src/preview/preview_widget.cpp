@@ -186,9 +186,9 @@ void PreviewWidget::setCrosshair(bool on) {
 }
 
 void PreviewWidget::updateOverlays() {
-    // Only the overlay layer: the picture under it hasn't changed. At most once per screen refresh while previewing, as
+    // Only the overlay layer: the picture under it hasn't changed. At most once per shown frame while previewing, as
     // the target box moves with every frame.
-    if (timer_.isActive() && overlayClock_.isValid() && static_cast<double>(overlayClock_.elapsed()) < refreshMs() - 2.0) return;
+    if (timer_.isActive() && overlayClock_.isValid() && static_cast<double>(overlayClock_.elapsed()) < frameMs() - 2.0) return;
     overlayClock_.start();
     overlayDirty_ = false;
     overlayLayer_->update();
@@ -198,6 +198,8 @@ double PreviewWidget::refreshMs() const {
     const double hz = screen() && screen()->refreshRate() > 1 ? screen()->refreshRate() : 60.0;
     return 1000.0 / hz;
 }
+
+double PreviewWidget::frameMs() const { return displayLimit_ > 0 ? std::max(refreshMs(), 1000.0 / displayLimit_) : refreshMs(); }
 
 void PreviewWidget::fitToWindow() {
     zoom_ = 1;
@@ -248,11 +250,12 @@ void PreviewWidget::poll() {
     // take() swaps buffers, so the frame is only valid until the next take(): use it right here.
     const LatestFrame::Frame* f = source_->take();
     if (!f) return;
-    // Every frame goes to the analyses (focus, collimation, ...); the display work only to one per screen refresh, and
-    // not while the last one still waits for its paint (unless no paint has come for 100 ms: minimised). Done for every
-    // frame, up to 125 a second, it kept SlopCap's window thread busy (2026-10-29).
+    // Every frame goes to the analyses (focus, collimation, ...); the display work only to one per shown frame (the
+    // display limit, at most the screen's rate), and not while the last one still waits for its paint (unless no paint
+    // has come for 100 ms: minimised). Done for every frame, up to 125 a second, it kept SlopCap's window thread busy
+    // (2026-10-29).
     const bool waiting = pending_ && shownClock_.elapsed() < 100;
-    if (!waiting && (!shownClock_.isValid() || static_cast<double>(shownClock_.elapsed()) >= refreshMs() - 2.0)) present(*f);
+    if (!waiting && (!shownClock_.isValid() || static_cast<double>(shownClock_.elapsed()) >= frameMs() - 2.0)) present(*f);
     emit rawFrame(*f);
 }
 
@@ -261,8 +264,7 @@ void PreviewWidget::present(const LatestFrame::Frame& f) {
     const auto& fi = f.info;
     const auto pixels = std::span(f.pixels).first(fi.bytes);
     const auto px = static_cast<std::size_t>(fi.roi.width) * static_cast<std::size_t>(fi.roi.height);
-    const int stride = static_cast<int>(std::max<std::size_t>(1, px / 500'000));
-    const auto hist = histogram(pixels, fi.bitDepth, stride);
+    const auto hist = histogram(pixels, fi.bitDepth, histogramStride(px));
     if (auto_) {
         const auto wb = levels_.wb;
         levels_ = autoLevels(hist);

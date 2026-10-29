@@ -15,9 +15,13 @@ Each recording is two files:
 - **`2026-10-17-0315_4-Saturn.ser`**: the video, in the SER format that AutoStakkert!, PIPP, PSS, SER Player and
   WinJUPOS read. The name is WinJUPOS-style: the date, then the time at the *middle* of the recording to a tenth of a
   minute, then the filter (if set) and the target. Every frame has its own timestamp.
-- **`2026-10-17-0315_4-Saturn.txt`**: what was used: camera, gain, exposure and every other control, ROI, bit depth,
-  readout mode, filter, start time, duration, frame count, the focuser position, and the mount's RA / Dec when a mount
-  is connected.
+- **`2026-10-17-0315_4-Saturn.txt`**: what was used: camera, gain, exposure and every other control, ROI, bit depth
+  (and for 16-bit, the camera's real depth: `ADCBits=12`), readout mode, filter, start time, duration, frame count,
+  the focuser position, and the mount's RA / Dec when a mount is connected.
+
+16-bit recordings hold each value in the top bits of its 16 (a 12-bit camera's 4095 is stored as 65520), as every
+camera delivers them, and their SER header says 16. Recordings made before November 2026 said the camera's depth
+(12) there, which some programs read as values running up to 4095 only; SlopCap's own replay handles both.
 
 A recording that was cut short (a crash, the power going) is still readable: SlopCap keeps the file's header up to date
 while it writes.
@@ -40,7 +44,8 @@ deletes older ones. It records:
 
 - the SlopCap version, the computer, and the settings at start;
 - the camera and its controls, and every change to them;
-- every recording's start and stop, with frames dropped and how fast the disk kept up;
+- every recording's start and stop, with frames dropped, how fast the disk kept up, the CPU SlopCap used, and how
+  long the disk needed after the camera stopped to write what was still in memory (`drain`);
 - a line of statistics every 10 seconds (frame rate, drops, disk speed, free space, sharpness, target);
 - INDI connections and everything the focuser's and mount's drivers say, including errors such as a serial port that
   won't open;

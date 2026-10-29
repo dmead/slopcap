@@ -66,6 +66,8 @@ std::array<uint32_t, 256> histogram(std::span<const std::byte> pixels, int bitDe
     return h;
 }
 
+int histogramStride(std::size_t pixels) { return static_cast<int>(std::max<std::size_t>(1, pixels / 100'000)) | 1; }
+
 RawHistogram rawHistogram(std::span<const std::byte> pixels, int width, int height, int bitDepth, Bayer bayer,
                           std::optional<int> adcBits, int bins, std::size_t maxSamples) {
     RawHistogram r;

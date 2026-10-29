@@ -27,13 +27,20 @@ struct CaptureOptions {
     std::filesystem::path output;                     ///< SER file to write; empty = live view only, nothing recorded
     std::optional<std::chrono::milliseconds> duration;  ///< stop after this long
     std::optional<uint64_t> frameLimit;                 ///< stop after this many frames
-    std::size_t ringBytes = std::size_t{1} << 30;       ///< memory for the ring (default 1 GiB)
+    std::size_t ringBytes = std::size_t{1} << 30;       ///< memory for the ring (default 1 GiB; see recordingRingBytes)
     std::string observer, telescope;                    ///< SER header text
     bool directIO = false;                              ///< unbuffered chunked writer (ser::DirectWriter)
     ser::DirectWriterOptions direct;                    ///< its chunk size, in-flight count, preallocation
     LatestFrame* preview = nullptr;                     ///< if set, the capture thread copies a frame in whenever it asks
     LatestFrame* remote = nullptr;                      ///< the same for the remote stream (net::RemoteServer::tap)
+    std::function<void()> beforeWrite;                  ///< called by the writer thread before each frame (tests: a slow disk)
 };
+
+/// The ring for a recording: a quarter of the RAM that's free, at most an eighth of all of it, between 1 and 4 GiB.
+/// Writing past the disk cache, the ring alone rides out the disk's stalls (an SSD whose fast cache is used up stalls
+/// for hundreds of milliseconds; full frame at 390 MB/s filled 1 GiB to within 4 slots). Free RAM unknown: an eighth
+/// of all of it; that unknown too: 1 GiB.
+std::size_t recordingRingBytes(std::optional<uint64_t> totalRam, std::optional<uint64_t> availableRam);
 
 struct CaptureStats {
     uint64_t delivered = 0;        ///< frames the camera handed us
@@ -43,9 +50,12 @@ struct CaptureStats {
     std::size_t ringCapacity = 0;
     std::size_t ringHighWater = 0;
     std::size_t ringQueued = 0;    ///< frames waiting for the writer right now
-    double seconds = 0;            ///< since start
+    double seconds = 0;            ///< the capture: from start until the camera stopped (or now, while capturing)
+    double drainSeconds = 0;       ///< after capture stopped, until the writer had written what the ring still held
     double captureFps = 0;         ///< delivered / seconds
-    double writeMBps = 0;          ///< written bytes / seconds
+    double writeMBps = 0;          ///< written bytes / the writer's time (capture plus drain)
+    double cpuCores = 0;           ///< the whole process's CPU use over the capture (seconds), in cores
+    bool capturing = false;        ///< the camera is still being read (false while only the drain goes on)
     bool running = false;
     std::string error;             ///< first error from either thread, if any
     std::string notice;            ///< last error from a posted action (the session keeps running)
@@ -88,6 +98,9 @@ private:
     std::atomic<bool> writerDone_{false};
     std::chrono::steady_clock::time_point started_;
     std::atomic<int64_t> finishedNs_{0};   ///< elapsed time when the writer finished (0 = still running)
+    std::atomic<int64_t> captureEndNs_{0};   ///< elapsed time when the camera stopped (0 = still capturing)
+    std::chrono::nanoseconds cpuStart_{0};    ///< the process's CPU time at start
+    std::atomic<int64_t> cpuCaptureNs_{0};   ///< process CPU used from start until the camera stopped
 
     std::atomic<uint64_t> delivered_{0}, written_{0}, ringDropped_{0}, bytesWritten_{0};
     std::atomic<uint64_t> cameraDropped_{0};

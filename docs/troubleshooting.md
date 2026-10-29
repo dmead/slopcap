@@ -34,7 +34,16 @@ There are two kinds, and the session log's stats lines (`dropped camera … disk
 - **Dropped by the camera:** the USB link couldn't deliver. Lower the camera's USB traffic setting (All controls),
   use a smaller ROI or 8-bit, plug the camera straight into the computer (not a hub), use a USB 3 port and cable.
 - **Dropped by the disk:** the disk didn't keep up. Record to a faster disk (an internal SSD), use a smaller ROI or
-  8-bit, or close other programs that use the disk. The session log's stats lines show the disk speed.
+  8-bit, or close other programs that use the disk. The session log's stats lines show the disk speed. SlopCap holds
+  up to a quarter of the free memory (1 to 4 GB) of frames for the disk to catch up on; an SSD that's nearly full
+  stalls for longer, so free space helps too.
+
+## SlopCap uses a lot of CPU
+
+- Every frame the live view shows costs CPU, in SlopCap and in anything that copies the screen (Remote Desktop, Chrome
+  Remote Desktop, TeamViewer). Pick **15 fps** on the live view's toolbar on a small PC or when you watch remotely;
+  recordings keep every frame either way.
+- The session log's `record: stop` line gives SlopCap's CPU use over that recording (`cpu 0.65 cores`).
 
 ## The focuser or mount won't connect
 

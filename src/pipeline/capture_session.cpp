@@ -1,6 +1,7 @@
 #include "pipeline/capture_session.hpp"
 
 #include "io/ser.hpp"
+#include "util/cpu_time.hpp"
 
 #include <algorithm>
 #include <format>
@@ -22,6 +23,13 @@ ser::ColorId serColor(Bayer b) {
 }
 
 }  // namespace
+
+std::size_t recordingRingBytes(std::optional<uint64_t> totalRam, std::optional<uint64_t> availableRam) {
+    constexpr uint64_t kGiB = uint64_t{1} << 30;
+    uint64_t bytes = kGiB;
+    if (totalRam) bytes = availableRam ? std::min(*totalRam / 8, *availableRam / 4) : *totalRam / 8;
+    return static_cast<std::size_t>(std::clamp(bytes, kGiB, 4 * kGiB));
+}
 
 CaptureSession::CaptureSession(ICamera& camera, CaptureOptions options) : cam_(camera), opt_(std::move(options)) {}
 
@@ -60,7 +68,10 @@ void CaptureSession::start() {
             h.colorId = serColor(info.bayer);
             h.width = r.width;
             h.height = r.height;
-            h.bitDepth = cam_.bitDepth() > 8 ? info.adcBits.value_or(16) : 8;
+            // Every backend delivers 16-bit samples MSB-aligned (ToupTek's are shifted up to match), so the header says
+            // 16: readers take the depth as the samples' range, and a 12 over MSB-aligned data reads as 16x too bright
+            // or clipped. The ADC's own depth goes in the sidecar.
+            h.bitDepth = cam_.bitDepth() > 8 ? 16 : 8;
             h.observer = opt_.observer;
             h.instrument = info.model;
             h.telescope = opt_.telescope;
@@ -90,6 +101,7 @@ void CaptureSession::start() {
                     ring_->release(*s);
                     continue;
                 }
+                if (opt_.beforeWrite) opt_.beforeWrite();
                 const auto t0 = std::chrono::steady_clock::now();
                 w->writeFrame(slot.pixels.first(slot.info.bytes), ser::toTicks(slot.info.timestamp));
                 writeLatency_.record(std::chrono::steady_clock::now() - t0);
@@ -124,6 +136,9 @@ void CaptureSession::start() {
         throw;
     }
 
+    captureEndNs_ = 0;
+    cpuCaptureNs_ = 0;
+    cpuStart_ = processCpuTime();
     started_ = std::chrono::steady_clock::now();
     try {
         cam_.startStream();
@@ -180,6 +195,10 @@ void CaptureSession::captureLoop() {
         fail(e);
     }
     cameraDropped_.store(cam_.droppedFrames(), std::memory_order_relaxed);
+    // The capture's own length and CPU: what the writer still has to write (the drain) is reported apart.
+    cpuCaptureNs_.store((processCpuTime() - cpuStart_).count(), std::memory_order_relaxed);
+    captureEndNs_.store(std::max<int64_t>(1, std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started_).count()),
+                        std::memory_order_release);
     // An unfilled held slot is simply never published; the ring is discarded with the session.
     captureDone_.store(true, std::memory_order_release);
     ring_->close();
@@ -235,13 +254,21 @@ CaptureStats CaptureSession::stats() const {
         s.ringHighWater = ring_->highWater();
         s.ringQueued = ring_->queued();
     }
+    using secs = std::chrono::duration<double>;
+    const auto now = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started_);
     const int64_t fin = finishedNs_.load(std::memory_order_relaxed);
-    const auto elapsed = fin ? std::chrono::nanoseconds(fin) : std::chrono::steady_clock::now() - started_;
-    s.seconds = std::chrono::duration<double>(elapsed).count();
+    const int64_t capEnd = captureEndNs_.load(std::memory_order_acquire);
+    const auto captureSpan = capEnd ? std::chrono::nanoseconds(capEnd) : now;
+    const auto writerSpan = fin ? std::chrono::nanoseconds(fin) : now;
+    s.seconds = secs(captureSpan).count();
+    s.drainSeconds = capEnd ? std::max(0.0, secs(writerSpan - captureSpan).count()) : 0;
     if (s.seconds > 0) {
         s.captureFps = static_cast<double>(s.delivered) / s.seconds;
-        s.writeMBps = static_cast<double>(bytesWritten_.load(std::memory_order_relaxed)) / 1e6 / s.seconds;
+        const auto cpu = capEnd ? std::chrono::nanoseconds(cpuCaptureNs_.load(std::memory_order_relaxed)) : processCpuTime() - cpuStart_;
+        s.cpuCores = secs(cpu).count() / s.seconds;
     }
+    if (writerSpan.count() > 0) s.writeMBps = static_cast<double>(bytesWritten_.load(std::memory_order_relaxed)) / 1e6 / secs(writerSpan).count();
+    s.capturing = captureThread_.joinable() && !capEnd;
     s.running = captureThread_.joinable() && !writerDone_.load(std::memory_order_acquire);
     s.writeP50Us = writeLatency_.percentileUs(0.5);
     s.writeP99Us = writeLatency_.percentileUs(0.99);

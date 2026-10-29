@@ -15,6 +15,7 @@ section 8).
 - **Left: the camera.** Gain and exposure, region of interest (ROI), 8 or 16 bit, readout mode, and the capture
   options with the big **Record** button at the bottom.
 - **Middle: the live view.** The toolbar above it sets the zoom (Fit, 100 %, 200 %), the stretch (Linear or Auto),
+  how many frames a second it shows (30 fps unless you pick 15, 60 or the screen's rate; recordings keep every frame),
   colour (Debayer, Auto WB) and overlays (Target box, Reticle), and has **Full screen**. Under it: the histogram, live
   sharpness and dispersion numbers, and the frame size.
 - **Right: what the telescope is doing.** The target SlopCap thinks it sees, the focuser, the mount, and a raw

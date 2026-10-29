@@ -171,6 +171,7 @@ struct MainWindowProbe {
     QStackedWidget*& left{w.left_};
     QStackedWidget*& right{w.right_};
     preview::HistogramWidget*& histogram{w.histogram_};
+    QComboBox*& displayRate{w.displayRate_};
 
     QLabel*& noCamera{w.noCamera_};
     QSlider*& gain{w.gain_};

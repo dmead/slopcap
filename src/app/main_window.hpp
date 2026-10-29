@@ -11,6 +11,7 @@
 #include "camera/camera.hpp"
 #include "pipeline/capture_session.hpp"
 #include "preview/latest_frame.hpp"
+#include "preview/render_cpu.hpp"
 #include "util/cpu_time.hpp"
 
 #include <QDateTime>
@@ -20,6 +21,7 @@
 #include <QPoint>
 #include <QTimer>
 
+#include <array>
 #include <map>
 #include <memory>
 #include <optional>
@@ -124,6 +126,7 @@ private:
     void syncControlWidgets(const std::string& name, double value);
     void centreRoiOn(QPointF imagePixel);
     void updateStats();
+    void updateStrip();                          ///< the histogram strip, from the last shown frame's histogram
     void updateRoiInfo();
     void updateTargetInfo();
     void logDevices();                           ///< INDI, focuser, mount and sweep events into the session log
@@ -168,8 +171,15 @@ private:
     MountSection* mountSection_ = nullptr;
     RawHistogramSection* rawHist_ = nullptr;
     QElapsedTimer rawHistClock_;
+    // The live focus score off the Focus tab and outside sweeps (the readouts, the target box): 15 a second
+    QElapsedTimer focusClock_;
+    // The histogram strip: 10 updates a second; the last frame's waits for the timer
+    QElapsedTimer stripClock_;
+    QTimer stripTimer_;
+    std::array<uint32_t, 256> stripHist_{};
+    preview::Levels stripLevels_;
     int statsLogTick_ = 0;   // stats lines go to the session log every 40 ticks
-    CpuMeter sessionCpu_, statsCpu_;   // the program's CPU use, in the session summary and each stats line
+    CpuMeter statsCpu_;      // the program's CPU use in each stats line (a session's own is in its stats)
     // the automatic target (Target: Auto)
     QElapsedTimer identifyClock_;
     QString autoName_, pendingAutoName_, autoDetail_, autoNotes_;
@@ -256,6 +266,7 @@ private:
     QWidget *toolbar_ = nullptr, *strip_ = nullptr, *previewHolder_ = nullptr;
     QButtonGroup* zoom_ = nullptr;
     QButtonGroup* stretch_ = nullptr;
+    QComboBox* displayRate_ = nullptr;
     QCheckBox* targetBox_ = nullptr;
     QLabel* recBadge_ = nullptr;
     QLabel* remoteBadge_ = nullptr;
