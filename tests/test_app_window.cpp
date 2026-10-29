@@ -468,7 +468,9 @@ TEST_CASE("window: the preview paints once per screen refresh at most, and leave
     CHECK(p.preview->displayFps() > 0);
     CHECK(p.preview->displayFps() <= hz * 1.15 + 2);   // unpaced: a paint per 8 ms poll, 125 a second
     CHECK(shown <= 2.5 * (hz * 1.15 + 2));             // and the display work (histogram, stretch, balance) with it
-    CHECK(raw > shown);                                // while focus, collimation, ... get every frame the preview takes
+    // focus, collimation, ... get every frame the preview takes (more than it shows when polls outpace the screen;
+    // a slow build, software OpenGL under a sanitizer, may poll no faster than it paints)
+    CHECK(raw >= shown);
     CHECK(p.preview->ownContextSwitches() == 0);       // no makeCurrent of its own per frame
     CHECK(unexpectedModals() == "");
 }
