@@ -372,20 +372,36 @@ TEST_CASE("CaptureSession: seconds, fps and CPU cover the capture; what a slow w
     CHECK_FALSE(s.running);
 }
 
-TEST_CASE("recordingRingBytes: a quarter of the free RAM, at most an eighth of all of it, 1 to 4 GiB") {
+TEST_CASE("recordingRingLimit: a quarter of the free RAM, at most an eighth of all of it, 1 to 4 GiB") {
     constexpr uint64_t kGiB = uint64_t{1} << 30;
-    CHECK(recordingRingBytes(16 * kGiB, 8 * kGiB) == 2 * kGiB);      // a 16 GB mini PC: 5 s of 4K at 390 MB/s
-    CHECK(recordingRingBytes(16 * kGiB, 6 * kGiB) == 3 * kGiB / 2);  // a quarter of what's free
-    CHECK(recordingRingBytes(8 * kGiB, 6 * kGiB) == 1 * kGiB);       // an eighth of all of it
-    CHECK(recordingRingBytes(4 * kGiB, 1 * kGiB) == 1 * kGiB);       // never below the 1 GiB it always had
-    CHECK(recordingRingBytes(192 * kGiB, 150 * kGiB) == 4 * kGiB);   // nor above 4
-    CHECK(recordingRingBytes(16 * kGiB, std::nullopt) == 2 * kGiB);
-    CHECK(recordingRingBytes(std::nullopt, std::nullopt) == 1 * kGiB);
+    CHECK(recordingRingLimit(16 * kGiB, 8 * kGiB) == 2 * kGiB);      // a 16 GB mini PC: 5 s of 4K at 390 MB/s
+    CHECK(recordingRingLimit(16 * kGiB, 6 * kGiB) == 3 * kGiB / 2);  // a quarter of what's free
+    CHECK(recordingRingLimit(8 * kGiB, 6 * kGiB) == 1 * kGiB);       // an eighth of all of it
+    CHECK(recordingRingLimit(4 * kGiB, 1 * kGiB) == 1 * kGiB);       // never below the 1 GiB it always had
+    CHECK(recordingRingLimit(192 * kGiB, 150 * kGiB) == 4 * kGiB);   // nor above 4
+    CHECK(recordingRingLimit(16 * kGiB, std::nullopt) == 2 * kGiB);
+    CHECK(recordingRingLimit(std::nullopt, std::nullopt) == 1 * kGiB);
     const auto total = totalRam(), avail = availableRam();
     REQUIRE(total);
     INFO("this machine: " << (*total >> 20) << " MB, " << (avail ? std::to_string(*avail >> 20) : std::string("?")) << " MB free");
     CHECK(*total > (uint64_t{256} << 20));
     if (avail) CHECK(*avail <= *total);
+}
+
+// v4 on a 16 GB PC (2026-10-30): the 2 GB ring was allocated and touched for every recording, at every format.
+TEST_CASE("recordingRingBytes: 8 seconds of the format at the live view's rate, within 256 MiB and the limit") {
+    constexpr uint64_t kGiB = uint64_t{1} << 30;
+    constexpr std::size_t kMiB = std::size_t{1} << 20;
+    const auto ring = [&](std::size_t frame, double fps) { return recordingRingBytes(frame, fps, 16 * kGiB, 8 * kGiB); };
+    CHECK(ring(640 * 480, 192.9) / kMiB == 452);            // was 2019 MB, of which recordings used at most 21
+    CHECK(ring(1024 * 768, 125.8) / kMiB == 754);
+    CHECK(ring(1920 * 1080, 91.4) / kMiB == 1445);          // 8 s: the deepest fill seen at this size was 5.0 s
+    CHECK(ring(3840 * 2160, 46.9) == 2 * kGiB);             // full frame: the limit (5.4 s), as before
+    CHECK(ring(3840 * 2160 * 2, 23.7) == 2 * kGiB);
+    CHECK(ring(640 * 480, 5) == 256 * kMiB);                // a slow camera: the floor
+    CHECK(ring(640 * 480, 0) == 2 * kGiB);                  // the rate not measured yet: the limit
+    CHECK(ring(0, 100) == 2 * kGiB);
+    CHECK(recordingRingBytes(640 * 480, 1, 4 * kGiB, 1 * kGiB) == 256 * kMiB);
 }
 
 // The cameras' 16-bit samples are MSB-aligned. A header of 12 (the ADC's depth, as SlopCap wrote until October

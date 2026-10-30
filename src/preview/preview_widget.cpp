@@ -245,18 +245,24 @@ void PreviewWidget::poll() {
     // Without a GL context frames still flow (histogram, focus, collimation); only the picture is missing. A GPU view
     // that is on screen but not started yet gets a moment; a hidden one (the window opened on the Focus tab) may not
     // start for a long time, and focus sweeps can't wait for it.
-    if (overlayDirty_) updateOverlays();
-    if (!source_ || (!glReady_ && glError_.isEmpty() && isVisible())) return;
-    // take() swaps buffers, so the frame is only valid until the next take(): use it right here.
-    const LatestFrame::Frame* f = source_->take();
-    if (!f) return;
-    // Every frame goes to the analyses (focus, collimation, ...); the display work only to one per shown frame (the
-    // display limit, at most the screen's rate), and not while the last one still waits for its paint (unless no paint
-    // has come for 100 ms: minimised). Done for every frame, up to 125 a second, it kept SlopCap's window thread busy
-    // (2026-10-29).
-    const bool waiting = pending_ && shownClock_.elapsed() < 100;
-    if (!waiting && (!shownClock_.isValid() || static_cast<double>(shownClock_.elapsed()) >= frameMs() - 2.0)) present(*f);
-    emit rawFrame(*f);
+    const LatestFrame::Frame* f = nullptr;
+    if (source_ && (glReady_ || !glError_.isEmpty() || !isVisible())) f = source_->take();   // valid until the next take()
+    bool shown = false;
+    if (f) {
+        // Every frame goes to the analyses (focus, collimation, ...); the display work only to one per shown frame (the
+        // display limit, at most the screen's rate), and not while the last one still waits for its paint (unless no
+        // paint has come for 100 ms: minimised). Done for every frame, up to 125 a second, it kept SlopCap's window
+        // thread busy (2026-10-29).
+        const bool waiting = pending_ && shownClock_.elapsed() < 100;
+        shown = !waiting && (!shownClock_.isValid() || static_cast<double>(shownClock_.elapsed()) >= frameMs() - 2.0);
+        if (shown) present(*f);
+        rawShown_ = shown;
+        emit rawFrame(*f);
+        rawShown_ = false;
+    }
+    // Overlays the analyses changed go out with the frame's paint: the window is composited once per shown frame, not
+    // again for each layer that changed in between. Without paints (no frames), on their own after 100 ms.
+    if (overlayDirty_ && (shown || !shownClock_.isValid() || shownClock_.elapsed() >= 100)) updateOverlays();
 }
 
 void PreviewWidget::present(const LatestFrame::Frame& f) {

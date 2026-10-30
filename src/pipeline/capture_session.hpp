@@ -36,11 +36,16 @@ struct CaptureOptions {
     std::function<void()> beforeWrite;                  ///< called by the writer thread before each frame (tests: a slow disk)
 };
 
-/// The ring for a recording: a quarter of the RAM that's free, at most an eighth of all of it, between 1 and 4 GiB.
-/// Writing past the disk cache, the ring alone rides out the disk's stalls (an SSD whose fast cache is used up stalls
-/// for hundreds of milliseconds; full frame at 390 MB/s filled 1 GiB to within 4 slots). Free RAM unknown: an eighth
-/// of all of it; that unknown too: 1 GiB.
-std::size_t recordingRingBytes(std::optional<uint64_t> totalRam, std::optional<uint64_t> availableRam);
+/// The most a recording's ring may take: a quarter of the RAM that's free, at most an eighth of all of it, between 1
+/// and 4 GiB. Free RAM unknown: an eighth of all of it; that unknown too: 1 GiB.
+std::size_t recordingRingLimit(std::optional<uint64_t> totalRam, std::optional<uint64_t> availableRam);
+
+/// The ring for a recording: 8 seconds of frames at the rate the live view measured, at least 256 MiB, at most
+/// recordingRingLimit; with the rate unknown (0), the limit. Writing past the disk cache, the ring alone rides out the
+/// disk's stalls: on a filling SSD a full-frame recording held up to 5.4 s of frames and a 1920x1080 one 5.0 s
+/// (2026-10-30). Sized in bytes alone it was 2 GB at every format, all of it touched at the start of each recording:
+/// 36 s of 640x480, of which no recording used more than 0.4.
+std::size_t recordingRingBytes(std::size_t frameBytes, double fps, std::optional<uint64_t> totalRam, std::optional<uint64_t> availableRam);
 
 struct CaptureStats {
     uint64_t delivered = 0;        ///< frames the camera handed us

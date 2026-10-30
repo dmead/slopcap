@@ -24,11 +24,20 @@ ser::ColorId serColor(Bayer b) {
 
 }  // namespace
 
-std::size_t recordingRingBytes(std::optional<uint64_t> totalRam, std::optional<uint64_t> availableRam) {
+std::size_t recordingRingLimit(std::optional<uint64_t> totalRam, std::optional<uint64_t> availableRam) {
     constexpr uint64_t kGiB = uint64_t{1} << 30;
     uint64_t bytes = kGiB;
     if (totalRam) bytes = availableRam ? std::min(*totalRam / 8, *availableRam / 4) : *totalRam / 8;
     return static_cast<std::size_t>(std::clamp(bytes, kGiB, 4 * kGiB));
+}
+
+std::size_t recordingRingBytes(std::size_t frameBytes, double fps, std::optional<uint64_t> totalRam, std::optional<uint64_t> availableRam) {
+    constexpr double kSeconds = 8;
+    constexpr std::size_t kFloor = std::size_t{256} << 20;
+    const std::size_t limit = recordingRingLimit(totalRam, availableRam);
+    if (!(fps > 0) || frameBytes == 0) return limit;
+    const double want = static_cast<double>(frameBytes) * fps * kSeconds;
+    return want >= static_cast<double>(limit) ? limit : std::clamp(static_cast<std::size_t>(want), std::min(kFloor, limit), limit);
 }
 
 CaptureSession::CaptureSession(ICamera& camera, CaptureOptions options) : cam_(camera), opt_(std::move(options)) {}

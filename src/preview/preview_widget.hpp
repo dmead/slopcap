@@ -58,6 +58,10 @@ public:
     void setDisplayLimit(int fps) { displayLimit_ = std::max(0, fps); }
     int displayLimit() const { return displayLimit_; }
     static constexpr int kDefaultDisplayLimit = 30;
+    /// During rawFrame: whether this frame is also being shown. Widgets changed now are redrawn with its paint, in one
+    /// composite of the window; changed between shown frames, each costs a composite of its own (and a frame for
+    /// whatever copies the screen).
+    bool rawFrameShown() const { return rawShown_; }
 
     void setOverlay(const QString& key, Overlay overlay);   ///< replaces; an empty function removes it
     void setCrosshair(bool on);
@@ -127,6 +131,7 @@ private:
     QElapsedTimer wbClock_;       ///< auto white balance and its white point: ten times a second
     double peakWhite_ = 0;        ///< white point that keeps the balanced target's bright zones below white
     int displayLimit_ = kDefaultDisplayLimit;
+    bool rawShown_ = false;       ///< the frame being handed out by rawFrame is also being shown
     bool overlayDirty_ = false;
     QElapsedTimer overlayClock_;
     QTransform overlayTransform_;   ///< the image-to-widget transform the overlays were last painted with

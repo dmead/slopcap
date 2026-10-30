@@ -246,42 +246,55 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         updateCurveInset();
     });
 
-    // The histogram strip, 10 times a second: plenty to read, and every repaint of these raster widgets has Qt copy them
-    // into a texture to compose with the GPU view. The last frame's numbers wait for the timer, so none stay stale.
+    // The side panels change with the frames, but only together with a shown frame: Qt composites the whole window
+    // (raster widgets copied into a texture, the GPU view, a present) once for everything that changed in one pass of
+    // the event loop, and a screen-capturing session or remote viewer pays again for every composite. So everything
+    // below is done in the pass that schedules a frame's paint.
+    //
+    // The histogram strip, 10 times a second. The last frame's numbers wait for a timer that only runs out once frames
+    // stop, so none stay stale.
     stripTimer_.setSingleShot(true);
     connect(&stripTimer_, &QTimer::timeout, this, &MainWindow::updateStrip);
     connect(preview_, &preview::PreviewWidget::frameShown, this, [this](const std::array<uint32_t, 256>& hist, const preview::Levels& lv, const FrameInfo&) {
         stripHist_ = hist;
         stripLevels_ = lv;
-        if (!stripClock_.isValid() || stripClock_.elapsed() >= 100) updateStrip();
-        else if (!stripTimer_.isActive()) stripTimer_.start(static_cast<int>(100 - stripClock_.elapsed()));
+        if (!stripClock_.isValid() || stripClock_.elapsed() >= 100 - kFrameSlackMs) updateStrip();
+        else stripTimer_.start(250);
     });
     connect(preview_, &preview::PreviewWidget::rawFrame, this, [this](const LatestFrame::Frame& f) {
         if (!cam_) return;
+        const bool shown = preview_->rawFrameShown();
+        auto due = [shown](QElapsedTimer& clock, int ms) {   // on a shown frame, `ms` after the last time
+            if (!shown || (clock.isValid() && clock.elapsed() < ms - kFrameSlackMs)) return false;
+            clock.start();
+            return true;
+        };
         // The live focus score for every frame where it's watched (the Focus tab, a sweep), else 15 a second for the
         // readouts and the target box: on a planet it takes ~1.6 ms per 1024x768 frame on a small PC, at up to 125
         // frames a second.
-        if (mode_ == Focus || focus_->sweeping() || !focusClock_.isValid() || focusClock_.elapsed() >= 1000 / 15) {
-            focusClock_.start();
-            focus_->onFrame(f, cam_->info().bayer);
+        if (mode_ == Focus || focus_->sweeping() || due(focusClock_, 1000 / 15)) focus_->onFrame(f, cam_->info().bayer);
+        if (shown && targetInfoDirty_) updateTargetInfo();
+        // the Focus tab's camera inset, at the display rate (the preview is hidden there, so its frames aren't shown)
+        const int insetFps = preview_->displayLimit() > 0 ? preview_->displayLimit() : 60;
+        if (mode_ == Focus && (!insetClock_.isValid() || insetClock_.elapsed() >= 1000 / insetFps - kFrameSlackMs)) {
+            insetClock_.start();
+            liveInset_->showFrame(f, cam_->info().bayer, preview_->levels(), focus_->live().last);
         }
-        if (mode_ == Focus) liveInset_->showFrame(f, cam_->info().bayer, preview_->levels(), focus_->live().last);
-        if (mode_ == Collimate) collim_->onFrame(f, cam_->info().bayer);
-        if (mode_ == Adc) adc_->onFrame(f, cam_->info().bayer);
-        // the readout histogram: up to 10 times a second, while the Capture sidebar shows it
-        if (mode_ == Capture && (!rawHistClock_.isValid() || rawHistClock_.elapsed() >= 100)) {
-            rawHistClock_.start();
+        if (mode_ == Collimate && shown) collim_->onFrame(f, cam_->info().bayer);
+        if (mode_ == Adc && shown) adc_->onFrame(f, cam_->info().bayer);
+        // the readout histogram: 10 times a second, while the Capture sidebar shows it
+        if (mode_ == Capture && due(rawHistClock_, 100))
             rawHist_->setData(preview::rawHistogram(f.pixels, f.info.roi.width, f.info.roi.height, f.info.bitDepth,
                                                     cam_->info().bayer, cam_->info().adcBits));
-        }
         // the automatic target: once a second, and not while recording (the file keeps the name it started with)
-        if (isAutoTarget() && !recording_ && (!identifyClock_.isValid() || identifyClock_.elapsed() >= 1000)) {
-            identifyClock_.start();
-            runAutoTarget(f);
-        }
+        if (isAutoTarget() && !recording_ && due(identifyClock_, 1000)) runAutoTarget(f);
     });
     connect(preview_, &preview::PreviewWidget::centreRequested, this, &MainWindow::centreRoiOn);
-    connect(focus_, &FocusController::liveUpdated, this, &MainWindow::updateTargetInfo);
+    // during a sweep the score comes with every frame: its readouts and target box wait for the next shown one
+    connect(focus_, &FocusController::liveUpdated, this, [this] {
+        if (!session_ || preview_->rawFrameShown()) updateTargetInfo();
+        else targetInfoDirty_ = true;
+    });
     connect(focus_, &FocusController::sweepUpdated, this, &MainWindow::updateFocusMode);
     connect(focus_, &FocusController::sweepStateChanged, this, [this](bool running) {
         if (running) curveDismissed_ = false;   // a new sweep: its curves show over the preview again
@@ -1381,6 +1394,7 @@ void MainWindow::updateAutoTarget() {
 }
 
 void MainWindow::updateTargetInfo() {
+    targetInfoDirty_ = false;
     const auto& l = focus_->live();
     const auto& s = l.last;
     if (s.channels == 0) {
@@ -1535,7 +1549,9 @@ void MainWindow::startSession(bool record) {
             for (const auto& [name, box] : controlBoxes_) recControls_[name] = box->value();
             opt.output = recordingPath_.toStdString();
             opt.directIO = true;
-            opt.ringBytes = recordingRingBytes(totalRam(), availableRam());
+            opt.ringBytes = testRingBytes_ ? testRingBytes_ : recordingRingBytes(cam_->frameBytes(), liveFps_, totalRam(), availableRam());
+            opt.beforeWrite = testBeforeWrite_;
+            diskBehindWarned_ = false;
             if (const int lim = limit_->currentData().toInt(); lim > 0) opt.duration = std::chrono::seconds(lim);
         }
     }
@@ -1555,7 +1571,11 @@ void MainWindow::startSession(bool record) {
         qInfo().noquote() << (recording_ ? "record: start" : "preview: start") << (recording_ ? recordingPath_ : QString()) << "· ROI"
                           << r.width << "x" << r.height << "+" << r.x << "," << r.y << "bin" << r.bin << "·" << cam_->bitDepth() << "-bit ·"
                           << "target" << targetName() << "· filter" << filter_->currentText() << "·" << controls.join(' ')
-                          << (recording_ ? QString("· buffer %1 MB").arg(opt.ringBytes >> 20) : QString());
+                          << (recording_ ? QString("· buffer %1 MB (%2)")
+                                                   .arg(opt.ringBytes >> 20)
+                                                   .arg(liveFps_ > 0 ? QString("%1 s at %2 fps").arg(static_cast<double>(opt.ringBytes) / static_cast<double>(cam_->frameBytes()) / liveFps_, 0, 'f', 1).arg(liveFps_, 0, 'f', 1)
+                                                                     : QString("frame rate not known yet: the most allowed"))
+                                         : QString());
         statsLogTick_ = 0;
         statsCpu_.start();
         preview_->setSource(&tap_, cam_->info().bayer);
@@ -1688,6 +1708,7 @@ void MainWindow::updateStats() {
         startSession(false);
         return;
     }
+    if (!recording_) liveFps_ = s.seconds >= 1 ? s.captureFps : 0;   // this format's rate, for the next recording's buffer
     if (!s.error.empty()) message("Error: " + QString::fromStdString(s.error));
     else if (!s.notice.empty() && fMessage_->text().isEmpty()) message(QString::fromStdString(s.notice));
     fState_->setText(recording_ ? "● Recording" : "○ Previewing");
@@ -1714,9 +1735,18 @@ void MainWindow::updateStats() {
     theme::reserveWidth(fFrames_, recording_ ? "9,999,999 frames" : "");
     if (recording_) {
         const double minutes = s.writeMBps > 1 ? static_cast<double>(disk.bytesAvailable()) / 1e6 / s.writeMBps / 60 : 0;
+        const std::size_t fill = s.ringCapacity ? 100 * s.ringQueued / s.ringCapacity : 0;
         fRing_->setText(QString("buffer %1% · %2 / %3")
-                            .arg(s.ringCapacity ? 100 * s.ringQueued / s.ringCapacity : 0)
+                            .arg(fill)
                             .arg(thousands(static_cast<double>(s.ringQueued)), thousands(static_cast<double>(s.ringCapacity))));
+        // The buffer filling means the disk is falling behind, and once it's full frames are lost: say so before that
+        // (a nearly full SSD can't keep up with full frame at all, 2026-10-30).
+        theme::setStyleIfChanged(fRing_, fill >= 50 ? QString("color: %1").arg((fill >= 80 ? theme::kRecText : theme::kAccent).name()) : "");
+        if (fill >= 50 && !diskBehindWarned_) {
+            diskBehindWarned_ = true;
+            message(QString("The disk is falling behind: the buffer is %1% full, and frames are lost once it fills").arg(fill));
+            qInfo().noquote() << "record: the disk is falling behind, buffer" << fill << "% full ·" << freeText;
+        }
         fDisk_->setText(QString("disk %1 MB/s · %2 · %3 min").arg(s.writeMBps, 0, 'f', 0).arg(freeText).arg(minutes, 0, 'f', 0));
         fFrames_->setText(QString("%1 frames").arg(thousands(static_cast<double>(s.written))));
         const int lim = limit_->currentData().toInt();
@@ -1728,6 +1758,7 @@ void MainWindow::updateStats() {
         recBadge_->raise();
     } else {
         fRing_->clear();
+        theme::setStyleIfChanged(fRing_, "");
         fDisk_->setText(freeText);
         fFrames_->clear();
     }

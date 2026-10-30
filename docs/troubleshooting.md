@@ -35,8 +35,10 @@ There are two kinds, and the session log's stats lines (`dropped camera … disk
   use a smaller ROI or 8-bit, plug the camera straight into the computer (not a hub), use a USB 3 port and cable.
 - **Dropped by the disk:** the disk didn't keep up. Record to a faster disk (an internal SSD), use a smaller ROI or
   8-bit, or close other programs that use the disk. The session log's stats lines show the disk speed. SlopCap holds
-  up to a quarter of the free memory (1 to 4 GB) of frames for the disk to catch up on; an SSD that's nearly full
-  stalls for longer, so free space helps too.
+  about 8 seconds of frames for the disk to catch up on (at most a quarter of the free memory, 1 to 4 GB). While a
+  recording runs, the bottom bar's **buffer** figure turns orange, then red, as the disk falls behind, and SlopCap says
+  so before frames are lost. An SSD that's nearly full stalls for longer and can't keep up with full frame at all, so
+  free space helps too.
 
 ## SlopCap uses a lot of CPU
 

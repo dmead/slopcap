@@ -210,6 +210,9 @@ struct MainWindowProbe {
     QLabel*& fFps{w.fFps_};
     QLabel*& fRemote{w.fRemote_};
     QLabel*& fMessage{w.fMessage_};
+    QLabel*& fRing{w.fRing_};
+    std::size_t& testRingBytes{w.testRingBytes_};
+    std::function<void()>& testBeforeWrite{w.testBeforeWrite_};
 
     void updateStats() { w.updateStats(); }
     QString targetName() const { return w.targetName(); }

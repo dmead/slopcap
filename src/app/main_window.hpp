@@ -22,6 +22,7 @@
 #include <QTimer>
 
 #include <array>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -170,13 +171,20 @@ private:
     devices::Mount* mount_ = nullptr;
     MountSection* mountSection_ = nullptr;
     RawHistogramSection* rawHist_ = nullptr;
-    QElapsedTimer rawHistClock_;
-    // The live focus score off the Focus tab and outside sweeps (the readouts, the target box): 15 a second
-    QElapsedTimer focusClock_;
-    // The histogram strip: 10 updates a second; the last frame's waits for the timer
-    QElapsedTimer stripClock_;
+    // Updates that follow the frames run on shown ones (one window composite per frame), at most this often:
+    // the readout histogram 10 a second; the live focus score off the Focus tab and outside sweeps (the readouts, the
+    // target box) 15; the Focus tab's camera inset at the display rate; the histogram strip 10, its last frame's
+    // numbers after a timer once frames stop. Shown frames come at whole poll ticks: a little slack keeps 15 a second
+    // from falling to 10 at a 30 fps display.
+    static constexpr int kFrameSlackMs = 10;
+    QElapsedTimer rawHistClock_, focusClock_, insetClock_, stripClock_;
+    bool targetInfoDirty_ = false;   ///< a sweep scored frames between shown ones: refresh the readouts with the next
+    double liveFps_ = 0;             ///< the live view's frame rate, once it has run a second (sizes a recording's buffer)
+    bool diskBehindWarned_ = false;  ///< this recording's "disk is falling behind" message was given
+    std::size_t testRingBytes_ = 0;          ///< tests: a recording buffer of this size instead
+    std::function<void()> testBeforeWrite_;  ///< tests: a slow disk (CaptureOptions::beforeWrite)
     QTimer stripTimer_;
-    std::array<uint32_t, 256> stripHist_{};
+    std::array<uint32_t, 256> stripHist_{};   ///< the last shown frame's, for the strip
     preview::Levels stripLevels_;
     int statsLogTick_ = 0;   // stats lines go to the session log every 40 ticks
     CpuMeter statsCpu_;      // the program's CPU use in each stats line (a session's own is in its stats)

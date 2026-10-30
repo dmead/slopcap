@@ -21,6 +21,7 @@
 #include <QGuiApplication>
 #include <QLabel>
 #include <QLineEdit>
+#include <QOpenGLWidget>
 #include <QPushButton>
 #include <QScreen>
 #include <QSettings>
@@ -33,7 +34,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <functional>
+#include <thread>
 
 using namespace slopcap;
 using namespace slopcap::app;
@@ -480,8 +483,11 @@ TEST_CASE("window: the preview shows its display rate at most (30 fps unless cho
     const double hz = w.screen() && w.screen()->refreshRate() > 1 ? w.screen()->refreshRate() : 60;
     PaintCounter strip;
     p.histogram->installEventFilter(&strip);
+    // every composite of the window (Qt's flush of raster widgets plus the GPU view) ends in the GPU view's frameSwapped
+    auto* gl = p.preview->findChild<QOpenGLWidget*>();
+    REQUIRE(gl);
     struct Counts {
-        int raw = 0, shown = 0, scored = 0, stripPaints = 0;
+        int raw = 0, shown = 0, scored = 0, stripPaints = 0, composites = 0;
     };
     auto measure = [&](int ms) {
         Counts c;
@@ -489,10 +495,9 @@ TEST_CASE("window: the preview shows its display rate at most (30 fps unless cho
         const auto c1 = QObject::connect(p.preview, &preview::PreviewWidget::rawFrame, p.preview, [&c] { ++c.raw; });
         const auto c2 = QObject::connect(p.preview, &preview::PreviewWidget::frameShown, p.preview, [&c] { ++c.shown; });
         const auto c3 = QObject::connect(p.focus, &FocusController::liveUpdated, p.preview, [&c] { ++c.scored; });
+        const auto c4 = QObject::connect(gl, &QOpenGLWidget::frameSwapped, p.preview, [&c] { ++c.composites; });
         QTest::qWait(ms);   // displayFps is counted over a second
-        QObject::disconnect(c1);
-        QObject::disconnect(c2);
-        QObject::disconnect(c3);
+        for (const auto& conn : {c1, c2, c3, c4}) QObject::disconnect(conn);
         c.stripPaints = strip.paints - paints0;
         return c;
     };
@@ -501,7 +506,13 @@ TEST_CASE("window: the preview shows its display rate at most (30 fps unless cho
     auto c = measure(2500);
     double limit = std::min(30.0, hz);
     INFO("screen " << hz << " Hz, preview " << p.preview->displayFps() << " fps; in 2.5 s " << c.raw << " frames analysed, " << c.shown
-                   << " shown, " << c.scored << " focus-scored, " << c.stripPaints << " strip repaints");
+                   << " shown, " << c.scored << " focus-scored, " << c.stripPaints << " strip repaints, " << c.composites
+                   << " window composites");
+    // One composite per shown frame: the strip, the readout histogram, the readouts and the overlays change with the
+    // frame's paint (each composite costs SlopCap a texture upload and a present, and a screen-capturing session or
+    // remote viewer a frame). The status bar's 4 updates a second are their own.
+    if (c.composites == 0) WARN("no frameSwapped from the GPU view here: composites not counted");
+    else CHECK(c.composites <= c.shown + 2.5 * 6 + 6);
     CHECK(p.preview->displayFps() > 0);
     CHECK(p.preview->displayFps() <= limit * 1.15 + 2);
     CHECK(c.shown <= 2.5 * (limit * 1.15 + 2));        // and the display work (histogram, stretch, balance) with it
@@ -535,6 +546,40 @@ TEST_CASE("window: the preview shows its display rate at most (30 fps unless cho
     CHECK(c.scored >= c.raw - 2);
     CHECK(c.scored > 0);
     p.histogram->removeEventFilter(&strip);
+    CHECK(unexpectedModals() == "");
+}
+
+// On a nearly full SSD the disk can't keep up with full frame (v4, 2026-10-30): the buffer fills, then frames are lost.
+TEST_CASE("window: a disk falling behind is reported while the buffer fills, before frames are lost", "[app]") {
+    clearSettings();
+    Modals::get().clear();
+    TempDir dir;
+    const QString ser = makeSer(dir.file("fast.ser"), 160, 120, 100, 25'000);   // 400 fps
+    MainWindow w;
+    MainWindowProbe p(w);
+    w.resize(1000, 700);
+    w.show();
+    REQUIRE(QTest::qWaitForWindowExposed(&w));
+    w.setOutputDir(dir.file("out"));
+    w.connectCamera("sim-loop:" + ser);
+    REQUIRE(p.waitForFrames(5));
+    p.testRingBytes = 64 * 20480;                                                              // 64 slots
+    p.testBeforeWrite = [] { std::this_thread::sleep_for(std::chrono::milliseconds(20)); };   // 50 frames a second
+    p.record->click();
+    REQUIRE(p.recording);
+    CHECK(waitFor([&] { return p.fMessage->text().contains("falling behind"); }, 5000));
+    CHECK(p.fRing->styleSheet().contains("color"));
+    p.record->click();
+    CHECK_FALSE(p.recording);
+    // a disk that keeps up: no warning colour
+    p.testBeforeWrite = {};
+    p.record->click();
+    REQUIRE(p.recording);
+    pump(800);
+    p.updateStats();
+    CHECK_FALSE(p.fRing->styleSheet().contains("color"));
+    p.record->click();
+    CHECK_FALSE(p.recording);
     CHECK(unexpectedModals() == "");
 }
 
