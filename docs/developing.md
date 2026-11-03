@@ -176,7 +176,7 @@ Built next to `slopcap` (`build/<preset>/`):
 | Tool | Does |
 |---|---|
 | `slopcap-bench --camera SPEC …` / `--sim FILE.ser` / `--list` | records through the full capture pipeline and reports frames per second, drops, the frame ring's peak and MB/s |
-| `slopcap-serinfo FILE.ser…` | a SER file's header, frames on disk against the header, timestamps, the real frame rate and the longest gap |
+| `slopcap-serinfo [--csv] FILE.ser…` | a SER file's header, frames on disk against the header, timestamps, the real frame rate, the frames lost on the way and the longest gap; reads any program's SER files the same way (`--csv`: one line per file) |
 | `slopcap-camprobe [--json]` | what every connected ZWO and QHY camera reports (its controls, readout modes, gain landmarks); the fixtures from real cameras are in `tools/camprobe/fixtures` |
 | `slopcap-diag [--png OUT/] FILE.ser…` | optical diagnostics from planetary recordings: stacks the best frames and reports dispersion, limb sharpness per colour and side, halo and jitter |
 | `slopcap-focusbench FILE.ser [frames] [metric]` | times the focus scorer on a recording |
@@ -234,7 +234,7 @@ viewer in full view.
 | `src/devices/` | a small INDI client (Qt Network), the backlash-aware focuser and the mount (guide pulses, moves, goto, park, tracking) |
 | `src/net/` | remote viewing: protocol, frame codec (lossless and JPEG), discovery, rate control, server and client |
 | `src/app/` | the GUI: main window, focus, collimation and ADC panels, mount, settings, full view, session log |
-| `tools/` | the command-line tools above, packaging (`package.sh`), coverage, macOS and remote-test scripts |
+| `tools/` | the command-line tools above, packaging (`package.sh`), coverage, macOS and remote-test scripts; `tools/perf/` compares SlopCap with SharpCap and FireCapture (its README has the procedure) |
 | `tests/` | Catch2 tests; `tests/fakes/` the camera SDK fakes; `tests/app_harness.*` the application tests' helpers |
 
 The design, its reasoning and the to-do list are in [PLAN.md](../PLAN.md).
