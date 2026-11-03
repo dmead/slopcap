@@ -166,6 +166,12 @@ and each zip holds the README, `LICENSE` and `licenses/`. A Mac zip goes up with
 the same commit after `macos-debug`'s tests passed there, and added to the run: the zip in the run's folder, and in its
 `summary.txt` a `  macos  pass` line and the zip's `  package:` line (path and SHA-256).
 
+GitHub lists a release's files below its notes, so `NOTES.md` starts with a `## Downloads` table naming each zip in
+backticks in its first column; `release.sh` turns those names into download links with sizes and adds the SHA-256s
+under the table. `tools/release.sh --update TAG NOTES.md` replaces a published release's notes the same way, and
+uploads any of the run's zips the release doesn't have yet (a Mac zip added a day later); `--dry-run` prints the notes
+and changes nothing.
+
 GitHub counts macOS minutes ten times and Windows minutes twice against a private repository's monthly allowance,
 which is why `ci.yml` only runs when started by hand and `tools/ci-local.sh` is the everyday check.
 
