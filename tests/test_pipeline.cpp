@@ -479,7 +479,9 @@ TEST_CASE("CaptureSession with no output is a live view: frames reach the previe
 }
 
 // Regression (2026-10-29), end to end: a session waiting for a slow camera, in live view or recording the way the
-// window does (direct I/O), must cost next to nothing. One spinning thread is the whole 600 ms.
+// window does (direct I/O), must cost next to nothing. One spinning thread is the whole 600 ms. The clock runs from
+// after start() to before stop(): a recording's writer zeroes its 64 MiB of chunk buffers in start() on purpose, which
+// is 25-55 ms of CPU in a debug build and up to 170 ms under ThreadSanitizer, and that's setting up, not waiting.
 TEST_CASE("CaptureSession: waiting for a slow camera costs next to no CPU, in live view and while recording") {
     TempDir dir;
     const auto src = makeSer(dir, 64, 32, 20, 1'000'000);   // frames 100 ms apart: 10 fps
@@ -492,11 +494,11 @@ TEST_CASE("CaptureSession: waiting for a slow camera costs next to no CPU, in li
             opt.directIO = true;
         }
         CaptureSession session(cam, opt);
-        const auto cpu0 = processCpuTime();
         session.start();
+        const auto cpu0 = processCpuTime();
         std::this_thread::sleep_for(600ms);
-        session.stop();
         const auto cpu = processCpuTime() - cpu0;
+        session.stop();
         const double cpuMs = std::chrono::duration<double>(cpu).count() * 1e3;
         INFO((record ? "recording" : "live view") << ": " << cpuMs << " ms CPU in 600 ms, " << session.stats().delivered << " frames");
         CHECK(session.stats().error.empty());
