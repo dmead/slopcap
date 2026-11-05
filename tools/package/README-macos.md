@@ -6,9 +6,10 @@ ready for it: collimation, focus, and knowing what you are pointed at.
 ## Start it
 
 1. Drag **SlopCap.app** from this folder to **Applications**.
-2. The first time, right-click SlopCap in Applications and choose **Open**, then **Open** again. SlopCap isn't
-   notarized by Apple, so a plain double-click is refused the first time (*System Settings → Privacy & Security →
-   Open Anyway* does the same).
+2. Double-click it. SlopCap isn't notarized by Apple, so the first time macOS refuses it: close that message, open
+   *System Settings → Privacy & Security*, scroll down to the line about SlopCap and choose **Open Anyway** (it's
+   there for about an hour after the refusal), then confirm with your password. After that it opens normally.
+   (Right-click → **Open** no longer gets past this since macOS 15.)
 3. The first time SlopCap shares a camera, watches one, or talks to an INDI server on another computer, macOS asks
    whether it may use the local network: choose **Allow**.
 

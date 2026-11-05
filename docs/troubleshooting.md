@@ -88,9 +88,12 @@ from the list yourself.
 - A slow link (for example a long outdoor cable running at 100 Mbit/s) gives fewer frames per second rather than a
   worse picture; that's on purpose.
 
-## Mac: "SlopCap can't be opened"
+## Mac: "SlopCap Not Opened" or "can't be opened"
 
-SlopCap isn't notarized by Apple. Right-click it in Applications, choose **Open**, then **Open** again; or *System
-Settings → Privacy & Security → Open Anyway*. You only need to do this once.
+SlopCap isn't notarized by Apple, so macOS refuses it the first time. Close the message, open *System Settings →
+Privacy & Security*, scroll down to the line about SlopCap and choose **Open Anyway**, then confirm with your
+password. The button is there for about an hour after the refusal: if it's gone, double-click SlopCap again first.
+You only need to do this once. Right-click → **Open**, which older guides suggest, no longer gets past this since
+macOS 15.
 
 If it won't start at all, check the macOS version: the Mac download needs macOS 27 or newer.
