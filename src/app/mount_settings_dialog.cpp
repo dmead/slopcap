@@ -71,10 +71,8 @@ MountSettingsDialog::MountSettingsDialog(devices::Mount& mount, QWidget* parent)
     });
     connect(applyButton, &QPushButton::clicked, this, &MountSettingsDialog::apply);
     connect(&mount_, &devices::Mount::settingsRead, this, [this] {
-        read_ = mount_.settings();
-        rebuild();
-        status_->setText("Read from the mount at " + QTime::currentTime().toString("HH:mm:ss") +
-                         ". Changes are written only when you press Apply.");
+        if (asking_) stale_ = true;
+        else showRead();
     });
     connect(&mount_, &devices::Mount::failed, this, [this](const QString& why) {
         status_->setText("<span style='color:#ff6b6b'>" + why.toHtmlEscaped() + "</span>");
@@ -139,6 +137,13 @@ MountSettingsDialog::MountSettingsDialog(devices::Mount& mount, QWidget* parent)
 }
 
 void MountSettingsDialog::showLog() { tabs_->setCurrentIndex(1); }
+
+void MountSettingsDialog::showRead() {
+    read_ = mount_.settings();
+    rebuild();
+    status_->setText("Read from the mount at " + QTime::currentTime().toString("HH:mm:ss") +
+                     ". Changes are written only when you press Apply.");
+}
 
 void MountSettingsDialog::rebuild() {
     editors_.clear();
@@ -206,7 +211,16 @@ void MountSettingsDialog::rebuild() {
                 connect(b, &QPushButton::clicked, this, [this, key, help] {
                     if (help.contains('?')) {
                         const auto q = help.left(help.lastIndexOf('.') + 1).trimmed(), ask = help.mid(help.lastIndexOf('.') + 1).trimmed();
-                        if (QMessageBox::question(this, "Mount", q + "\n\n" + ask) != QMessageBox::Yes) return;
+                        // a read that comes in while the question is open waits for it: rebuilding the page now would
+                        // delete this button in the middle of its click
+                        asking_ = true;
+                        const bool yes = QMessageBox::question(this, "Mount", q + "\n\n" + ask) == QMessageBox::Yes;
+                        asking_ = false;
+                        if (stale_) {
+                            stale_ = false;
+                            QMetaObject::invokeMethod(this, &MountSettingsDialog::showRead, Qt::QueuedConnection);
+                        }
+                        if (!yes) return;
                     }
                     act(key);
                 });

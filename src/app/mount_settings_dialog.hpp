@@ -34,8 +34,11 @@ public:
 
 private:
     void rebuild();
+    void showRead();                      ///< the settings as last read, into the page
     void pullLog();
     devices::Mount& mount_;
+    bool asking_ = false;                 ///< an action's question is open: its button mustn't be rebuilt away under it
+    bool stale_ = false;                  ///< a read came in meanwhile
     QTabWidget* tabs_ = nullptr;
     QScrollArea* scroll_ = nullptr;
     QLabel* status_ = nullptr;

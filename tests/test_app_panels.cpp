@@ -16,6 +16,7 @@
 #include "preview/preview_widget.hpp"
 
 #include <QButtonGroup>
+#include <QCheckBox>
 #include <QDir>
 #include <QFileInfo>
 #include <QLabel>
@@ -218,6 +219,53 @@ TEST_CASE("panels: an OnStep's own settings and the mount's log", "[app][panels]
     CHECK(waitFor([&] { return d->logText().contains("!! a UTC offset is like +05:00"); }, 3000));
     ms.openSettings(true);
     CHECK_FALSE(labelWith(&ms, "like +05:00")->isVisible());
+
+    // the log's filters and Clear
+    auto box = [&](const QString& text) -> QCheckBox* {
+        for (auto* c : d->findChildren<QCheckBox*>())
+            if (c->text() == text) return c;
+        return nullptr;
+    };
+    REQUIRE(box("Hide status polls"));
+    REQUIRE(box("Errors only"));
+    box("Hide status polls")->setChecked(false);
+    CHECK(waitFor([&] { return d->logText().contains(":GU#"); }, 3000));
+    box("Errors only")->setChecked(true);
+    CHECK_FALSE(d->logText().contains(":Sh+05#"));
+    CHECK(d->logText().contains("!! a UTC offset is like +05:00"));
+    box("Errors only")->setChecked(false);
+    button(d, "Clear")->click();
+    CHECK(d->logText().isEmpty());
+
+    // read again: what the mount has now
+    fakeSays([&] { return fake.horizon = 7; });
+    button(d, "Read from the mount")->click();
+    CHECK(waitFor([&] { return d->valueOf("horizon") == "7"; }, 5000));
+
+    // Go home and Park here move the mount or replace its park position: asked first, and No sends nothing
+    auto& m = Modals::get();
+    m.clear();
+    m.answer(QMessageBox::No);
+    button(d, "Park here")->click();
+    REQUIRE(m.done());
+    CHECK(m.lastSeen().contains("Replace the park position?"));
+    waitFor([] { return false; }, 300);
+    CHECK_FALSE(fakeSays([&] { return fake.parkSet; }));
+    m.answer(QMessageBox::Yes);
+    button(d, "Park here")->click();
+    REQUIRE(m.done());
+    CHECK(waitFor([&] { return fakeSays([&] { return fake.parkSet; }); }, 3000));
+    // a read that lands while the question is open waits for it (rebuilding the page would delete the button under
+    // its own click), then shows
+    CHECK(waitFor([&] { return d->valueOf("horizon") == "7"; }, 3000));
+    fakeSays([&] { return fake.horizon = 9; });
+    mount.readSettings();
+    m.answer(QMessageBox::Yes);
+    button(d, "Go to the home position")->click();
+    REQUIRE(m.done());
+    CHECK(m.lastSeen().contains("Move the mount now?"));
+    CHECK(waitFor([&] { return fakeSays([&] { return fake.atHome; }); }, 3000));
+    CHECK(waitFor([&] { return d->valueOf("horizon") == "9"; }, 3000));
     mount.close();
 }
 
