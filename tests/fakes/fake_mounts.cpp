@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <ctime>
 #include <thread>
 
 namespace slopcap::test {
@@ -114,6 +115,201 @@ Device fakeLx200(std::shared_ptr<mounts::SimMount> sim, Lx200Dialect dialect) {
         }
         return {};   // LX200s say nothing to what they don't know
     };
+}
+
+// ---------------------------------------------------------------- OnStepX
+
+Device FakeOnStep::device() {
+    return [this](std::string_view in) { return handle(in); };
+}
+
+std::string FakeOnStep::handle(std::string_view in) {
+    std::lock_guard lock(m);
+    if (in.size() < 3 || in.front() != ':' || in.back() != '#') return {};
+    const std::string c(in.substr(1, in.size() - 2));
+    auto is = [&](const char* p) { return c.rfind(p, 0) == 0; };
+    const auto x = sim_->state();
+    constexpr double kSidereal = 15.041067 / 3600;   // degrees per second
+    static const double kRateX[] = {0.25, 0.5, 1, 2, 4, 8, 20, 48, 240, 480, 1};
+    auto ok = [&](bool good, int why) {
+        lastError = good ? 0 : why;
+        return std::string(good ? "1" : "0");   // numeric: no '#'
+    };
+    if (c == "GE") {
+        char buf[8];
+        std::snprintf(buf, sizeof buf, "%02d#", lastError);
+        return buf;
+    }
+    lastError = 0;
+    if (c == "GVP") return "On-Step#";
+    if (c == "GVN") return firmware + "#";
+    if (c == "GR" || (c == "GRH" && highPrecision)) {
+        if (c == "GRH") {
+            char buf[32];
+            const double s = x.ra * 3600;
+            std::snprintf(buf, sizeof buf, "%02d:%02d:%07.4f#", static_cast<int>(s / 3600), static_cast<int>(s / 60) % 60, std::fmod(s, 60.0));
+            return buf;
+        }
+        return lx200Ra(x.ra, longFormat);
+    }
+    if (c == "GD" || (c == "GDH" && highPrecision)) {
+        if (c == "GDH") {
+            char buf[32];
+            const double s = std::abs(x.dec) * 3600;
+            std::snprintf(buf, sizeof buf, "%c%02d*%02d:%06.3f#", x.dec < 0 ? '-' : '+', static_cast<int>(s / 3600), static_cast<int>(s / 60) % 60, std::fmod(s, 60.0));
+            return buf;
+        }
+        return lx200Dec(x.dec, longFormat, ':');
+    }
+    if (c == "U") return longFormat = !longFormat, "";
+    if (c == "GU") {
+        std::string s;
+        if (!x.tracking && !trackingClaimed_) s += 'n';
+        if (!x.slewing) s += 'N';
+        s += parkFailed ? 'F' : x.parked ? 'P' : 'p';
+        if (atHome) s += 'H';
+        if (x.rate == mounts::TrackRate::Lunar) s += '(';
+        if (x.rate == mounts::TrackRate::Solar) s += 'O';
+        if (x.rate == mounts::TrackRate::King) s += 'k';
+        if (compensation) s += compensation;
+        if (compensation && singleAxis) s += 's';
+        if (pauseAtHome) s += 'u';
+        if (buzzer) s += 'z';
+        if (autoFlip) s += 'a';
+        s += 'E';
+        s += x.pier == mounts::PierSide::East ? 'T' : x.pier == mounts::PierSide::West ? 'W' : 'o';
+        s += static_cast<char>('0' + pulseRate);
+        s += static_cast<char>('0' + guideRate);
+        s += static_cast<char>('0' + error);
+        return s + "#";
+    }
+    if (c == "Gm") return x.pier == mounts::PierSide::East ? "E#" : x.pier == mounts::PierSide::West ? "W#" : "N#";
+    if (c == "GT") return lostRate ? "0.00000#" : x.tracking ? "60.16427#" : "0#";
+    if (c == "GX90") {
+        char buf[16];
+        std::snprintf(buf, sizeof buf, "%.2f#", kRateX[pulseRate]);
+        return buf;
+    }
+    if ((c == "GXTR" || c == "GXTD") && rateOffsets) {
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "%.8f#", c == "GXTR" ? raOffset : decOffset);
+        return buf;
+    }
+    if ((is("SXTR,") || is("SXTD,")) && rateOffsets) {
+        (c[3] == 'R' ? raOffset : decOffset) = std::atof(c.c_str() + 5);
+        return ok(true, 0);
+    }
+    char out[48];
+    if (c == "Gh") return std::snprintf(out, sizeof out, "%+03d*#", horizon), out;
+    if (c == "Go") return std::snprintf(out, sizeof out, "%02d*#", overhead), out;
+    if (c == "GXE9" || c == "GXEA") return std::snprintf(out, sizeof out, "%d#", c == "GXE9" ? meridianEast : meridianWest), out;
+    if (c == "Gv") return elevation + "#";
+    if (c == "GX95") return autoFlip ? "1#" : "0#";
+    if (c == "GX96") return std::string(1, pierSide) + "#";
+    if (c == "GX97") return "5.0#";
+    if (c == "GXE4" || c == "GXE5") return "25600#";
+    if (c == "%BR" || c == "%BD") return std::snprintf(out, sizeof out, "%d#", c == "%BR" ? backlashRa : backlashDec), out;
+    auto intAfter = [&](std::size_t at, int lo, int hi, int& into) {
+        char* end = nullptr;
+        const long v = std::strtol(c.c_str() + at, &end, 10);
+        if (end == c.c_str() + at || *end || v < lo || v > hi) return ok(false, 4);
+        into = static_cast<int>(v);
+        return ok(true, 0);
+    };
+    if (is("Sh")) return intAfter(2, -30, 30, horizon);
+    if (is("So")) return intAfter(2, 60, 90, overhead);
+    if (is("SXE9,")) return intAfter(5, -720, 720, meridianEast);
+    if (is("SXEA,")) return intAfter(5, -720, 720, meridianWest);
+    if (is("$BR")) return intAfter(3, 0, 3600, backlashRa);
+    if (is("$BD")) return intAfter(3, 0, 3600, backlashDec);
+    if (is("SX95,") || is("SX97,") || is("SX98,")) {
+        if (c.size() != 6 || (c[5] != '0' && c[5] != '1')) return ok(false, 4);
+        (c[3] == '5' ? autoFlip : c[3] == '7' ? buzzer : pauseAtHome) = c[5] == '1';
+        return ok(true, 0);
+    }
+    if (is("SX96,")) {
+        if (c.size() != 6 || std::string("EWBA").find(c[5]) == std::string::npos) return ok(false, 4);
+        pierSide = c[5];
+        return ok(true, 0);
+    }
+    if (is("SX93,")) return gotoPreset = std::atoi(c.c_str() + 5), "";
+    if (is("Sv")) return elevation = c.substr(2), ok(true, 0);
+    if (is("SG")) return utcOffset = c.substr(2), ok(c.size() == 8 && (c[2] == '+' || c[2] == '-'), 5);
+    if (is("St")) return latitude = c.substr(2), ok(mounts::parseLx200Dec(c.substr(2)).has_value(), 5);
+    if (is("Sg")) return longitude = c.substr(2), ok(c.size() >= 9, 5);
+    if (is("SC")) return setDate = c.substr(2), ok(c.size() == 10, 5);
+    if (is("SL")) return setTime = c.substr(2), ok(c.size() == 10, 5);
+    if (c == "Tn" || c == "Tr" || c == "To") return compensation = c == "Tn" ? 0 : c[1] == 'r' ? 'r' : 't', ok(true, 0);
+    if (c == "T1" || c == "T2") return singleAxis = c == "T1", ok(true, 0);
+    if (c == "hQ") return parkSet = true, ok(true, 0);
+    if (c == "hC") return sim_->goTo(sim_->state().ra, 90), atHome = true, "";
+    if (c == "Gt") return latitude + "#";
+    if (c == "Gg") return longitude + "#";
+    if (c == "GG") return utcOffset + "#";
+    if (c == "GC" || c == "GL") {
+        // local time = UTC - offset (OnStep's offset is what to add to local time for UTC)
+        const int sign = utcOffset[0] == '-' ? -1 : 1;
+        const double offH = sign * (std::atoi(utcOffset.c_str() + 1) + std::atoi(utcOffset.c_str() + 4) / 60.0);
+        const auto t = static_cast<std::time_t>(std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count() + clockOffset - offH * 3600);
+        std::tm tm{};
+#ifdef _WIN32
+        gmtime_s(&tm, &t);
+#else
+        gmtime_r(&t, &tm);
+#endif
+        char buf[32];
+        if (c == "GC") std::snprintf(buf, sizeof buf, "%02d/%02d/%02d#", tm.tm_mon + 1, tm.tm_mday, tm.tm_year % 100);
+        else std::snprintf(buf, sizeof buf, "%02d:%02d:%02d#", tm.tm_hour, tm.tm_min, tm.tm_sec);
+        return buf;
+    }
+    if (c == "D") return x.slewing ? "\x7f#" : "#";
+    if (is("Sr")) return ra_ = mounts::parseLx200Ra(c.substr(2)).value_or(-1), ok(ra_ >= 0, 5);
+    if (is("Sd")) {
+        const auto d = mounts::parseLx200Dec(c.substr(2));
+        dec_ = d.value_or(0);
+        return ok(d.has_value(), 5);
+    }
+    if (c == "MS" && stillMoving > 0) return --stillMoving, lastError = 22, "8";
+    if (c == "MS") return sim_->goTo(ra_, dec_) ? "0" : (lastError = 18, "4");   // a digit, no '#'
+    if (c == "CM") {
+        if (x.parked) return lastError = 18, "E4#";
+        return sim_->sync(ra_, dec_), "N/A#";
+    }
+    if (c == "Q") return sim_->abort(), "";
+    if (c.size() == 2 && c[0] == 'Q' && std::string("nsew").find(c[1]) != std::string::npos) return sim_->stop(dirOf(c[1])), "";
+    if (c.size() == 2 && c[0] == 'R') {
+        const auto at = std::string("0123456789").find(c[1]);
+        const int r = c[1] == 'G' ? 2 : c[1] == 'C' ? 5 : c[1] == 'M' ? 6 : c[1] == 'F' ? 7 : c[1] == 'S' ? 8 : at != std::string::npos ? static_cast<int>(at) : -1;
+        if (r < 0) return "0";
+        guideRate = r;
+        if (separatePulseRate && r <= 2) pulseRate = r;   // and into NV, as the firmware does
+        return "";
+    }
+    if (c.size() == 2 && c[0] == 'M' && std::string("nsew").find(c[1]) != std::string::npos)
+        return sim_->move(dirOf(c[1]), kRateX[guideRate] * kSidereal * speedup), "";
+    if (is("Mg") && c.size() > 3) return sim_->pulse(dirOf(c[2]), std::atoi(c.c_str() + 3)), "";
+    if (c == "TQ" || c == "TL" || c == "TS" || c == "TK") {
+        lostRate = false;
+        if (trackingClaimed_) sim_->setTracking(true), trackingClaimed_ = false;
+        sim_->setTrackRate(c == "TL" ? mounts::TrackRate::Lunar : c == "TS" ? mounts::TrackRate::Solar : c == "TK" ? mounts::TrackRate::King : mounts::TrackRate::Sidereal);
+        return "";
+    }
+    if (c == "Te") {
+        if (x.parked) return ok(false, 9);
+        if (lostRate) return trackingClaimed_ = true, ok(true, 0);
+        return sim_->setTracking(true), ok(true, 0);
+    }
+    if (c == "Td") return trackingClaimed_ = false, sim_->setTracking(false), ok(true, 0);
+    if (c == "hP") {
+        if (noParkPosition) return ok(false, 12);
+        return sim_->park(), ok(true, 0);
+    }
+    if (c == "hR") {
+        if (!x.parked) return ok(false, 11);
+        return sim_->unpark(), ok(true, 0);
+    }
+    lastError = 2;
+    return "0";   // OnStepX: a bare 0 to what it doesn't know
 }
 
 // ---------------------------------------------------------------- NexStar / SynScan

@@ -74,16 +74,26 @@ void Mount::openBuiltIn() {
         emit failed(QString::fromUtf8(e.what()));
         return;
     }
+    openWith(std::move(make));
+}
+
+void Mount::openWith(std::function<std::unique_ptr<mounts::IMountDriver>()> make) {
+    if (worker_) return;
     qInfo().noquote() << "mount: opening" << spec_;
     const bool wasReady = ready();
     worker_ = std::make_unique<mounts::MountWorker>(std::move(make));
     connect(worker_.get(), &mounts::MountWorker::connectedChanged, this, [this](bool ok) {
-        if (ok) qInfo().noquote() << "mount:" << spec_ << "is" << QString::fromStdString(worker_->info().model);
+        if (ok) {
+            const auto info = worker_->info();
+            qInfo().noquote() << "mount:" << spec_ << "is" << QString::fromStdString(info.model)
+                              << (info.details.empty() ? QString() : "(" + QString::fromStdString(info.details) + ")");
+        }
         emit readyChanged(ok);
         emit stateChanged();
     });
     connect(worker_.get(), &mounts::MountWorker::statusChanged, this, &Mount::onWorkerStatus);
     connect(worker_.get(), &mounts::MountWorker::failed, this, [this](const QString& why) { emit failed(why); });
+    connect(worker_.get(), &mounts::MountWorker::settingsRead, this, &Mount::settingsRead);
     if (wasReady) emit readyChanged(false);   // INDI's mount steps aside
 }
 
@@ -136,6 +146,41 @@ std::optional<bool> Mount::parked() const {
     if (!p || !p->elements.count("PARK")) return std::nullopt;
     return p->elements.at("PARK").on() && !p->busy();   // PARK goes On (Busy) as soon as parking starts
 }
+
+mounts::PierSide Mount::pierSide() const { return worker_ && worker_->connected() ? worker_->status().pier : mounts::PierSide::Unknown; }
+
+bool Mount::atHome() const { return worker_ && worker_->connected() && worker_->status().atHome; }
+
+QString Mount::fault() const { return worker_ && worker_->connected() ? QString::fromStdString(worker_->status().fault) : QString(); }
+
+bool Mount::canTrackOwnRate() const { return worker_ && worker_->connected() && worker_->info().caps.rateOffsets; }
+
+void Mount::setRateOffsets(double raArcsecPerSec, double decArcsecPerSec) {
+    if (!canTrackOwnRate()) {
+        emit failed("this mount can't track at a rate of its own");
+        return;
+    }
+    qInfo().noquote() << "mount: rate offsets RA" << raArcsecPerSec << "Dec" << decArcsecPerSec << "arcsec/s";
+    worker_->setRateOffsets(raArcsecPerSec, decArcsecPerSec);
+}
+
+bool Mount::hasSettings() const { return worker_ && worker_->connected() && worker_->info().caps.settings; }
+
+void Mount::readSettings() {
+    if (hasSettings()) worker_->readSettings();
+}
+
+void Mount::changeSetting(const QString& key, const QString& value) {
+    if (!hasSettings()) {
+        emit failed("this mount's settings can't be changed from SlopCap");
+        return;
+    }
+    qInfo().noquote() << "mount: setting" << key << (value.isEmpty() ? QString() : "= " + value);
+    worker_->changeSetting(key.toStdString(), value.toStdString());
+    worker_->readSettings();
+}
+
+std::vector<mounts::MountSetting> Mount::settings() const { return worker_ ? worker_->settings() : std::vector<mounts::MountSetting>{}; }
 
 // built-in mounts without pulses of their own get timed moves instead (MountWorker)
 bool Mount::canPulse() const { return worker_ ? worker_->connected() : client_.property(device_, kGuideNS) && client_.property(device_, kGuideWE); }

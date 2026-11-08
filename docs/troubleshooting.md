@@ -63,12 +63,14 @@ Through INDI:
 A mount on SlopCap's own driver (Settings → Mount, or `--mount`):
 
 - The session log says why, on a `mount: failed:` line. *Access is denied* (Windows) or *Device or resource busy*
-  means another program has the port: close NINA, PHD2, an INDI driver or anything else using it. Two programs
+  means another program has the port: close NINA, PHD2, an INDI driver or anything else using it. With an OnStep that
+  NINA or PHD2 also use, the ASCOM OnStep driver holds the port while either is connected: disconnect the mount there
+  first, or use OnStep's Wi-Fi (`onstep:tcp://HOST`), which takes a connection of its own. Two programs
   talking to one mount over one serial port confuse it, even where the system lets both open it.
 - `slopcap --list-mounts` lists the serial ports this computer has; the mount's USB adapter should appear and
   disappear as you plug and unplug it.
 - A port that opens but never answers is usually the wrong speed (add `@9600` or the mount's own, as in
-  `lx200:COM3@9600`) or the wrong kind of mount in the spec. For an LX200 that's recognised wrongly, name it:
+  `lx200:COM3@9600`; `onstep:` tries the usual speeds itself) or the wrong kind of mount in the spec. For an LX200 that's recognised wrongly, name it:
   `lx200-classic`, `lx200-meade` or `lx200-onstep`.
 - **Linux:** permission denied means you're not in the `dialout` group, as above.
 

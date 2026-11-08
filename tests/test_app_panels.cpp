@@ -4,11 +4,15 @@
 #include "app/focus_controller.hpp"
 #include "app/focus_views.hpp"
 #include "app/mount_section.hpp"
+#include "app/mount_settings_dialog.hpp"
 #include "app/raw_histogram.hpp"
 #include "app/session_log.hpp"
 #include "app/settings_dialog.hpp"
 #include "app/theme.hpp"
 #include "app_harness.hpp"
+#include "fakes/fake_mounts.hpp"
+#include "mounts/mount_log.hpp"
+#include "mounts/onstep.hpp"
 #include "preview/preview_widget.hpp"
 
 #include <QButtonGroup>
@@ -134,6 +138,32 @@ TEST_CASE("panels: focus, mount and collimation with nothing connected", "[app][
     CHECK(ms.pulseMs() == 1000);
     button(&ms, "Connect")->click();   // nothing listens there
     CHECK(waitFor([&] { return !fc.indi().isConnected(); }, 2000));
+    CHECK(ms.speed().isEmpty());   // guide pulses until a mount says what speeds it has
+
+    // a built-in mount: its speeds join "Guide pulse", and with one picked a held button moves the mount
+    devices::Mount sim(fc.indi());
+    sim.setSpec("sim");
+    MountSection simSection(sim, fc);
+    sim.openBuiltIn();
+    REQUIRE(waitFor([&] { return sim.ready() && sim.hasCoords(); }, 5000));
+    const auto rates = sim.slewRates();
+    REQUIRE(rates.size() >= 2);
+    simSection.setSpeed(rates.last());
+    CHECK(simSection.speed() == rates.last());
+    CHECK(sim.slewRate() == rates.last());
+    const double dec0 = sim.dec();
+    auto* north = button(&simSection, "N");
+    REQUIRE(north);
+    emit north->pressed();
+    CHECK(waitFor([&] { return sim.dec() > dec0 + 0.05; }, 5000));
+    emit north->released();
+    waitFor([] { return false; }, 600);   // (the move stops)
+    const double dec1 = sim.dec();
+    waitFor([] { return false; }, 1200);
+    CHECK(std::abs(sim.dec() - dec1) < 0.01);   // stopped on release
+    simSection.setSpeed("");
+    CHECK(simSection.speed().isEmpty());
+    sim.close();
 
     preview::PreviewWidget pv;
     CollimationPanel collim(&pv);
@@ -141,6 +171,51 @@ TEST_CASE("panels: focus, mount and collimation with nothing connected", "[app][
     CHECK(labelWith(collim.right(), "Looking for a star"));
     collim.setAnalysing(false);
     CHECK(labelWith(collim.right(), "Analysis off"));
+}
+
+TEST_CASE("panels: an OnStep's own settings and the mount's log", "[app][panels]") {
+    FocusController fc;
+    fc.setServer("localhost:1");
+    auto sim = std::make_shared<mounts::SimMount>();
+    FakeOnStep fake(sim);
+    devices::Mount mount(fc.indi());
+    mount.setSpec("onstep:/dev/fake");
+    MountSection ms(mount, fc);
+    mount.openWith([&] {
+        return std::make_unique<mounts::OnStepDriver>(std::vector<mounts::TransportFactory>{fakeLink(fake.device(), std::make_shared<LinkState>())});
+    });
+    REQUIRE(waitFor([&] { return mount.ready() && mount.hasSettings(); }, 5000));
+    REQUIRE(button(&ms, "Settings and log…"));
+    auto* d = ms.openSettings();
+    REQUIRE(waitFor([&] { return !d->valueOf("horizon").isEmpty(); }, 5000));
+    CHECK(d->valueOf("horizon") == "-10");
+    CHECK(d->valueOf("pierSide") == "E");
+    CHECK(d->valueOf("buzzer") == "1");
+    CHECK(d->valueOf("longitude") == "-0.1000");
+
+    // only what was changed is written, and it's read back
+    d->edit("horizon", "5");
+    d->edit("buzzer", "0");
+    d->apply();
+    auto fakeSays = [&](auto f) {
+        std::lock_guard lock(fake.m);
+        return f();
+    };
+    CHECK(waitFor([&] { return fakeSays([&] { return fake.horizon == 5 && !fake.buzzer; }); }, 5000));
+    CHECK(waitFor([&] { return d->valueOf("horizon") == "5" && d->valueOf("buzzer") == "0"; }, 5000));
+    CHECK(fakeSays([&] { return fake.overhead == 80 && fake.autoFlip && fake.pierSide == 'E' && fake.backlashDec == 70; }));
+
+    // the log has the commands; an error goes to the log and shows in red in the panel until the log is opened
+    d->showLog();
+    CHECK(waitFor([&] { return d->logText().contains(":Sh+05#  < 1"); }, 3000));
+    CHECK_FALSE(d->logText().contains(":GU#"));   // status polls hidden
+    d->close();
+    mount.changeSetting("utcOffset", "+5:20");
+    CHECK(waitFor([&] { return labelWith(&ms, "like +05:00") != nullptr; }, 3000));
+    CHECK(waitFor([&] { return d->logText().contains("!! a UTC offset is like +05:00"); }, 3000));
+    ms.openSettings(true);
+    CHECK_FALSE(labelWith(&ms, "like +05:00")->isVisible());
+    mount.close();
 }
 
 TEST_CASE("panels: settings dialog round trip", "[app][panels]") {

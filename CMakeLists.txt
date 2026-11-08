@@ -257,7 +257,7 @@ if(SLOPCAP_BUILD_GUI)
   if(Qt6_FOUND)
     # SlopCap's own mount drivers (docs/design/mounts.md): LX200 / OnStep, NexStar / SynScan, Sky-Watcher's motor
     # controller, the SynScan app, a simulator; serial (own Win32 / termios class), TCP and UDP. Qt Core + Network.
-    add_library(slopcap_mounts STATIC src/mounts/transport.cpp src/mounts/command_channel.cpp src/mounts/lx200.cpp
+    add_library(slopcap_mounts STATIC src/mounts/transport.cpp src/mounts/command_channel.cpp src/mounts/mount_log.cpp src/mounts/lx200.cpp src/mounts/onstep.cpp
       src/mounts/nexstar.cpp src/mounts/skywatcher.cpp src/mounts/synscan_app.cpp src/mounts/sim_mount.cpp
       src/mounts/mount_worker.cpp src/mounts/open_mount.cpp)
     set_target_properties(slopcap_mounts PROPERTIES AUTOMOC ON)
@@ -265,6 +265,9 @@ if(SLOPCAP_BUILD_GUI)
     if(WIN32)
       target_link_libraries(slopcap_mounts PRIVATE advapi32)   # the COM port list, from the registry
     endif()
+    # A built-in mount driver from the command line, on a real mount (tools/mountprobe).
+    add_executable(slopcap-mountprobe tools/mountprobe/main.cpp)
+    target_link_libraries(slopcap-mountprobe PRIVATE slopcap_mounts slopcap_warnings)
     # Devices (focuser and mount over INDI, the mount also through slopcap_mounts). Qt Core + Network only.
     add_library(slopcap_devices STATIC src/devices/indi_client.cpp src/devices/focuser.cpp src/devices/mount.cpp)
     set_target_properties(slopcap_devices PROPERTIES AUTOMOC ON)
@@ -286,7 +289,7 @@ if(SLOPCAP_BUILD_GUI)
     target_link_libraries(slopcap-diag PRIVATE slopcap_core Qt6::Gui slopcap_warnings)
     # The application's windows and panels: a library, so the tests drive the same code the program runs.
     add_library(slopcap_app STATIC src/app/main_window.cpp src/app/theme.cpp src/app/focus_controller.cpp
-      src/app/focus_views.cpp src/app/collimation_panel.cpp src/app/settings_dialog.cpp src/app/mount_section.cpp
+      src/app/focus_views.cpp src/app/collimation_panel.cpp src/app/settings_dialog.cpp src/app/mount_section.cpp src/app/mount_settings_dialog.cpp
       src/app/raw_histogram.cpp src/app/session_log.cpp src/app/full_view_bar.cpp src/app/adc_panel.cpp src/app/live_inset.cpp)
     set_target_properties(slopcap_app PROPERTIES AUTOMOC ON)
     target_link_libraries(slopcap_app PUBLIC slopcap_gui slopcap_net PRIVATE slopcap_warnings)
@@ -397,7 +400,7 @@ if(SLOPCAP_BUILD_TESTS)
       # executable), all under a real QApplication; needs a screen (Xvfb in docker/build.sh).
       if(TARGET Qt6::Test)
         add_executable(slopcap-app-tests tests/app_main.cpp tests/app_harness.cpp tests/test_app_window.cpp tests/test_app_focus.cpp
-          tests/test_app_panels.cpp tests/test_app_remote.cpp tests/test_app_program.cpp tests/test_app_adc.cpp)
+          tests/test_app_panels.cpp tests/test_app_remote.cpp tests/test_app_program.cpp tests/test_app_adc.cpp tests/fakes/fake_mounts.cpp)
         target_link_libraries(slopcap-app-tests PRIVATE slopcap_app slopcap_warnings Catch2::Catch2 Qt6::Test)
         target_compile_definitions(slopcap-app-tests PRIVATE SLOPCAP_PROGRAM="$<TARGET_FILE:slopcap>")
         add_dependencies(slopcap-app-tests slopcap)

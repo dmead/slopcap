@@ -1,6 +1,7 @@
 #include "app/mount_section.hpp"
 
 #include "app/focus_controller.hpp"
+#include "app/mount_settings_dialog.hpp"
 #include "app/theme.hpp"
 
 #include <QComboBox>
@@ -8,7 +9,12 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QSignalBlocker>
+#include <QTime>
+#include <QTimer>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 #include <cmath>
 
@@ -87,8 +93,13 @@ MountSection::MountSection(devices::Mount& mount, FocusController& fc, QWidget* 
         auto* b = theme::button(text);
         b->setStyleSheet(kPadButton + "font-weight: 600;");
         b->setAccessibleName(name);
-        b->setToolTip(name + " (guide pulse)");
-        connect(b, &QPushButton::clicked, this, [this, d] { mount_.pulse(d, pulseMs()); });
+        b->setToolTip(name + ": a guide pulse, or with a speed picked, moves while held");
+        // guide pulses: a tap; a speed: moves from press to release
+        connect(b, &QPushButton::pressed, this, [this, d] { press(d); });
+        connect(b, &QPushButton::released, this, [this] { release(); });
+        connect(b, &QPushButton::clicked, this, [this, d] {
+            if (speed().isEmpty()) mount_.pulse(d, pulseMs());
+        });
         g->addWidget(b, row, col);
     };
     nudge("N", "Nudge north", Direction::North, 0, 1);
@@ -100,13 +111,33 @@ MountSection::MountSection(devices::Mount& mount, FocusController& fc, QWidget* 
     stop->setAccessibleName("Stop mount");
     stop->setToolTip("Stop every mount motion (slews and moves)");
     connect(stop, &QPushButton::clicked, this, [this] {
+        held_.reset();
+        renew_->stop();
         mount_.stopMove();
         mount_.abort();
     });
     g->addWidget(stop, 1, 1);
     v->addWidget(pad_, 0, Qt::AlignHCenter);
 
-    auto* pulseRow = new QHBoxLayout;
+    auto* speedRow = new QHBoxLayout;
+    speedRow->addWidget(theme::label("Speed", "muted"));
+    speedRow->addStretch(1);
+    speed_ = new QComboBox;
+    speed_->setAccessibleName("Mount speed");
+    speed_->setToolTip("Guide pulse: each tap nudges the mount at its guide rate.\n"
+                       "A speed: the mount moves while a pad button is held.");
+    speed_->addItem("Guide pulse", QString());
+    speedRow->addWidget(speed_);
+    v->addLayout(speedRow);
+    connect(speed_, &QComboBox::currentIndexChanged, this, [this] {
+        release();
+        if (!speed().isEmpty()) mount_.setSlewRate(speed());
+        pulseRow_->setVisible(speed().isEmpty());
+    });
+
+    pulseRow_ = new QWidget;
+    auto* pulseRow = new QHBoxLayout(pulseRow_);
+    pulseRow->setContentsMargins(0, 0, 0, 0);
     pulseRow->addWidget(theme::label("Pulse length", "muted"));
     pulseRow->addStretch(1);
     pulse_ = new QComboBox;
@@ -115,19 +146,78 @@ MountSection::MountSection(devices::Mount& mount, FocusController& fc, QWidget* 
     pulse_->addItem("1 s", 1000);
     pulse_->setCurrentIndex(1);
     pulseRow->addWidget(pulse_);
-    v->addLayout(pulseRow);
+    v->addWidget(pulseRow_);
     connect(pulse_, &QComboBox::currentIndexChanged, this, [this] { emit pulseLengthChanged(pulseMs()); });
+
+    // a held button renews its move before the mount's own 10 s deadman stops it (MountWorker::kDeadmanMs)
+    renew_ = new QTimer(this);
+    renew_->setInterval(4000);
+    connect(renew_, &QTimer::timeout, this, [this] {
+        if (held_) mount_.startMove(*held_);
+    });
 
     connect(&mount_, &devices::Mount::readyChanged, this, &MountSection::refresh);
     connect(&mount_, &devices::Mount::coordsChanged, this, &MountSection::refresh);
     connect(&mount_, &devices::Mount::stateChanged, this, &MountSection::refresh);
-    connect(&mount_, &devices::Mount::failed, this, [this](const QString& why) { emit message("Mount: " + why); });
+    // what went wrong last, in red until the log is opened; and the mount's own settings and the log, connected or not
+    auto* moreRow = new QHBoxLayout;
+    moreRow->setSpacing(6);
+    lastError_ = theme::label("", "muted");
+    lastError_->setWordWrap(true);
+    lastError_->setStyleSheet("color: #ff6b6b;");
+    lastError_->setVisible(false);
+    more_ = theme::button("Settings and log…");
+    more_->setToolTip("The mount's own settings (OnStep: site, time, limits, flips, backlash…) and every command, reply and error");
+    moreRow->addWidget(lastError_, 1);
+    moreRow->addWidget(more_, 0, Qt::AlignTop);
+    v->addLayout(moreRow);
+    connect(more_, &QPushButton::clicked, this, [this] { openSettings(lastError_->isVisible()); });
+
+    connect(&mount_, &devices::Mount::failed, this, [this](const QString& why) {
+        emit message("Mount: " + why);
+        lastError_->setText(QTime::currentTime().toString("HH:mm") + "  " + why);
+        lastError_->setToolTip("Settings and log… has the whole story");
+        lastError_->setVisible(true);
+    });
     // the INDI connection itself (shared with the focuser)
     connect(&fc_, &FocusController::focuserChanged, this, &MountSection::refresh);
     refresh();
 }
 
 int MountSection::pulseMs() const { return pulse_->currentData().toInt(); }
+
+MountSettingsDialog* MountSection::openSettings(bool log) {
+    if (!dialog_) dialog_ = new MountSettingsDialog(mount_, this);
+    else if (mount_.hasSettings()) mount_.readSettings();
+    if (log) dialog_->showLog();
+    lastError_->setVisible(false);
+    dialog_->show();
+    dialog_->raise();
+    dialog_->activateWindow();
+    return dialog_;
+}
+
+QString MountSection::speed() const { return speed_->currentData().toString(); }
+
+void MountSection::setSpeed(const QString& rate) {
+    const int i = speed_->findData(rate);
+    if (i >= 0) speed_->setCurrentIndex(i);
+}
+
+void MountSection::press(Direction d) {
+    if (speed().isEmpty()) return;   // a guide pulse, on click
+    mount_.setSlewRate(speed());
+    held_ = d;
+    mount_.startMove(d);
+    renew_->start();
+}
+
+void MountSection::release() {
+    if (!held_) return;
+    held_.reset();
+    renew_->stop();
+    mount_.stopMove();
+}
 
 void MountSection::setPulseMs(int ms) {
     const int i = pulse_->findData(ms);
@@ -150,7 +240,21 @@ void MountSection::refresh() {
     }
     online_->setVisible(ok);
     pad_->setVisible(ok);
-    if (!ok) return;
+    // the speeds the mount has (OnStep: 0.25x to max), after "Guide pulse"
+    if (const auto rates = ok ? mount_.slewRates() : QStringList{}; rates != rates_) {
+        const QString was = speed();
+        const QSignalBlocker block(speed_);
+        rates_ = rates;
+        while (speed_->count() > 1) speed_->removeItem(1);
+        for (const auto& r : rates_) speed_->addItem(r, r);
+        speed_->setCurrentIndex(std::max(0, speed_->findData(was)));
+        pulseRow_->setVisible(speed().isEmpty());
+    }
+    speed_->setEnabled(ok && !rates_.isEmpty());
+    if (!ok) {
+        release();
+        return;
+    }
 
     coords_->setText(mount_.hasCoords() ? QString("RA %1   Dec %2").arg(formatRa(mount_.ra()), formatDec(mount_.dec())) : QString("RA —   Dec —"));
     const auto parked = mount_.parked();
@@ -160,8 +264,11 @@ void MountSection::refresh() {
     else if (mount_.slewing()) state << "Slewing";
     else if (tracking == true) state << "Tracking";
     else if (tracking == false) state << "Not tracking";
+    if (mount_.atHome() && parked != true) state << "at home";
+    if (const auto pier = mount_.pierSide(); pier != mounts::PierSide::Unknown) state << (pier == mounts::PierSide::East ? "pier east" : "pier west");
     if (mount_.pulsing()) state << "pulsing";
     if (!mount_.canPulse()) state << "no guide pulses";
+    if (const auto fault = mount_.fault(); !fault.isEmpty()) state << "⚠ " + fault;
     state_->setText(state.join(" · "));
     unpark_->setVisible(parked == true);
     track_->setVisible(parked != true && tracking == false);

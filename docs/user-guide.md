@@ -160,7 +160,8 @@ of the chosen length to nudge the planet back into the ROI; **Stop** halts every
 
   | Mount | Spec |
   |---|---|
-  | Meade LX200, Autostar, Audiostar, LX200GPS, or OnStep, on a serial or USB cable | `lx200:COM3`, `lx200:/dev/ttyUSB0` (it asks which) |
+  | Meade LX200, Autostar, Audiostar, LX200GPS, on a serial or USB cable | `lx200:COM3`, `lx200:/dev/ttyUSB0` (it asks which) |
+  | OnStep or OnStepX, on USB or Bluetooth (it finds the speed) | `onstep:COM6`, `onstep:/dev/ttyUSB0` |
   | OnStep over its Wi-Fi | `onstep:tcp://192.168.0.1` (port 9999 unless you add `:PORT`) |
   | Celestron, through the hand controller | `nexstar:COM4` |
   | Sky-Watcher, through the SynScan hand controller | `synscan:COM4` |
@@ -176,7 +177,25 @@ of the chosen length to nudge the planet back into the ROI; **Stop** halts every
   hand controllers) get timed slow moves instead. A Sky-Watcher on its own motors needs Settings → Site to know where
   it points, starts from its home position (pointing at the pole, counterweights down), and a sync on a known object
   puts it right. These drivers are written from the makers' published protocols and tested against simulations of
-  them, but none has been tried on a real mount yet; through INDI, the LX200 has.
+  them. The OnStep driver has been tried on an OnStepX 10.25a (a JTW Trident P75); the others not yet on a real mount
+  (through INDI, the LX200 has).
+
+  **OnStep** has a driver of its own (`onstep:`), which knows more of it than `lx200:` does. It tries 9600, 230400,
+  115200, 57600, 38400 and 19200 baud until the mount answers (or give it one: `onstep:COM6@230400`). The panel shows
+  the pier side, *at home*, and the mount's own faults in words ("at the meridian limit", "a motor fault"). The pad
+  offers OnStep's ten speeds, 0.25x to its maximum. On connecting, SlopCap compares the mount's clock with the
+  computer's and its site with Settings → Site, and says so when they differ: a clock an hour out is usually the UTC
+  offset after a change to or from daylight saving. Starting tracking is checked: after a soft reset an OnStep can
+  say it tracks at a rate of 0, and SlopCap gives it its rate back. On OnStep the rate a move uses is also the rate
+  PHD2's guide pulses go at, so SlopCap puts the mount's own rates back when the move ends. **Settings and log…** in
+  the mount panel sets what you'd otherwise set in OnStep's web server or app: site, elevation, UTC offset and
+  the clock (from this computer, in one go), tracking rate and refraction compensation, horizon, overhead and
+  meridian limits, automatic flips and the preferred pier side, guide-pulse and goto speeds, backlash, the buzzer,
+  and the park position. Nothing is written until you press Apply, and then only what you changed. Its Log tab
+  has every command SlopCap sent the mount and every reply and error. The panel's **Speed** picks how the pad moves
+  it: Guide pulse (a tap, a pulse of the chosen length) or one of the mount's speeds (it moves while you hold the
+  button). To try it without the app:
+  `slopcap-mountprobe onstep:COM6` reads what the mount says, and `--move` moves it a little each way.
 
 ## Afterwards
 

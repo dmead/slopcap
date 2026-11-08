@@ -1,6 +1,7 @@
 #include "mounts/mount_worker.hpp"
 
 #include "analysis/ephemeris.hpp"
+#include "mounts/mount_log.hpp"
 
 #include <QMetaObject>
 
@@ -140,6 +141,38 @@ void MountWorker::sync(double ra, double dec) {
     });
 }
 
+void MountWorker::setRateOffsets(double raArcsecPerSec, double decArcsecPerSec) {
+    post([this, raArcsecPerSec, decArcsecPerSec] {
+        if (!info_.caps.rateOffsets) throw MountError("this mount can't track at a rate of its own");
+        driver_->setRateOffsets(raArcsecPerSec, decArcsecPerSec);
+    });
+}
+
+void MountWorker::readSettings() {
+    post([this] {
+        if (!info_.caps.settings) return;
+        auto s = driver_->settings();
+        {
+            std::lock_guard lock(m_);
+            settings_ = std::move(s);
+        }
+        QMetaObject::invokeMethod(this, [this] { emit settingsRead(); }, Qt::QueuedConnection);
+    });
+}
+
+void MountWorker::changeSetting(const std::string& key, const std::string& value) {
+    post([this, key, value] {
+        MountLog::instance().add(MountLog::Kind::Info, "setting " + key + (value.empty() ? std::string() : " = " + value));
+        driver_->changeSetting(key, value);
+        nextPoll_ = Clock::now();
+    });
+}
+
+std::vector<MountSetting> MountWorker::settings() const {
+    std::lock_guard lock(m_);
+    return settings_;
+}
+
 void MountWorker::stopAxis(int axis) {
     auto& a = axes_[axis];
     const auto d = a.moving ? a.moving : a.emulated;
@@ -148,6 +181,7 @@ void MountWorker::stopAxis(int axis) {
 }
 
 void MountWorker::report(const std::string& why) {
+    MountLog::instance().add(MountLog::Kind::Error, why);
     QMetaObject::invokeMethod(this, [this, w = QString::fromStdString(why)] { emit failed(w); }, Qt::QueuedConnection);
 }
 
@@ -162,7 +196,10 @@ bool MountWorker::tryConnect() {
         }
         pollFailures_ = 0;
         lastError_.clear();
+        lastFault_.clear();
         QMetaObject::invokeMethod(this, [this] { emit connectedChanged(true); }, Qt::QueuedConnection);
+        MountLog::instance().add(MountLog::Kind::Info, "connected: " + info_.model + (info_.details.empty() ? "" : " (" + info_.details + ")"));
+        for (const auto& note : info_.notes) report(note);
         return true;
     } catch (const std::exception& e) {
         // the same failure every 10 s is said once
@@ -200,6 +237,9 @@ void MountWorker::pollNow() {
             status_ = st;
         }
         pollFailures_ = 0;
+        // the mount's own faults (a limit, a motor fault), each said once when it starts
+        if (st.fault != lastFault_ && !st.fault.empty()) report("the mount says: " + st.fault);
+        lastFault_ = st.fault;
         QMetaObject::invokeMethod(this, [this] { emit statusChanged(); }, Qt::QueuedConnection);
         const bool busy = st.slewing || st.pulsing || axes_[0].moving || axes_[1].moving;
         nextPoll_ = Clock::now() + std::chrono::milliseconds(busy ? 250 : 1000);

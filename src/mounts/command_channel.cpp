@@ -1,5 +1,7 @@
 #include "mounts/command_channel.hpp"
 
+#include "mounts/mount_log.hpp"
+
 #include <QDebug>
 #include <QElapsedTimer>
 #include <QLoggingCategory>
@@ -95,9 +97,11 @@ std::string CommandChannel::count(std::string_view cmd, std::size_t n, int ms, b
 }
 
 void CommandChannel::log(std::string_view cmd, const std::optional<std::string>& reply) const {
+    // kept for Settings and log... whatever the log level; the session log has it at debug level
+    const std::string line = printable(cmd) + (reply ? "  < " + printable(*reply) : std::string());
+    MountLog::instance().add(MountLog::Kind::Exchange, line);
     if (!lcMount().isDebugEnabled()) return;
-    qCDebug(lcMount).noquote() << QString::fromStdString("mount[" + tag_ + "]> " + printable(cmd) +
-                                                         (reply ? "  < " + printable(*reply) : std::string()));
+    qCDebug(lcMount).noquote() << QString::fromStdString("mount[" + tag_ + "]> " + line);
 }
 
 }  // namespace slopcap::mounts

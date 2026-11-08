@@ -3,7 +3,8 @@
 //   sim                         a simulated mount
 //   lx200:PORT                  Meade LX200 / Autostar / LX200GPS or OnStep, told apart by asking (lx200-classic:,
 //                               lx200-meade:, onstep: to say which)
-//   onstep:PORT                 OnStep / OnStepX (USB, Bluetooth, or its Wi-Fi: tcp://HOST, port 9999 by default)
+//   onstep:PORT                 OnStep / OnStepX on its own driver (onstep.hpp): USB or Bluetooth, trying the usual
+//                               speeds when no @BAUD is given, or its Wi-Fi (tcp://HOST, port 9999 by default)
 //   nexstar:PORT                a Celestron through its hand controller
 //   synscan:PORT                a Sky-Watcher through its SynScan hand controller
 //   skywatcher:PORT             a Sky-Watcher's motor controller itself: USB on the mount, an EQDIR cable, or its

@@ -38,21 +38,22 @@ std::vector<double> fields(std::string_view s, bool& negative) {
     return out;
 }
 
-std::string raText(double hours) {
+}  // namespace
+
+std::string lx200RaText(double hours) {
     const long s = std::lround(std::fmod(std::fmod(hours, 24.0) + 24.0, 24.0) * 3600.0) % 86400;
     char buf[40];
     std::snprintf(buf, sizeof buf, "%02ld:%02ld:%02ld", s / 3600, s / 60 % 60, s % 60);
     return buf;
 }
 
-std::string decText(double deg) {
+std::string lx200DecText(double deg) {
     const long s = std::min(90L * 3600, std::lround(std::abs(deg) * 3600.0));
     char buf[40];
     std::snprintf(buf, sizeof buf, "%c%02ld*%02ld:%02ld", deg < 0 ? '-' : '+', s / 3600, s / 60 % 60, s % 60);
     return buf;
 }
 
-/// OnStepX's :MS# codes (Goto.command.cpp)
 const char* onStepGotoError(char c) {
     switch (c) {
         case '1': return "below the horizon limit";
@@ -66,8 +67,6 @@ const char* onStepGotoError(char c) {
     }
     return "unspecified error";
 }
-
-}  // namespace
 
 std::optional<double> parseLx200Ra(std::string_view s) {
     bool neg = false;
@@ -156,8 +155,8 @@ MountStatus Lx200Driver::poll() {
 }
 
 void Lx200Driver::setTarget(double ra, double dec) {
-    if (ch().count(":Sr" + raText(ra) + "#", 1, kReplyMs) != "1") throw MountError("the mount refused the target's RA");
-    if (ch().count(":Sd" + decText(dec) + "#", 1, kReplyMs) != "1") throw MountError("the mount refused the target's Dec");
+    if (ch().count(":Sr" + lx200RaText(ra) + "#", 1, kReplyMs) != "1") throw MountError("the mount refused the target's RA");
+    if (ch().count(":Sd" + lx200DecText(dec) + "#", 1, kReplyMs) != "1") throw MountError("the mount refused the target's Dec");
 }
 
 void Lx200Driver::slewTo(double ra, double dec) {

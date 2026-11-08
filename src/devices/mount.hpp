@@ -38,6 +38,8 @@ public:
     QString spec() const { return spec_; }
     bool builtInSpec() const;              ///< the spec names one of SlopCap's own drivers
     void openBuiltIn();                    ///< connect it (retrying every 10 s until it answers)
+    /// (tests) a built-in driver made by `make` instead of from the spec
+    void openWith(std::function<std::unique_ptr<mounts::IMountDriver>()> make);
     void close();                          ///< a built-in mount: stop what moves, let go of the port
     bool builtIn() const { return worker_ != nullptr; }
 
@@ -52,6 +54,18 @@ public:
     std::optional<bool> tracking() const;  ///< nullopt: the driver doesn't say
     std::optional<bool> parked() const;    ///< at the park position (not on the way); nullopt: the driver can't park
     bool canPulse() const;                 ///< the driver takes timed guide pulses
+    mounts::PierSide pierSide() const;     ///< (built-in drivers that say; else Unknown)
+    bool atHome() const;                   ///< (built-in drivers that say)
+    QString fault() const;                 ///< what the mount says is wrong ("" when nothing; built-in drivers)
+    bool canTrackOwnRate() const;          ///< rate offsets (a built-in driver whose mount has them: OnStepX)
+    /// Track this much faster than the chosen rate (arcsec per second, RA as an angle, and Dec); 0, 0 to stop.
+    void setRateOffsets(double raArcsecPerSec, double decArcsecPerSec);
+    /// The mount's own settings (a built-in driver that has them: OnStep): read them (settingsRead() when they're
+    /// in), change one (read again after), and the last read.
+    bool hasSettings() const;
+    void readSettings();
+    void changeSetting(const QString& key, const QString& value);
+    std::vector<mounts::MountSetting> settings() const;
     bool pulsing() const { return pulsing_; }
 
     /// Guide pulse at the mount's guide rate. One axis at a time: N/S and E/W pulses may overlap.
@@ -75,6 +89,7 @@ signals:
     void stateChanged();                   ///< tracking, park, slewing, pulsing or slew rate changed
     void pulseDone();                      ///< every pulse sent has finished
     void failed(const QString& why);
+    void settingsRead();
 
 private:
     void onDefined(const QString& dev, const QString& name);

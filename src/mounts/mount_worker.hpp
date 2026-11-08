@@ -45,11 +45,16 @@ public:
     void park();
     void unpark();
     void sync(double ra, double dec);   ///< JNow
+    void setRateOffsets(double raArcsecPerSec, double decArcsecPerSec);   ///< caps.rateOffsets
+    void readSettings();                                 ///< caps.settings: read them; settingsRead() when done
+    void changeSetting(const std::string& key, const std::string& value);   ///< (then readSettings() again)
+    std::vector<MountSetting> settings() const;          ///< as last read
 
 signals:
     void connectedChanged(bool connected);
     void statusChanged();
     void failed(const QString& why);
+    void settingsRead();
 
 private:
     using Clock = std::chrono::steady_clock;
@@ -74,9 +79,11 @@ private:
     std::deque<Command> queue_;
     MountInfo info_;
     MountStatus status_;
+    std::vector<MountSetting> settings_;
     bool connected_ = false;
     std::atomic<bool> quit_{false};
     std::string lastError_;
+    std::string lastFault_;   ///< the mount's own fault last said (worker thread)
     // worker thread only
     struct Axis {
         std::optional<Dir> moving;   ///< a move that way, started at `since`

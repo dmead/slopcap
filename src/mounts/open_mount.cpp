@@ -2,6 +2,7 @@
 
 #include "mounts/lx200.hpp"
 #include "mounts/nexstar.hpp"
+#include "mounts/onstep.hpp"
 #include "mounts/sim_mount.hpp"
 #include "mounts/skywatcher.hpp"
 #include "mounts/synscan_app.hpp"
@@ -42,11 +43,18 @@ std::function<std::unique_ptr<IMountDriver>()> mountFactory(const std::string& s
         return [w] { return std::make_unique<SynScanAppDriver>([w] { return openTransport(w, 0, 11881); }); };
     }
     if (where.empty()) throw MountError(kind + " needs a port: " + kind + ":COM3, " + kind + ":/dev/ttyUSB0 or " + kind + ":tcp://HOST:PORT");
-    if (kind.rfind("lx200", 0) == 0 || kind == "onstep") {
+    const bool speedGiven = where.find("://") != std::string::npos || where.find('@') != std::string::npos;
+    if (kind == "onstep" || kind == "lx200-onstep") {
+        // OnStep's own driver; a serial port without @BAUD tries OnStepX's default, then the speeds ESP32 builds use
+        std::vector<TransportFactory> opens;
+        for (const int baud : speedGiven ? std::vector<int>{9600} : std::vector<int>{9600, 230400, 115200, 57600, 38400, 19200})
+            opens.push_back(link(baud, 9999));
+        return [opens, site] { return std::make_unique<OnStepDriver>(opens, site); };
+    }
+    if (kind.rfind("lx200", 0) == 0) {
         const auto dialect = kind == "lx200-classic" ? Lx200Dialect::MeadeClassic
                              : kind == "lx200-meade" ? Lx200Dialect::Meade
-                             : kind == "lx200"       ? Lx200Dialect::Auto
-                                                     : Lx200Dialect::OnStep;
+                                                     : Lx200Dialect::Auto;
         return [open = link(9600, 9999), dialect] { return std::make_unique<Lx200Driver>(open, dialect); };
     }
     if (kind == "nexstar" || kind == "synscan")
@@ -55,7 +63,7 @@ std::function<std::unique_ptr<IMountDriver>()> mountFactory(const std::string& s
         };
     // skywatcher: the mount's own USB port runs at 115200 baud, EQDIR cables at 9600; try both unless told
     std::vector<TransportFactory> opens;
-    if (where.find("://") != std::string::npos || where.find('@') != std::string::npos) opens = {link(9600, 11880)};
+    if (speedGiven) opens = {link(9600, 11880)};
     else opens = {link(115200, 11880), link(9600, 11880)};
     return [opens, site] { return std::make_unique<SkyWatcherDriver>(opens, site); };
 }
@@ -65,7 +73,8 @@ std::string mountSpecHelp() {
         "Mounts SlopCap drives itself (--mount SPEC, or Settings > Mount):\n"
         "  sim                        a simulated mount\n"
         "  lx200:PORT                 Meade LX200, Autostar, LX200GPS or OnStep (asks which)\n"
-        "  onstep:PORT                OnStep / OnStepX (its Wi-Fi: onstep:tcp://HOST, port 9999)\n"
+        "  onstep:PORT                OnStep / OnStepX: finds the speed itself (or COM6@230400);\n"
+        "                             its Wi-Fi: onstep:tcp://HOST (port 9999)\n"
         "  nexstar:PORT               Celestron, through the hand controller\n"
         "  synscan:PORT               Sky-Watcher, through the SynScan hand controller\n"
         "  skywatcher:PORT            Sky-Watcher motor controller: USB on the mount, EQDIR cable,\n"

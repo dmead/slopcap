@@ -102,14 +102,14 @@ else to install:
 | Mount | Connected through |
 |---|---|
 | Meade LX200 Classic, Autostar and Audiostar, LX200GPS | a serial or USB cable |
-| OnStep and OnStepX | USB, Bluetooth, or OnStep's Wi-Fi |
+| OnStep and OnStepX (its own driver, tried on an OnStepX 10.25a) | USB, Bluetooth, or OnStep's Wi-Fi |
 | Celestron NexStar, CPC, CGE, SLT, Advanced GT | the hand controller |
 | Sky-Watcher with a SynScan hand controller | the hand controller |
 | Sky-Watcher EQ6-R, HEQ5, EQ8, AZ-EQ5 / 6 (equatorial), Star Adventurer GTi | its own motors: the mount's USB port, an EQDIR cable, or its Wi-Fi |
 | Any mount the SynScan app drives | the app, over the network |
 
 Mounts without guide pulses of their own get timed slow moves instead. The drivers are written from each maker's
-published protocol and tested against simulations of them, but haven't been tried on these mounts yet.
+published protocol and tested against simulations of them; the OnStep driver has also been tried on a real OnStepX.
 [A night at the telescope](docs/user-guide.md#8-the-mount-optional) says what to put in Settings for each.
 
 ## Point-to-point video

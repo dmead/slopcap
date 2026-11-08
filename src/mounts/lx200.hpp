@@ -51,5 +51,10 @@ private:
 /// "HH:MM:SS" or "HH:MM.T" -> hours; "sDD*MM:SS", "sDD*MM'SS", "sDD*MM" (any separators) -> degrees. nullopt: not one.
 std::optional<double> parseLx200Ra(std::string_view s);
 std::optional<double> parseLx200Dec(std::string_view s);
+/// Hours -> "HH:MM:SS"; degrees -> "sDD*MM:SS" (for :Sr# / :Sd#).
+std::string lx200RaText(double hours);
+std::string lx200DecText(double deg);
+/// OnStep's :MS# codes (and :CM#'s "En") in words: '1' below the horizon limit ... '9' unspecified (Goto.command.cpp).
+const char* onStepGotoError(char c);
 
 }  // namespace slopcap::mounts

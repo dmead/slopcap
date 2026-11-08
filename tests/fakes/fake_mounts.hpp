@@ -55,6 +55,48 @@ mounts::TransportFactory fakeLink(Device device, std::shared_ptr<LinkState> stat
 
 /// LX200: Meade Classic (no :GVP#, no pulses), Meade Autostar, OnStep. Starts in low precision.
 Device fakeLx200(std::shared_ptr<mounts::SimMount> sim, mounts::Lx200Dialect dialect);
+/// OnStepX as the firmware's command handlers answer (OnStepX src/telescope/mount/*.command.cpp; replies checked against
+/// an OnStepX 10.25a): set commands answer a bare 0 or 1, unknown ones a bare 0, :GU# ends with the pier side, the
+/// pulse-guide and guide rate indices and the error code. The fields are the mount's settings and quirks; set them
+/// before the driver connects, read them under `m`.
+class FakeOnStep {
+public:
+    explicit FakeOnStep(std::shared_ptr<mounts::SimMount> sim) : sim_(std::move(sim)) {}
+    Device device();
+    std::string handle(std::string_view in);
+
+    std::mutex m;
+    std::string firmware = "10.25a";
+    bool lostRate = false;           ///< tracking rate 0, as after :ERESET#: :Te# says 1 but nothing tracks until :TQ#
+    int error = 0;                   ///< the general error in :GU#
+    bool parkFailed = false, atHome = false, noParkPosition = false;
+    int pulseRate = 0, guideRate = 10;   ///< :R indices (10: custom)
+    bool separatePulseRate = true;   ///< GUIDE_SEPARATE_PULSE_RATE: :R0# .. :R2# also set the pulse-guide rate
+    bool rateOffsets = true;         ///< :GXTR# / :SXTR,n# (arcsec per sidereal second)
+    double raOffset = 0, decOffset = 0;
+    bool highPrecision = true;       ///< :GRH# / :GDH#
+    bool longFormat = true;          ///< :GR# as HH:MM:SS (false: HH:MM.T until :U#)
+    double clockOffset = 0;          ///< seconds the mount's clock is ahead
+    std::string utcOffset = "+05:00";
+    std::string latitude = "+51*30", longitude = "+000*06";   ///< :Gt#, :Gg# (west positive)
+    double speedup = 20;             ///< moves this many times faster than OnStep's rates (so tests can measure them)
+    int stillMoving = 0;             ///< the next this many :MS# say 8 (still slowing down after a move)
+    // the settings OnStepX's web server sets
+    std::string elevation = "45.0";
+    int horizon = -10, overhead = 80, meridianEast = 60, meridianWest = 60;
+    bool autoFlip = true, buzzer = true, pauseAtHome = false, singleAxis = false;
+    char pierSide = 'E', compensation = 0;   ///< compensation: 0, 'r' or 't'
+    int backlashRa = 0, backlashDec = 70, gotoPreset = 3;
+    bool parkSet = false;
+    std::string setDate, setTime;    ///< what :SC# / :SL# last said
+    int lastError = 0;
+
+private:
+    std::shared_ptr<mounts::SimMount> sim_;
+    double ra_ = 0, dec_ = 0;
+    bool trackingClaimed_ = false;   ///< :Te# with the rate lost
+};
+
 /// Celestron NexStar or SynScan hand controller.
 Device fakeNexStar(std::shared_ptr<mounts::SimMount> sim, mounts::HandController kind, bool aligned = true);
 /// The SynScan app; `j2000`: it says its coordinates are J2000.

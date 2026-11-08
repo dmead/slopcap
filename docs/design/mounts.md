@@ -19,6 +19,8 @@ own Win32 / termios class, not Qt SerialPort (9.2), and Sky-Watcher direct is in
 - The driver interface is simpler than §3.2's: `move(Dir, rateIndex)` / `stop(Dir)` over named rates instead of
   `moveAxis(Axis, degPerSec)`, which fits the LX200 and hand-controller rates.
 
+OnStep has its own driver since 2026-11-07, tried on an OnStepX (§3.7).
+
 Not yet: INDI behind `IMountDriver` (`devices::Mount` keeps its INDI code and switches to the worker for a built-in
 spec), ASCOM COM and Alpaca (phase 2), the 10Micron / Gemini / ZWO / iOptron dialects, alt-az `AxisMount`, Celestron
 AUX, the horizon check before a goto, planet-rate tracking, pier side in the panel, `slopcap-mountprobe`. None of the
@@ -275,6 +277,50 @@ For drivers that see only motor axes (Sky-Watcher direct, Celestron AUX) and for
 - goto: both axes, then a slow final approach from a fixed direction;
 - home and park positions, limits (horizon, meridian, counterweight-up);
 - one-star sync as an offset; no multi-star pointing model (non-goal).
+
+### 3.7 OnStep's own driver (`onstep`)
+
+Added 2026-11-07. OnStep was an LX200 dialect (still there for `lx200:` when the mount says it's OnStep); `onstep:`
+and `lx200-onstep:` now get `OnStepDriver` (`src/mounts/onstep.*`), written from OnStepX's command handlers
+(`src/telescope/mount/*/*.command.cpp`, `src/libApp/commands/ProcessCmds.cpp`, main at 2026-11-02) and checked
+against an OnStepX 10.25a (JTW Trident P75, ESP32, CP2102 at 230400 baud). What a good OnStep connector has to do,
+and where each is:
+
+| Need | Why | How |
+|---|---|---|
+| Find the speed | OnStepX defaults to 9600 baud, ESP32 builds often run at 115200 or 230400 (the P75: 230400) | `onstep:PORT` tries 9600, 230400, 115200, 57600, 38400, 19200 (`:GVP#`, noise is skipped); `@BAUD` or `tcp://` don't |
+| Don't reset the controller | DTR / RTS edges reset an Arduino or put an ESP32 in its boot loader | the serial class keeps both low (unchanged) |
+| Read replies the way OnStepX frames them | set commands answer a bare `0` / `1`, unknown commands a bare `0`, `:MS#` one digit, all without `#` | every command reads its own reply shape; stray bytes are drained before each command. (The ASCOM OnStep driver's `CommandString(raw)` reads to `#`: a `:Sr…#` through it left its replies one behind until NINA reconnected the mount.) |
+| Say who's on the port | the ASCOM driver holds the port while NINA or PHD2 is connected | "Access is denied" / "busy" adds: disconnect there, or use the Wi-Fi |
+| Precision | `:GRH#` / `:GDH#` give HH:MM:SS.SSSS where the firmware has them (10.25a does) | asked once at connect; else `:U#` as for Meade |
+| One status read per poll | `:GU#` has tracking, goto, park state, at home, homing, guiding, mount type, pier side, the pulse-guide and guide rate indices and the general error | `parseOnStepStatus()`; three reads per poll (`:GRH#`, `:GDH#`, `:GU#`) instead of five |
+| Faults in words | the last `:GU#` character is `Limits::errorCode()`: motor fault, horizon / overhead / meridian / under-pole limits, NV and site init | `MountStatus::fault`, said once by the worker when it appears, shown in the panel |
+| Refusals with reasons | `:MS#` codes, `:CM#` `E<n>`, and `:GE#` (last command error) after a `0` from `:Te#`, `:hP#`, `:hR#` | "the mount couldn't start tracking: it is parked" |
+| OnStep's ten speeds | `:R0#`..`:R9#` (0.25x, 0.5x, 1x, 2x, 4x, 8x, 20x, 48x, half max, max) | `MountInfo::rates` |
+| Leave PHD2's guide rate alone | the rate a move sets (`:Rn#`) is what guide pulses go at, and with GUIDE_SEPARATE_PULSE_RATE `:R0#`..`:R2#` are also stored as the pulse-guide rate | after the moves end the driver sends back the rates `:GU#` gave before them (the pulse-guide rate, then the guide rate unless it was custom) |
+| A goto right after a move | the mount is still slowing down and answers `8` (already moving) | asked again every 0.5 s for 6 s |
+| Tracking that really tracks | after `:ERESET#` the tracking rate is 0 and `:Te#` still says `1` | `:GT#` checked after `:Te#`; 0 → the chosen rate (`:TQ#`, `:TL#`, …) and `:Te#` again, else an error saying so |
+| A planet's own motion | `:SXTR,n#` / `:SXTD,n#`: rate offsets in arcseconds per sidereal second (±1800) | `IMountDriver::setRateOffsets()` (arcsec per SI second), `Caps::rateOffsets` from `:GXTR#`; `Mount::setRateOffsets()`. The panel doesn't offer it yet (§4, planet-rate tracking) |
+| Clock and site | gotos land 15″ off per second of clock error; OnStep's `:GG#` offset doesn't follow daylight saving | at connect, `:GC#` + `:GL#` + `:GG#` against the computer's UTC (an hour out: "daylight saving?"), `:Gt#` / `:Gg#` (west positive) against Settings → Site; `MountInfo::notes`, said once. Read only: the mount's own app sets them (§5.5) |
+| Limits and setup for the log | horizon `:Gh#`, overhead `:Go#`, meridian `:GXE9#` / `:GXEA#`, mount type, pulse-guide rate | `MountInfo::details`, on the "mount: … is …" log line |
+| Home | the P75 starts at home (pole, counterweights down) | `OnStepDriver::home()` (`:hC#`), `MountStatus::atHome` |
+| Its settings, without the web server | site, elevation, UTC offset, date and time; tracking rate and compensation (`:Tn#` / `:Tr#` / `:To#`, `:T1#` / `:T2#`); horizon, overhead and meridian limits (`:Sh`, `:So`, `:SXE9`, `:SXEA`); automatic flips, preferred pier side, pause at home (`:SX95`, `:SX96`, `:SX98`); guide pulse and goto speeds (`:R0#`..`:R2#`, `:SX93`); backlash (`:$BR`, `:$BD`); buzzer (`:SX97`); go home, park here (`:hQ#`) | `IMountDriver::settings()` / `changeSetting()` (`MountSetting`: number, choice, toggle, text, info, action), `Caps::settings`; Mount → **Settings and log…** reads them when it opens and writes only the ones changed, on **Apply**, then reads them back. "Set date, time and UTC offset from this computer" fixes the daylight-saving hour. Left to the web server on purpose: axis wiring (steps, reverse, drivers), mount type, PEC, restarts: a wrong one there runs a motor the wrong way |
+| A log of everything | errors were in the footer for a moment, commands only at debug level | `mounts::MountLog`: every command and reply (`CommandChannel`) and every error, fault and note (`MountWorker`), the last 5000, whatever the log level; the Log tab (status polls hidden, errors only, copy); the panel shows the latest error in red until the log is opened |
+
+Not done: Send site and time (a button, §4), park position set (`:hQ#`), the rotator / focuser / auxiliary features
+OnStepX also carries, `:Gu#` (the bit-packed status), sending commands through the ASCOM driver (it frames commands
+its own way, see above), and OnStep's checksum framing.
+
+**On the P75 (2026-11-07, `slopcap-mountprobe onstep:/dev/ttyUSB0 --move`, the CP2102 passed to WSL with
+usbipd):** found at 230400 baud on the second speed; high precision and rate offsets present; clock and site agreed.
+Tracking on, pulses each way, 8x moves south and north (215.9″ and 215.5″), half-max moves east and west, a goto
+10° south (to Dec +79°00′00″, after the driver waited out the deceleration), home (`:hC#`), tracking off; `:GU#`
+rates afterwards as before. The pulse distances weren't consistent: at the pole a 1 s south pulse moved 72″ with the
+guide rate at 8x, and about 2″ a second at 0.25x and at 2x. That doesn't fit either reading of
+GUIDE_SEPARATE_PULSE_RATE, and it isn't backlash: `:%BD#` says 0″. Still to explain.
+
+`tools/mountprobe` (`slopcap-mountprobe SPEC [--move] [--log]`, or `PORT --send CMD …` for raw commands) is the
+§6 tool, for any built-in driver.
 
 ## 4. Above the driver: what changes in the app
 

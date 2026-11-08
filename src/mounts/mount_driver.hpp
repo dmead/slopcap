@@ -28,12 +28,30 @@ struct Site {
     double latitude = 0, longitude = 0;   ///< degrees, north and east positive
 };
 
+/// One of a mount's own settings (OnStep's site, limits, backlash, ...), as the driver reads it from the mount, for
+/// Settings and log... in the mount panel. Values travel as text; a driver writes one with changeSetting().
+struct MountSetting {
+    enum class Kind { Number, Choice, Toggle, Text, Info, Action };
+    std::string key;     ///< the driver's name for it ("horizon")
+    std::string group;   ///< "Site and time", "Limits", ...
+    std::string label;
+    Kind kind = Kind::Info;
+    std::string value;   ///< Number: "12.5"; Choice: one of choices' values; Toggle: "1" / "0"; Info: the text
+    std::vector<std::pair<std::string, std::string>> choices;   ///< value, label
+    double min = 0, max = 0;
+    int decimals = 0;
+    std::string unit;    ///< "°", "min", "″", "m"
+    std::string help;    ///< a tooltip; an Action's is asked as a question first when it says "?"
+};
+
 struct Caps {
     bool pulse = false;        ///< timed guide pulses (without: the worker times a move at the slowest rate)
     bool park = false, unpark = false;
     bool tracking = false;     ///< tracking on / off
     bool trackRates = false;   ///< lunar, solar (and King where there is one)
     bool sync = false;         ///< "the mount points here"
+    bool rateOffsets = false;  ///< tracking a little faster or slower on each axis (a planet's own motion)
+    bool settings = false;     ///< settings() / changeSetting(): the mount's own settings
 };
 
 struct MountInfo {
@@ -42,6 +60,8 @@ struct MountInfo {
     bool j2000 = false;               ///< reads and writes J2000 coordinates (else of date, JNow)
     std::vector<std::string> rates;   ///< move rates, slowest first; move() takes an index into this
     Caps caps;
+    std::string details;              ///< for the log: link, limits, guide rate ("" when the driver has nothing to add)
+    std::vector<std::string> notes;   ///< things found on connecting that the user should hear (a clock that's off)
 };
 
 struct MountStatus {
@@ -51,6 +71,8 @@ struct MountStatus {
     std::optional<bool> tracking, parked;   ///< nullopt: the mount doesn't say
     PierSide pier = PierSide::Unknown;
     bool pulsing = false;      ///< (the worker's: a guide pulse is running)
+    bool atHome = false;       ///< at the home position (where an OnStep starts: counterweights down, at the pole)
+    std::string fault;         ///< what the mount itself says is wrong ("" when nothing): a limit, a motor fault
 };
 
 /// Opens the link (on the worker thread: network sockets belong to the thread that makes them).
@@ -73,6 +95,13 @@ public:
     virtual void park() {}                 ///< caps.park
     virtual void unpark() {}               ///< caps.unpark
     virtual void sync(double /*ra*/, double /*dec*/) {}   ///< caps.sync
+    /// caps.rateOffsets: track this much faster than the chosen rate, arcseconds per SI second, RA (as an angle,
+    /// 15" = 1 s of time) and Dec; 0, 0 is the plain rate again.
+    virtual void setRateOffsets(double /*raArcsecPerSec*/, double /*decArcsecPerSec*/) {}
+    /// caps.settings: the mount's own settings as it has them now (a setting the firmware lacks is left out) ...
+    virtual std::vector<MountSetting> settings() { return {}; }
+    /// ... and one written (an Action's value is ignored). Throws MountError with the mount's reason.
+    virtual void changeSetting(const std::string& /*key*/, const std::string& /*value*/) {}
 };
 
 }  // namespace slopcap::mounts

@@ -6,6 +6,7 @@
 #include "fakes/fake_mounts.hpp"
 #include "mounts/command_channel.hpp"
 #include "mounts/mount_worker.hpp"
+#include "mounts/onstep.hpp"
 #include "mounts/open_mount.hpp"
 #include "mounts/skywatcher.hpp"
 #include "mounts/synscan_app.hpp"
@@ -20,6 +21,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <chrono>
 #include <cmath>
@@ -201,6 +203,354 @@ TEST_CASE("mounts: LX200 dialects, NexStar, SynScan, the SynScan app and the sim
         SimDriver d(sim);
         conformance(d, *sim, "sim", 1e-6);
     }
+    SECTION("OnStep's own driver") {
+        auto sim = quickSim();
+        FakeOnStep fake(sim);
+        OnStepDriver d({fakeLink(fake.device(), std::make_shared<LinkState>())});
+        conformance(d, *sim, "onstep", 1e-3 / 3600 + 1e-9);
+    }
+    SECTION("OnStep's own driver, an OnStep that talks low precision and has no :GRH#") {
+        auto sim = quickSim();
+        FakeOnStep fake(sim);
+        fake.highPrecision = fake.longFormat = false;
+        auto link = std::make_shared<LinkState>();
+        OnStepDriver d({fakeLink(fake.device(), link)});
+        conformance(d, *sim, "onstep", 1.5 / 3600);
+        CHECK(link->wrote(":U#"));
+    }
+}
+
+TEST_CASE("mounts: OnStep's own driver", "[mounts]") {
+    auto sim = quickSim();
+    FakeOnStep fake(sim);
+    auto link = std::make_shared<LinkState>();
+    auto connectTo = [&](std::optional<Site> site = std::nullopt) {
+        return std::make_unique<OnStepDriver>(std::vector<TransportFactory>{fakeLink(fake.device(), link)}, site);
+    };
+
+    SECTION(":GU# as OnStepX 10.25a sends it") {
+        // at home after power-up (read from the P75): not tracking, no goto, unparked, at home, buzzer, auto flip,
+        // German, no pier side, pulse guide 0.25x, custom guide rate, no error
+        const auto s = parseOnStepStatus("nNpHzaEo0:0");
+        REQUIRE(s);
+        CHECK_FALSE(s->tracking);
+        CHECK_FALSE(s->slewing);
+        CHECK(s->park == 'p');
+        CHECK(s->atHome);
+        CHECK(s->mountType == 'E');
+        CHECK(s->pier == PierSide::Unknown);
+        CHECK(s->pulseRate == 0);
+        CHECK(s->guideRate == 10);
+        CHECK(s->error == 0);
+        const auto t = parseOnStepStatus("pG(EW257");   // tracking lunar, a goto, pulse guiding, west, meridian limit
+        REQUIRE(t);
+        CHECK(t->tracking);
+        CHECK(t->slewing);
+        CHECK(t->pulseGuiding);
+        CHECK(t->rate == TrackRate::Lunar);
+        CHECK(t->pier == PierSide::West);
+        CHECK(t->pulseRate == 2);
+        CHECK(onStepFault(t->error) == "at the meridian limit");
+        const auto v4 = parseOnStepStatus("nNPE");   // an older OnStep: flags only
+        REQUIRE(v4);
+        CHECK(v4->park == 'P');
+        CHECK(v4->pulseRate == -1);
+        CHECK_FALSE(parseOnStepStatus(""));
+        CHECK(onStepFault(0).empty());
+        CHECK(onStepCommandError(9) == "it is parked");
+    }
+
+    SECTION("what it says on connecting") {
+        fake.atHome = true;
+        auto d = connectTo(Site{51.51, -0.12});
+        const auto info = d->connect();
+        CHECK(info.backend == "onstep");
+        CHECK(info.model == "OnStepX 10.25a");
+        CHECK(info.rates.size() == 10);
+        CHECK(info.rates.front() == "0.25x");
+        CHECK(info.caps.rateOffsets);
+        CHECK(info.details.find("German equatorial") != std::string::npos);
+        CHECK(info.details.find("pulse guides at 0.25x") != std::string::npos);
+        CHECK(info.details.find("horizon limit -10*") != std::string::npos);
+        CHECK(info.notes.empty());   // clock and site agree
+        const auto st = d->poll();
+        CHECK(st.atHome);
+        CHECK(st.fault.empty());
+    }
+
+    SECTION("a clock an hour out (the UTC offset across daylight saving), or minutes out") {
+        fake.clockOffset = 3600;
+        auto d = connectTo();
+        auto info = d->connect();
+        REQUIRE(info.notes.size() == 1);
+        CHECK(info.notes[0].find("an hour ahead of") != std::string::npos);
+        CHECK(info.notes[0].find("+05:00") != std::string::npos);
+        fake.clockOffset = -300;
+        info = d->connect();
+        REQUIRE(info.notes.size() == 1);
+        CHECK(info.notes[0].find("5 min") != std::string::npos);
+        CHECK(info.notes[0].find("behind") != std::string::npos);
+    }
+
+    SECTION("a site that isn't Settings'") {
+        auto d = connectTo(Site{48.86, 2.35});
+        const auto info = d->connect();
+        REQUIRE(info.notes.size() == 1);
+        CHECK(info.notes[0].find("51\xC2\xB0" "30'N 0\xC2\xB0" "06'W") != std::string::npos);
+    }
+
+    SECTION("the mount's own faults, in words") {
+        auto d = connectTo();
+        d->connect();
+        fake.error = 2;
+        CHECK(d->poll().fault == "below the horizon limit");
+        fake.error = 0;
+        fake.parkFailed = true;
+        CHECK(d->poll().fault == "the last park failed");
+    }
+
+    SECTION("a tracking rate lost after :ERESET#: :Te# says 1, the rate goes back") {
+        auto d = connectTo();
+        d->connect();
+        d->setTracking(false);
+        fake.lostRate = true;
+        d->setTracking(true);
+        CHECK(link->wrote(":TQ#"));
+        CHECK(sim->state().tracking);
+        CHECK(*d->poll().tracking);
+        // and lunar stays lunar
+        d->setTrackRate(TrackRate::Lunar);
+        d->setTracking(false);
+        fake.lostRate = true;
+        d->setTracking(true);
+        CHECK(sim->state().rate == TrackRate::Lunar);
+    }
+
+    SECTION("moves put the mount's own guide and pulse-guide rates back when they end") {
+        fake.guideRate = 6;   // 20x, say, as the hand controller left it; pulses at 0.25x
+        auto d = connectTo();
+        d->connect();
+        d->poll();
+        d->move(Dir::North, 1);   // 0.5x: OnStepX makes that its pulse-guide rate too
+        CHECK(fake.pulseRate == 1);
+        d->move(Dir::East, 1);
+        d->stop(Dir::North);
+        CHECK(fake.pulseRate == 1);   // a move still running
+        d->poll();                    // (and the driver doesn't learn the changed rate as the mount's)
+        d->stop(Dir::East);
+        CHECK(fake.pulseRate == 0);
+        CHECK(fake.guideRate == 6);
+        d->move(Dir::South, 7);   // 48x
+        CHECK(fake.guideRate == 7);
+        d->stop(Dir::South);
+        CHECK(fake.pulseRate == 0);
+        CHECK(fake.guideRate == 6);
+        d->move(Dir::West, 0);
+        d->abort();
+        CHECK(fake.pulseRate == 0);
+        CHECK(fake.guideRate == 6);
+        // a custom guide rate (10, from :RA# / :RE#) can't be said with :R#: the pulse-guide rate goes back
+        fake.guideRate = 10;
+        d->connect();
+        d->move(Dir::East, 5);
+        d->stop(Dir::East);
+        CHECK(fake.pulseRate == 0);
+        CHECK(fake.guideRate == 0);
+    }
+
+    SECTION("a goto right after a move waits for the mount to stop") {
+        OnStepDriver::kGotoRetryMs = 10;
+        auto d = connectTo();
+        d->connect();
+        fake.stillMoving = 3;
+        CHECK_NOTHROW(d->slewTo(8, 20));
+        settle(*d);
+        fake.stillMoving = 1000;
+        CHECK_THROWS_WITH(d->slewTo(9, 20), "the mount refused the goto: the mount is already moving");
+        fake.stillMoving = 0;
+        OnStepDriver::kGotoRetryMs = 500;
+    }
+
+    SECTION("refusals say why") {
+        auto d = connectTo();
+        d->connect();
+        sim->park();
+        settle(*d);
+        auto why = [](auto f) {
+            try {
+                f();
+            } catch (const MountError& e) {
+                return std::string(e.what());
+            }
+            return std::string("(went through)");
+        };
+        CHECK(why([&] { d->setTracking(true); }) == "the mount couldn't start tracking: it is parked");
+        CHECK(why([&] { d->slewTo(3, 3); }) == "the mount refused the goto: the mount is parked");
+        CHECK(why([&] { d->sync(3, 3); }) == "the mount refused the sync: the mount is parked");
+        CHECK(why([&] { d->park(); }) == "(went through)");
+        sim->unpark();
+        CHECK(why([&] { d->unpark(); }) == "the mount couldn't unpark: it isn't parked");
+        fake.noParkPosition = true;
+        CHECK(why([&] { d->park(); }) == "the mount couldn't park: no park position is set");
+    }
+
+    SECTION("its own settings, as OnStepX's web server has them: read, written, refused") {
+        auto d = connectTo();
+        REQUIRE(d->connect().caps.settings);
+        auto find = [](const std::vector<MountSetting>& all, const std::string& key) -> const MountSetting* {
+            for (const auto& s : all)
+                if (s.key == key) return &s;
+            return nullptr;
+        };
+        auto all = d->settings();
+        for (const char* key : {"latitude", "longitude", "elevation", "utcOffset", "clock", "syncTime", "trackRate", "compensation",
+                                "dualAxis", "horizon", "overhead", "meridianEast", "meridianWest", "autoFlip", "pierSide", "pauseAtHome",
+                                "pulseRate", "gotoSpeed", "backlashRa", "backlashDec", "buzzer", "goHome", "setPark", "about"})
+            CHECK(find(all, key));
+        CHECK(find(all, "latitude")->value == "51.5000");
+        CHECK(find(all, "longitude")->value == "-0.1000");   // east positive, from OnStep's west positive
+        CHECK(find(all, "horizon")->value == "-10");
+        CHECK(find(all, "backlashDec")->value == "70");
+        CHECK(find(all, "pierSide")->value == "E");
+        CHECK(find(all, "autoFlip")->value == "1");
+        CHECK(find(all, "compensation")->value == "none");
+        CHECK(find(all, "about")->value.find("OnStepX 10.25a, German equatorial, 25600 / 25600 steps per degree") != std::string::npos);
+        CHECK(find(all, "clock")->value.find("agrees") != std::string::npos);
+
+        d->changeSetting("horizon", "5");
+        d->changeSetting("overhead", "85");
+        d->changeSetting("meridianWest", "-15");
+        d->changeSetting("backlashDec", "0");
+        d->changeSetting("autoFlip", "0");
+        d->changeSetting("pierSide", "W");
+        d->changeSetting("buzzer", "0");
+        d->changeSetting("pauseAtHome", "1");
+        d->changeSetting("compensation", "refraction");
+        d->changeSetting("dualAxis", "0");
+        d->changeSetting("latitude", "-33.8650");
+        d->changeSetting("longitude", "151.2094");
+        d->changeSetting("elevation", "58");
+        d->changeSetting("utcOffset", "-10");
+        d->changeSetting("gotoSpeed", "4");
+        d->changeSetting("gotoSpeed", "");   // as it is: nothing sent
+        d->changeSetting("setPark", "");
+        CHECK(link->wrote(":Sh+05#"));
+        CHECK(link->wrote(":St-33*51:54#"));
+        CHECK(link->wrote(":Sg-151*12:34#"));   // west positive
+        CHECK(link->wrote(":SG-10:00#"));
+        CHECK(link->wrote(":SX93,4#"));
+        CHECK(fake.horizon == 5);
+        CHECK(fake.overhead == 85);
+        CHECK(fake.meridianWest == -15);
+        CHECK(fake.backlashDec == 0);
+        CHECK_FALSE(fake.autoFlip);
+        CHECK(fake.pierSide == 'W');
+        CHECK_FALSE(fake.buzzer);
+        CHECK(fake.pauseAtHome);
+        CHECK(fake.compensation == 'r');
+        CHECK(fake.singleAxis);
+        CHECK(fake.elevation == "58.0");
+        CHECK(fake.gotoPreset == 4);
+        CHECK(fake.parkSet);
+        all = d->settings();   // and read back
+        CHECK(find(all, "horizon")->value == "5");
+        CHECK(find(all, "latitude")->value == "-33.8650");
+        CHECK(find(all, "pierSide")->value == "W");
+        CHECK(find(all, "compensation")->value == "refraction");
+        CHECK(find(all, "dualAxis")->value == "0");
+        CHECK(find(all, "pauseAtHome")->value == "1");
+
+        // this computer's date, time and UTC offset
+        d->changeSetting("syncTime", "");
+        CHECK(fake.setDate.size() == 8);
+        CHECK(fake.setTime.size() == 8);
+        CHECK((fake.utcOffset[0] == '+' || fake.utcOffset[0] == '-'));
+
+        // the pulse-guide rate is the driver's own from then on: no "putting back" the old one after a move
+        d->changeSetting("pulseRate", "2");
+        CHECK(fake.pulseRate == 2);
+        d->move(Dir::North, 5);
+        d->stop(Dir::North);
+        CHECK(fake.pulseRate == 2);
+
+        // refusals and nonsense
+        CHECK_THROWS_WITH(d->changeSetting("horizon", "45"), "not a value for horizon: 45");
+        CHECK_THROWS_WITH(d->changeSetting("utcOffset", "+5:20"), Catch::Matchers::ContainsSubstring("like +05:00"));
+        CHECK_THROWS_WITH(d->changeSetting("warp", "9"), "OnStep has no setting warp");
+        fake.overhead = 80;
+        CHECK_THROWS_WITH(d->changeSetting("meridianEast", "999"), "not a value for meridianEast: 999");
+        d->changeSetting("goHome", "");
+        CHECK(link->wrote(":hC#"));
+    }
+
+    SECTION("rate offsets for a planet's own motion, where the firmware has them") {
+        auto d = connectTo();
+        REQUIRE(d->connect().caps.rateOffsets);
+        d->setRateOffsets(1.5, -0.25);
+        CHECK(fake.raOffset == Approx(1.5 * 0.99726957).margin(1e-5));
+        CHECK(fake.decOffset == Approx(-0.25 * 0.99726957).margin(1e-5));
+        fake.rateOffsets = false;
+        CHECK_FALSE(d->connect().caps.rateOffsets);
+    }
+
+    SECTION("finding the speed, a port someone else has, and something that isn't OnStep") {
+        auto noise = [](std::string reply) { return [reply](std::string_view) { return reply; }; };
+        auto l = std::make_shared<LinkState>();
+        // 9600: nothing; 230400: noise with a '#' in it; 115200: OnStep
+        OnStepDriver d({fakeLink(noise(""), l), fakeLink(noise("\x9e\xf0#"), l), fakeLink(fake.device(), l)});
+        CHECK(d.connect().model == "OnStepX 10.25a");
+        CHECK(d.poll().haveCoords);
+        OnStepDriver none({fakeLink(noise(""), l), fakeLink(noise(""), l)});
+        try {
+            none.connect();
+            FAIL("connected to nothing");
+        } catch (const MountError& e) {
+            CHECK(std::string(e.what()) == "no OnStep answers on a fake link, a fake link");
+        }
+        OnStepDriver busy({[]() -> std::unique_ptr<ITransport> { throw MountError("can't open COM6: Access is denied"); }});
+        try {
+            busy.connect();
+            FAIL("opened a busy port");
+        } catch (const MountError& e) {
+            CHECK(std::string(e.what()).find("another program has the port open (the OnStep ASCOM driver") != std::string::npos);
+        }
+        OnStepDriver meade({fakeLink(noise("Autostar#"), l)});
+        CHECK_THROWS_WITH(meade.connect(), Catch::Matchers::ContainsSubstring("not OnStep"));
+    }
+
+    SECTION("specs") {
+        CHECK(isBuiltInMount("onstep:COM6"));
+        CHECK(isBuiltInMount("lx200-onstep:/dev/ttyUSB0"));
+        CHECK_NOTHROW(mountFactory("onstep:COM6@230400", std::nullopt));
+        CHECK_NOTHROW(mountFactory("onstep:tcp://192.168.0.10", std::nullopt));
+        CHECK(mountSpecHelp().find("finds the speed itself") != std::string::npos);
+    }
+}
+
+TEST_CASE("mounts: the worker passes on what the mount says (notes, faults) and rate offsets", "[mounts]") {
+    auto sim = quickSim();
+    FakeOnStep fake(sim);
+    fake.clockOffset = 3600;
+    QStringList said;
+    MountWorker w([&] { return std::make_unique<OnStepDriver>(std::vector<TransportFactory>{fakeLink(fake.device(), std::make_shared<LinkState>())}); });
+    QObject::connect(&w, &MountWorker::failed, [&](const QString& why) { said << why; });
+    REQUIRE(waitFor([&] { return w.connected(); }, 5000));
+    CHECK(waitFor([&] { return said.size() == 1; }, 2000));
+    CHECK(said.value(0).contains("an hour ahead"));
+    {
+        std::lock_guard lock(fake.m);
+        fake.error = 7;
+    }
+    CHECK(waitFor([&] { return said.size() == 2; }, 3000));
+    CHECK(said.value(1) == "the mount says: at the meridian limit");
+    CHECK(waitFor([&] { return w.status().fault == "at the meridian limit"; }, 2000));
+    sleepMs(1200);   // said once, not every poll
+    CHECK(said.size() == 2);
+    w.setRateOffsets(0.75, 0);
+    CHECK(waitFor([&] {
+        std::lock_guard lock(fake.m);
+        return fake.raOffset != 0;
+    }, 2000));
 }
 
 TEST_CASE("mounts: what each protocol says when it can't", "[mounts]") {
