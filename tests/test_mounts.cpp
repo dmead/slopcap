@@ -393,6 +393,7 @@ TEST_CASE("mounts: OnStep's own driver", "[mounts]") {
         CHECK(why([&] { d->slewTo(3, 3); }) == "the mount refused the goto: the mount is parked");
         CHECK(why([&] { d->sync(3, 3); }) == "the mount refused the sync: the mount is parked");
         CHECK(why([&] { d->park(); }) == "(went through)");
+        settle(*d);   // (that park slews to the pole and parks again when it gets there)
         sim->unpark();
         CHECK(why([&] { d->unpark(); }) == "the mount couldn't unpark: it isn't parked");
         fake.noParkPosition = true;
