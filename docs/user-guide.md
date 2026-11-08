@@ -194,8 +194,7 @@ of the chosen length to nudge the planet back into the ROI; **Stop** halts every
   and the park position. Nothing is written until you press Apply, and then only what you changed. Its Log tab
   has every command SlopCap sent the mount and every reply and error. The panel's **Speed** picks how the pad moves
   it: Guide pulse (a tap, a pulse of the chosen length) or one of the mount's speeds (it moves while you hold the
-  button). To try it without the app:
-  `slopcap-mountprobe onstep:COM6` reads what the mount says, and `--move` moves it a little each way.
+  button).
 
 ## Afterwards
 

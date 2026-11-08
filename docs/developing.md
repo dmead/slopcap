@@ -186,6 +186,7 @@ Built next to `slopcap` (`build/<preset>/`):
 | `slopcap-camprobe [--json]` | what every connected ZWO and QHY camera reports (its controls, readout modes, gain landmarks); the fixtures from real cameras are in `tools/camprobe/fixtures` |
 | `slopcap-diag [--png OUT/] FILE.ser…` | optical diagnostics from planetary recordings: stacks the best frames and reports dispersion, limb sharpness per colour and side, halo and jitter |
 | `slopcap-focusbench FILE.ser [frames] [metric]` | times the focus scorer on a recording |
+| `slopcap-mountprobe SPEC [--site LAT,LON] [--move] [--log]` | one of SlopCap's own mount drivers without the app: what the mount is, what the driver found on connecting and its state; `--move` pulses, moves and a short goto each way (OnStep: then home), `--send CMD` a raw command, `--settings` the mount's own settings (OnStep), `--log` every command and reply |
 
 `slopcap` itself takes the options in [the user guide](user-guide.md#starting-slopcap-from-a-command-line), and for
 scripted screenshots and smoke tests also `--listen ADDRESS`, `--set NAME=VALUE[@SECONDS]`,
