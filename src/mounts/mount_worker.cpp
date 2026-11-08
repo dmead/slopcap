@@ -228,7 +228,10 @@ void MountWorker::lost(const std::string& why) {
 
 void MountWorker::pollNow() {
     try {
-        auto st = driver_->poll();
+        auto st = [this] {
+            const MountLog::PollScope polling;   // (Settings and log... hides these unless asked)
+            return driver_->poll();
+        }();
         if (info_.j2000 && st.haveCoords) analysis::j2000ToDate(st.ra, st.dec, jdNow());
         const auto now = Clock::now();
         st.pulsing = axes_[0].pulseEnd > now || axes_[1].pulseEnd > now;

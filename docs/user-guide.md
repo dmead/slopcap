@@ -183,7 +183,7 @@ of the chosen length to nudge the planet back into the ROI; **Stop** halts every
   **OnStep** has a driver of its own (`onstep:`), which knows more of it than `lx200:` does. It tries 9600, 230400,
   115200, 57600, 38400 and 19200 baud until the mount answers (or give it one: `onstep:COM6@230400`). The panel shows
   the pier side, *at home*, and the mount's own faults in words ("at the meridian limit", "a motor fault"). The pad
-  offers OnStep's ten speeds, 0.25x to its maximum. On connecting, SlopCap compares the mount's clock with the
+  offers OnStep's ten speeds, 0.25× to its maximum. On connecting, SlopCap compares the mount's clock with the
   computer's and its site with Settings → Site, and says so when they differ: a clock an hour out is usually the UTC
   offset after a change to or from daylight saving. Starting tracking is checked: after a soft reset an OnStep can
   say it tracks at a rate of 0, and SlopCap gives it its rate back. On OnStep the rate a move uses is also the rate

@@ -14,7 +14,15 @@ namespace slopcap::mounts {
 
 class MountLog {
 public:
-    enum class Kind { Exchange, Error, Info };
+    enum class Kind { Exchange, Poll, Error, Info };   ///< Poll: an exchange made while a PollScope lives on its thread
+    /// The worker's status poll: the exchanges it makes are polls, whatever the driver's commands are.
+    struct PollScope {
+        PollScope() { polling_ = true; }
+        ~PollScope() { polling_ = false; }
+        PollScope(const PollScope&) = delete;
+        PollScope& operator=(const PollScope&) = delete;
+    };
+    static bool polling() { return polling_; }
     struct Entry {
         std::uint64_t seq = 0;
         std::chrono::system_clock::time_point at;
@@ -30,6 +38,7 @@ public:
     void clear();
 
 private:
+    static thread_local bool polling_;
     mutable std::mutex m_;
     std::deque<Entry> entries_;
     std::uint64_t next_ = 1, errors_ = 0;

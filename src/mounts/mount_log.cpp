@@ -2,6 +2,8 @@
 
 namespace slopcap::mounts {
 
+thread_local bool MountLog::polling_ = false;
+
 MountLog& MountLog::instance() {
     static MountLog log;
     return log;

@@ -5,6 +5,7 @@
 #include "devices/mount.hpp"
 #include "fakes/fake_mounts.hpp"
 #include "mounts/command_channel.hpp"
+#include "mounts/mount_log.hpp"
 #include "mounts/mount_worker.hpp"
 #include "mounts/onstep.hpp"
 #include "mounts/open_mount.hpp"
@@ -26,6 +27,7 @@
 #include <chrono>
 #include <cmath>
 #include <future>
+#include <optional>
 #include <thread>
 
 #ifdef _WIN32
@@ -270,10 +272,10 @@ TEST_CASE("mounts: OnStep's own driver", "[mounts]") {
         CHECK(info.backend == "onstep");
         CHECK(info.model == "OnStepX 10.25a");
         CHECK(info.rates.size() == 10);
-        CHECK(info.rates.front() == "0.25x");
+        CHECK(info.rates.front() == "0.25\xC3\x97");
         CHECK(info.caps.rateOffsets);
         CHECK(info.details.find("German equatorial") != std::string::npos);
-        CHECK(info.details.find("pulse guides at 0.25x") != std::string::npos);
+        CHECK(info.details.find("pulse guides at 0.25\xC3\x97") != std::string::npos);
         CHECK(info.details.find("horizon limit -10*") != std::string::npos);
         CHECK(info.notes.empty());   // clock and site agree
         const auto st = d->poll();
@@ -589,6 +591,18 @@ TEST_CASE("mounts: the worker passes on what the mount says (notes, faults) and 
         std::lock_guard lock(fake.m);
         return fake.raOffset != 0;
     }, 2000));
+
+    // the mount's log: what the worker's poll sent is a poll, whatever the driver's commands; the rest isn't
+    auto kindOf = [](const std::string& start) {
+        std::optional<MountLog::Kind> kind;
+        for (const auto& e : MountLog::instance().since(0))
+            if (e.text.rfind(start, 0) == 0) kind = e.kind;
+        return kind;
+    };
+    CHECK(kindOf(":GDH#") == MountLog::Kind::Poll);
+    CHECK(kindOf(":SXTR,") == MountLog::Kind::Exchange);
+    CHECK(kindOf(":GVP#") == MountLog::Kind::Exchange);   // (connecting)
+    CHECK_FALSE(MountLog::polling());
 }
 
 TEST_CASE("mounts: what each protocol says when it can't", "[mounts]") {

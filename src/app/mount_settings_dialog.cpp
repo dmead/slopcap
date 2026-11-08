@@ -31,13 +31,6 @@ namespace {
 
 using Kind = mounts::MountSetting::Kind;
 
-/// The status reads every poll makes: hidden from the log unless asked for
-bool isPoll(const std::string& line) {
-    for (const char* p : {":GU#", ":GR#", ":GD#", ":GRH#", ":GDH#", ":D#", ":Gm#", ":GT#", "\\x06"})
-        if (line.rfind(p, 0) == 0) return true;
-    return false;
-}
-
 }  // namespace
 
 MountSettingsDialog::MountSettingsDialog(devices::Mount& mount, QWidget* parent) : QDialog(parent), mount_(mount) {
@@ -84,7 +77,7 @@ MountSettingsDialog::MountSettingsDialog(devices::Mount& mount, QWidget* parent)
     auto* filters = new QHBoxLayout;
     hidePolls_ = new QCheckBox("Hide status polls");
     hidePolls_->setChecked(true);
-    hidePolls_->setToolTip("The position and status reads made every second (:GR#, :GD#, :GU#, …)");
+    hidePolls_->setToolTip("The position and status reads made every second");
     errorsOnly_ = new QCheckBox("Errors only");
     auto* copy = theme::button("Copy all");
     auto* clear = theme::button("Clear");
@@ -151,7 +144,7 @@ void MountSettingsDialog::rebuild() {
     auto* pv = new QVBoxLayout(page);
     pv->setSpacing(6);
     if (!mount_.hasSettings()) {
-        auto* none = theme::label(mount_.ready() ? "This mount's own settings can't be changed from SlopCap (an OnStep's can, on its own driver: onstep:PORT)."
+        auto* none = theme::label(mount_.ready() ? "SlopCap can't change this mount's own settings. The Log tab has what was sent and said."
                                                  : "Connect the mount to see its settings. The Log tab says what happened so far.",
                                   "muted");
         none->setWordWrap(true);
@@ -284,10 +277,10 @@ void MountSettingsDialog::pullLog() {
         logSeq_ = e.seq;
         using K = mounts::MountLog::Kind;
         if (errorsOnly_->isChecked() && e.kind != K::Error) continue;
-        if (hidePolls_->isChecked() && e.kind == K::Exchange && isPoll(e.text)) continue;
+        if (hidePolls_->isChecked() && e.kind == K::Poll) continue;
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(e.at.time_since_epoch()).count();
         const QString t = QDateTime::fromMSecsSinceEpoch(ms).toString("HH:mm:ss.zzz");
-        const char* mark = e.kind == K::Exchange ? ">  " : e.kind == K::Error ? "!! " : "-- ";
+        const char* mark = e.kind == K::Exchange || e.kind == K::Poll ? ">  " : e.kind == K::Error ? "!! " : "-- ";
         lines << t + "  " + mark + QString::fromStdString(e.text);
     }
     if (lines.isEmpty()) return;

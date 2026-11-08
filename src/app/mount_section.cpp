@@ -168,7 +168,7 @@ MountSection::MountSection(devices::Mount& mount, FocusController& fc, QWidget* 
     lastError_->setStyleSheet("color: #ff6b6b;");
     lastError_->setVisible(false);
     more_ = theme::button("Settings and log…");
-    more_->setToolTip("The mount's own settings (OnStep: site, time, limits, flips, backlash…) and every command, reply and error");
+    more_->setToolTip("The mount's own settings, where SlopCap can change them, and every command, reply and error");
     moreRow->addWidget(lastError_, 1);
     moreRow->addWidget(more_, 0, Qt::AlignTop);
     v->addLayout(moreRow);
@@ -241,7 +241,7 @@ void MountSection::refresh() {
     }
     online_->setVisible(ok);
     pad_->setVisible(ok);
-    // the speeds the mount has (OnStep: 0.25x to max), after "Guide pulse"
+    // the speeds the mount has, after "Guide pulse"
     if (const auto rates = ok ? mount_.slewRates() : QStringList{}; rates != rates_) {
         const QString was = speed();
         const QSignalBlocker block(speed_);

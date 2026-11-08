@@ -17,8 +17,11 @@ namespace {
 constexpr int kReplyMs = 1500;
 constexpr double kSiderealSecond = 0.99726957;   // SI seconds
 
-const char* const kRateNames[OnStepDriver::kRates] = {"0.25x", "0.5x", "1x", "2x", "4x", "8x", "20x", "48x", "Half max", "Max"};
-const char* const kRateText[] = {"0.25x", "0.5x", "1x", "2x", "4x", "8x", "20x", "48x", "half max", "max", "custom"};
+// as the other drivers name speeds: multiples of sidereal with "×"
+const char* const kRateNames[OnStepDriver::kRates] = {"0.25\xC3\x97", "0.5\xC3\x97", "1\xC3\x97",  "2\xC3\x97",  "4\xC3\x97",
+                                                      "8\xC3\x97",    "20\xC3\x97",  "48\xC3\x97", "Half max", "Max"};
+const char* const kRateText[] = {"0.25\xC3\x97", "0.5\xC3\x97", "1\xC3\x97", "2\xC3\x97", "4\xC3\x97", "8\xC3\x97",
+                                 "20\xC3\x97",   "48\xC3\x97",  "half max", "max",       "custom"};
 
 std::string trim(std::string s) {
     while (!s.empty() && (s.back() == ' ' || s.back() == '\0')) s.pop_back();
@@ -589,7 +592,7 @@ std::vector<MountSetting> OnStepDriver::settings() {
     // guiding and gotos
     if (st.pulseRate >= 0 && st.pulseRate <= 2)
         add({"pulseRate", kGroupSpeeds, "Guide pulse rate", K::Choice, std::to_string(st.pulseRate),
-             {{"0", "0.25x sidereal"}, {"1", "0.5x sidereal"}, {"2", "1x sidereal"}}, 0, 0, 0, "",
+             {{"0", "0.25\xC3\x97 sidereal"}, {"1", "0.5\xC3\x97 sidereal"}, {"2", "1\xC3\x97 sidereal"}}, 0, 0, 0, "",
              "The speed of guide pulses (PHD2's): change PHD2's calibration after changing it"});
     {
         const auto now = get(":GX97#");

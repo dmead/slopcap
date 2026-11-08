@@ -212,7 +212,8 @@ TEST_CASE("panels: an OnStep's own settings and the mount's log", "[app][panels]
     // the log has the commands; an error goes to the log and shows in red in the panel until the log is opened
     d->showLog();
     CHECK(waitFor([&] { return d->logText().contains(":Sh+05#  < 1"); }, 3000));
-    CHECK_FALSE(d->logText().contains(":GU#"));   // status polls hidden
+    CHECK(d->logText().contains(":GU#"));         // read for the settings: shown
+    CHECK_FALSE(d->logText().contains(":GDH#"));  // only the worker's polls read Dec: hidden
     d->close();
     mount.changeSetting("utcOffset", "+5:20");
     CHECK(waitFor([&] { return labelWith(&ms, "like +05:00") != nullptr; }, 3000));
@@ -229,7 +230,7 @@ TEST_CASE("panels: an OnStep's own settings and the mount's log", "[app][panels]
     REQUIRE(box("Hide status polls"));
     REQUIRE(box("Errors only"));
     box("Hide status polls")->setChecked(false);
-    CHECK(waitFor([&] { return d->logText().contains(":GU#"); }, 3000));
+    CHECK(waitFor([&] { return d->logText().contains(":GDH#"); }, 3000));
     box("Errors only")->setChecked(true);
     CHECK_FALSE(d->logText().contains(":Sh+05#"));
     CHECK(d->logText().contains("!! a UTC offset is like +05:00"));
