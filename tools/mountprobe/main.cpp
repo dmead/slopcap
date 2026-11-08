@@ -55,7 +55,9 @@ MountStatus settle(IMountDriver& d, int ms = 120000) {
     const auto start = std::chrono::steady_clock::now();
     for (;;) {
         auto st = d.poll();
-        if ((!st.slewing && !st.pulsing) || g_stop || std::chrono::steady_clock::now() - start > std::chrono::milliseconds(ms)) return st;
+        // (the position is read before whether it moves: once it has stopped, read it again)
+        if (!st.slewing && !st.pulsing) return d.poll();
+        if (g_stop || std::chrono::steady_clock::now() - start > std::chrono::milliseconds(ms)) return st;
         sleepMs(250);
     }
 }

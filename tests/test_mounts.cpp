@@ -70,7 +70,10 @@ MountStatus settle(IMountDriver& d, int ms = 10000) {
     t.start();
     for (;;) {
         const auto st = d.poll();
-        if (!st.slewing || t.elapsed() > ms) return st;
+        // a poll reads the position before whether it's slewing: when the slew has just ended, the position may be from
+        // a moment before, so it's read once more
+        if (!st.slewing) return d.poll();
+        if (t.elapsed() > ms) return st;
         sleepMs(30);
     }
 }
