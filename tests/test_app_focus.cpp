@@ -100,7 +100,10 @@ TEST_CASE("focus: INDI focuser and mount simulators, sweeps, results, collimatio
         track->click();
         CHECK(waitFor([&] { return p.mount->tracking() == true; }, 5000));
     }
-    auto* pulse = ms->findChild<QComboBox*>();
+    QComboBox* pulse = nullptr;   // (the Speed picker is a combo box too)
+    for (auto* c : ms->findChildren<QComboBox*>())
+        if (c->accessibleName() == "Pulse length") pulse = c;
+    REQUIRE(pulse);
     pulse->setCurrentIndex(0);
     CHECK(ms->pulseMs() == 100);
     CHECK(waitFor([&] { return p.mount->canPulse(); }, 5000));

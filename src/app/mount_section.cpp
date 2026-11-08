@@ -141,6 +141,7 @@ MountSection::MountSection(devices::Mount& mount, FocusController& fc, QWidget* 
     pulseRow->addWidget(theme::label("Pulse length", "muted"));
     pulseRow->addStretch(1);
     pulse_ = new QComboBox;
+    pulse_->setAccessibleName("Pulse length");
     pulse_->addItem("100 ms", 100);
     pulse_->addItem("300 ms", 300);
     pulse_->addItem("1 s", 1000);

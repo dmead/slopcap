@@ -148,8 +148,11 @@ TEST_CASE("panels: focus, mount and collimation with nothing connected", "[app][
     REQUIRE(waitFor([&] { return sim.ready() && sim.hasCoords(); }, 5000));
     const auto rates = sim.slewRates();
     REQUIRE(rates.size() >= 2);
-    simSection.setSpeed(rates.last());
-    CHECK(simSection.speed() == rates.last());
+    // the panel lists them when the worker's "connected" reaches it, which can come a moment after ready()
+    CHECK(waitFor([&] {
+        simSection.setSpeed(rates.last());
+        return simSection.speed() == rates.last();
+    }, 5000));
     CHECK(sim.slewRate() == rates.last());
     const double dec0 = sim.dec();
     auto* north = button(&simSection, "N");
