@@ -404,7 +404,7 @@ TEST_CASE("mounts: OnStep's own driver", "[mounts]") {
         };
         auto all = d->settings();
         for (const char* key : {"latitude", "longitude", "elevation", "utcOffset", "clock", "syncTime", "trackRate", "compensation",
-                                "dualAxis", "horizon", "overhead", "meridianEast", "meridianWest", "autoFlip", "pierSide", "pauseAtHome",
+                                "dualAxis", "horizon", "overhead", "meridianEast", "meridianWest", "autoFlip", "pierSide", "flipHome",
                                 "pulseRate", "gotoSpeed", "backlashRa", "backlashDec", "buzzer", "goHome", "setPark", "about"})
             CHECK(find(all, key));
         CHECK(find(all, "latitude")->value == "51.5000");
@@ -424,7 +424,7 @@ TEST_CASE("mounts: OnStep's own driver", "[mounts]") {
         d->changeSetting("autoFlip", "0");
         d->changeSetting("pierSide", "W");
         d->changeSetting("buzzer", "0");
-        d->changeSetting("pauseAtHome", "1");
+        d->changeSetting("flipHome", "2");
         d->changeSetting("compensation", "refraction");
         d->changeSetting("dualAxis", "0");
         d->changeSetting("latitude", "-33.8650");
@@ -446,7 +446,7 @@ TEST_CASE("mounts: OnStep's own driver", "[mounts]") {
         CHECK_FALSE(fake.autoFlip);
         CHECK(fake.pierSide == 'W');
         CHECK_FALSE(fake.buzzer);
-        CHECK(fake.pauseAtHome);
+        CHECK(fake.flipHome == 2);
         CHECK(fake.compensation == 'r');
         CHECK(fake.singleAxis);
         CHECK(fake.elevation == "58.0");
@@ -458,7 +458,7 @@ TEST_CASE("mounts: OnStep's own driver", "[mounts]") {
         CHECK(find(all, "pierSide")->value == "W");
         CHECK(find(all, "compensation")->value == "refraction");
         CHECK(find(all, "dualAxis")->value == "0");
-        CHECK(find(all, "pauseAtHome")->value == "1");
+        CHECK(find(all, "flipHome")->value == "2");
 
         // this computer's date, time and UTC offset
         d->changeSetting("syncTime", "");
@@ -481,6 +481,41 @@ TEST_CASE("mounts: OnStep's own driver", "[mounts]") {
         CHECK_THROWS_WITH(d->changeSetting("meridianEast", "999"), "not a value for meridianEast: 999");
         d->changeSetting("goHome", "");
         CHECK(link->wrote(":hC#"));
+    }
+
+    SECTION("the way it flips: straight across, through home or waiting there, on firmware with and without :SX94") {
+        auto d = connectTo();
+        d->connect();
+        auto flipHome = [&] {
+            for (const auto& s : d->settings())
+                if (s.key == "flipHome") return s.value;
+            return std::string("(none)");
+        };
+        CHECK(flipHome() == "0");
+        // 10.25a (the P75): no :SX94, and :SX98 turns waiting at home on and off
+        d->changeSetting("flipHome", "2");
+        CHECK(link->wrote(":SX94,2#"));
+        CHECK(link->wrote(":SX98,1#"));
+        CHECK(flipHome() == "2");
+        d->changeSetting("flipHome", "0");
+        CHECK(fake.flipHome == 0);
+        CHECK(flipHome() == "0");
+        CHECK_THROWS_WITH(d->changeSetting("flipHome", "1"), Catch::Matchers::ContainsSubstring("10.28"));
+        CHECK(fake.flipHome == 0);
+        // 10.28 on: :SX94 has all three, and :SX98,0 (which would leave it going through home) isn't sent
+        fake.flipHomeModes = true;
+        fake.flipHome = 2;
+        CHECK(flipHome() == "2");
+        {
+            std::lock_guard lock(link->m);
+            link->written.clear();
+        }
+        d->changeSetting("flipHome", "0");
+        CHECK(fake.flipHome == 0);
+        CHECK_FALSE(link->wrote(":SX98,0#"));
+        d->changeSetting("flipHome", "1");
+        CHECK(flipHome() == "1");
+        CHECK_THROWS_WITH(d->changeSetting("flipHome", "3"), "not a value for flipHome: 3");
     }
 
     SECTION("rate offsets for a planet's own motion, where the firmware has them") {

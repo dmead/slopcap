@@ -84,7 +84,9 @@ public:
     // the settings OnStepX's web server sets
     std::string elevation = "45.0";
     int horizon = -10, overhead = 80, meridianEast = 60, meridianWest = 60;
-    bool autoFlip = true, buzzer = true, pauseAtHome = false, singleAxis = false;
+    bool autoFlip = true, buzzer = true, singleAxis = false;
+    int flipHome = 0;                ///< a flip goes 0 straight across, 1 through home, 2 waits at home (:GU# v / u)
+    bool flipHomeModes = false;      ///< :SX94,n# (OnStepX 10.28 on); without it (the P75's 10.25a) :SX98 is on / off
     char pierSide = 'E', compensation = 0;   ///< compensation: 0, 'r' or 't'
     int backlashRa = 0, backlashDec = 70, gotoPreset = 3;
     bool parkSet = false;

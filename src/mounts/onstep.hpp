@@ -45,7 +45,8 @@ struct OnStepStatus {
     std::optional<TrackRate> rate;   ///< lunar, solar or King when :GU# says so; nullopt: sidereal or not said
     char compensation = 0;        ///< r refraction, t full (OnTrack); 0 none
     bool singleAxis = false;      ///< (with compensation) RA only
-    bool buzzer = false, autoFlip = false, pauseAtHome = false;
+    bool buzzer = false, autoFlip = false;
+    bool pauseAtHome = false, visitHome = false;   ///< how a flip goes: u pauses at home, v goes through it; neither: straight
 };
 std::optional<OnStepStatus> parseOnStepStatus(std::string_view gu);
 /// The general error code in words ("" for 0).
@@ -92,6 +93,7 @@ private:
     void checkSite(MountInfo& info);
     void setNumeric(const std::string& cmd, const std::string& what);   ///< a 1, or the mount's reason
     void syncTime();
+    void setFlipHome(int mode);   ///< 0 straight across, 1 through home, 2 pausing there
     char mountType_ = 0;
     std::vector<TransportFactory> opens_;
     std::optional<Site> site_;

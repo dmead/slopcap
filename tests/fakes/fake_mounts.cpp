@@ -173,7 +173,8 @@ std::string FakeOnStep::handle(std::string_view in) {
         if (x.rate == mounts::TrackRate::King) s += 'k';
         if (compensation) s += compensation;
         if (compensation && singleAxis) s += 's';
-        if (pauseAtHome) s += 'u';
+        if (flipHome == 2) s += 'u';
+        if (flipHome == 1) s += 'v';
         if (buzzer) s += 'z';
         if (autoFlip) s += 'a';
         s += 'E';
@@ -222,9 +223,19 @@ std::string FakeOnStep::handle(std::string_view in) {
     if (is("SXEA,")) return intAfter(5, -720, 720, meridianWest);
     if (is("$BR")) return intAfter(3, 0, 3600, backlashRa);
     if (is("$BD")) return intAfter(3, 0, 3600, backlashDec);
-    if (is("SX95,") || is("SX97,") || is("SX98,")) {
+    if (is("SX95,") || is("SX97,")) {
         if (c.size() != 6 || (c[5] != '0' && c[5] != '1')) return ok(false, 4);
-        (c[3] == '5' ? autoFlip : c[3] == '7' ? buzzer : pauseAtHome) = c[5] == '1';
+        (c[3] == '5' ? autoFlip : buzzer) = c[5] == '1';
+        return ok(true, 0);
+    }
+    if (is("SX98,")) {   // on the newer firmware 0 turns waiting at home into going through it, and nothing else
+        if (c.size() != 6 || (c[5] != '0' && c[5] != '1')) return ok(false, 4);
+        flipHome = c[5] == '1' ? 2 : flipHomeModes ? (flipHome == 2 ? 1 : flipHome) : 0;
+        return ok(true, 0);
+    }
+    if (is("SX94,") && flipHomeModes) {
+        if (c.size() != 6 || c[5] < '0' || c[5] > '2') return ok(false, 4);
+        flipHome = c[5] - '0';
         return ok(true, 0);
     }
     if (is("SX96,")) {

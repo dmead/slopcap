@@ -128,6 +128,7 @@ std::optional<OnStepStatus> parseOnStepStatus(std::string_view gu) {
             case 'z': s.buzzer = true; break;
             case 'a': s.autoFlip = true; break;
             case 'u': s.pauseAtHome = true; break;
+            case 'v': s.visitHome = true; break;
             default: break;
         }
     }
@@ -579,8 +580,10 @@ std::vector<MountSetting> OnStepDriver::settings() {
             add({"pierSide", kGroupFlips, "Preferred pier side", K::Choice, v->substr(0, 1),
                  {{"E", "East"}, {"W", "West"}, {"B", "Best (stay on this side if it can)"}, {"A", "Auto"}}, 0, 0, 0, "",
                  "The side a goto chooses when both would do"});
-        add({"pauseAtHome", kGroupFlips, "Pause at home during a flip", K::Toggle, st.pauseAtHome ? "1" : "0", {}, 0, 0, 0, "",
-             "Stop at the home position half-way through a flip until told to carry on"});
+        add({"flipHome", kGroupFlips, "A flip goes", K::Choice, st.pauseAtHome ? "2" : st.visitHome ? "1" : "0",
+             {{"0", "Straight across"}, {"1", "Through the home position"}, {"2", "Through home, and waits there"}}, 0, 0, 0, "",
+             "The way to the other side of the pier: directly, by way of the home position, or stopping at home until told to "
+             "carry on. OnStepX before mid-2026 (10.28) has only straight across and waiting at home"});
     }
 
     // guiding and gotos
@@ -633,6 +636,14 @@ void OnStepDriver::syncTime() {
     setNumeric(buf, "the time");
 }
 
+void OnStepDriver::setFlipHome(int mode) {
+    // :SX94,n# since OnStepX 10.28 (mid-2026); before it, :SX98 only turned the pause at home on and off. On the newer
+    // firmware :SX98,0 turns a pause into going through home, so it's the fallback only, for a firmware without :SX94
+    if (numeric(":SX94," + std::to_string(mode) + "#")) return;
+    if (mode == 1) throw MountError("this OnStep can't flip through home without waiting there (OnStepX 10.28 and later can)");
+    setNumeric(std::string(":SX98,") + (mode == 2 ? '1' : '0') + "#", "the way it flips");
+}
+
 void OnStepDriver::changeSetting(const std::string& key, const std::string& value) {
     const auto v = number(trim(value));
     auto need = [&](double lo, double hi) {
@@ -666,7 +677,7 @@ void OnStepDriver::changeSetting(const std::string& key, const std::string& valu
     else if (key == "pierSide") {
         if (value.size() != 1 || std::string("EWBA").find(value[0]) == std::string::npos) throw MountError("not a pier side: " + value);
         setNumeric(":SX96," + value + "#", "the preferred pier side");
-    } else if (key == "pauseAtHome") setNumeric(std::string(":SX98,") + flag() + "#", "pausing at home");
+    } else if (key == "flipHome") setFlipHome(static_cast<int>(need(0, 2)));
     else if (key == "buzzer") setNumeric(std::string(":SX97,") + flag() + "#", "the buzzer setting");
     else if (key == "pulseRate") {
         const int r = static_cast<int>(need(0, 2));
