@@ -1,8 +1,10 @@
 // slopcap-mountprobe: one of SlopCap's own mount drivers from the command line (docs/design/mounts.md §6), for trying a
 // driver on a real mount without the app.
-//   slopcap-mountprobe SPEC [--site LAT,LON] [--move] [--log]
-// Without --move it only reads: what the mount is, what the driver found on connecting (limits, guide rate, a clock or
-// site that's off) and its state. --move then, with tracking on, sends 1 s guide pulses each way, short moves at 8x
+//   slopcap-mountprobe SPEC [--site LAT,LON] [--settings] [--set KEY=VALUE ...] [--move] [--log]
+// Without --set or --move it only reads: what the mount is, what the driver found on connecting (limits, guide rate, a
+// clock or site that's off) and its state; --settings adds the mount's own settings (OnStep). --set writes one of them
+// the way Mount > Settings and log... does (KEY as the driver names it: horizon=-10, buzzer=1, goHome) and reads them
+// back. --move then, with tracking on, sends 1 s guide pulses each way, short moves at 8x
 // and a visible one at half the maximum speed east and back west, a goto 10 degrees south of where it starts, and
 // (OnStep) back home, printing where the mount says it is after each, and how far that is from before. Stop it with
 // Ctrl+C: the driver is told to stop first. --log prints every command and reply.
@@ -66,9 +68,16 @@ int main(int argc, char** argv) {
     std::optional<Site> site;
     bool doMove = false, doSettings = false;
     std::vector<std::string> sends;
+    std::vector<std::pair<std::string, std::string>> sets;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--move")) doMove = true;
         else if (!std::strcmp(argv[i], "--settings")) doSettings = true;
+        else if (!std::strcmp(argv[i], "--set") && i + 1 < argc) {
+            const std::string kv = argv[++i];
+            const auto eq = kv.find('=');
+            sets.emplace_back(kv.substr(0, eq), eq == std::string::npos ? std::string() : kv.substr(eq + 1));
+            doSettings = true;
+        }
         else if (!std::strcmp(argv[i], "--log")) QLoggingCategory::setFilterRules("slopcap.mount.debug=true");
         else if (!std::strcmp(argv[i], "--site") && i + 1 < argc) {
             Site s;
@@ -77,7 +86,7 @@ int main(int argc, char** argv) {
         else spec = argv[i];
     }
     if (spec.empty()) {
-        std::fputs("usage: slopcap-mountprobe SPEC [--site LAT,LON] [--move] [--log]\n"
+        std::fputs("usage: slopcap-mountprobe SPEC [--site LAT,LON] [--settings] [--set KEY=VALUE ...] [--move] [--log]\n"
                    "       slopcap-mountprobe PORT --send CMD [--send CMD ...]   raw commands; replies up to '#' or 500 ms\n"
                    "                                                          (\"wait:MS\" pauses)\n\n",
                    stderr);
@@ -126,12 +135,21 @@ int main(int argc, char** argv) {
         for (const auto& n : info.notes) std::printf("NOTE       %s\n", n.c_str());
         const auto s0 = d->poll();
         show("now", s0);
-        if (doSettings) {   // read only: what Mount > Settings and log would show
+        for (const auto& [key, value] : sets) {   // written as Settings and log... writes them, then read back below
+            try {
+                d->changeSetting(key, value);
+                std::printf("set        %s%s%s\n", key.c_str(), value.empty() ? "" : " = ", value.c_str());
+            } catch (const MountError& e) {
+                std::printf("REFUSED    %s%s%s: %s\n", key.c_str(), value.empty() ? "" : " = ", value.c_str(), e.what());
+            }
+            std::fflush(stdout);
+        }
+        if (doSettings) {   // what Mount > Settings and log would show
             std::string group;
             for (const auto& s : d->settings()) {
                 if (s.group != group) std::printf("\n[%s]\n", (group = s.group).c_str());
-                if (s.kind == MountSetting::Kind::Action) std::printf("  (action) %s\n", s.label.c_str());
-                else std::printf("  %-34s %s%s%s\n", s.label.c_str(), s.value.c_str(), s.unit.empty() ? "" : " ", s.unit.c_str());
+                if (s.kind == MountSetting::Kind::Action) std::printf("  %-14s (action) %s\n", s.key.c_str(), s.label.c_str());
+                else std::printf("  %-14s %-34s %s%s%s\n", s.key.c_str(), s.label.c_str(), s.value.c_str(), s.unit.empty() ? "" : " ", s.unit.c_str());
             }
         }
         if (!doMove) return 0;
