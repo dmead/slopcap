@@ -118,7 +118,8 @@ MountInfo SkyWatcherDriver::connect() {
     info.model = "Sky-Watcher motor controller " + version + (site_ ? "" : " (no site in Settings: no coordinates or gotos)");
     info.rates = {"0.5\xC3\x97", "1\xC3\x97", "8\xC3\x97", "32\xC3\x97", "128\xC3\x97", "400\xC3\x97", "800\xC3\x97"};   // kRates
 
-    info.caps.park = info.caps.unpark = info.caps.tracking = info.caps.trackRates = info.caps.sync = true;
+    info.caps.park = info.caps.unpark = info.caps.tracking = true;
+    info.trackRates = {TrackRate::Sidereal, TrackRate::Lunar, TrackRate::Solar, TrackRate::King};
     return info;
 }
 
@@ -227,6 +228,7 @@ MountStatus SkyWatcherDriver::poll() {
     }
     st.slewing = gotoActive_;
     st.tracking = trackingOn_ && !gotoActive_ && !parked_;
+    st.trackRate = trackRate_;
     st.parked = parked_;
     if (site_) {
         const bool south = site_->latitude < 0;
@@ -292,6 +294,7 @@ void SkyWatcherDriver::setTracking(bool on) {
 
 void SkyWatcherDriver::setTrackRate(TrackRate r) {
     trackArcsec_ = r == TrackRate::Lunar ? 14.685 : r == TrackRate::Solar ? 15.0 : r == TrackRate::King ? 15.0369 : 15.041067;
+    trackRate_ = r;
     if (trackingOn_) raSpeed();
 }
 

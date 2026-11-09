@@ -53,16 +53,23 @@ public:
     bool slewing() const { return slewing_; }
     std::optional<bool> tracking() const;  ///< nullopt: the driver doesn't say
     std::optional<bool> parked() const;    ///< at the park position (not on the way); nullopt: the driver can't park
-    bool canPulse() const;                 ///< the driver takes timed guide pulses
+    /// What this mount does besides the core every mount has (goto, moves at its speeds, abort, where it points), the
+    /// same question for SlopCap's own drivers and INDI's. `pulse`: guide pulses work at all (SlopCap times moves for
+    /// a built-in driver whose mount has none). Nothing while it isn't connected.
+    mounts::Caps capabilities() const;
+    std::vector<mounts::TrackRate> trackRates() const;   ///< what setTrackRate() takes (empty: none to choose)
+    mounts::TrackRate trackRate() const;   ///< as the mount says, else as last set from here (sidereal at first)
+    void setTrackRate(mounts::TrackRate r);
+    bool canPulse() const { return capabilities().pulse; }
     mounts::PierSide pierSide() const;     ///< (built-in drivers that say; else Unknown)
     bool atHome() const;                   ///< (built-in drivers that say)
     QString fault() const;                 ///< what the mount says is wrong ("" when nothing; built-in drivers)
-    bool canTrackOwnRate() const;          ///< rate offsets (a built-in driver whose mount has them: OnStepX)
+    bool canTrackOwnRate() const { return capabilities().rateOffsets; }   ///< (a built-in driver whose mount has them: OnStepX)
     /// Track this much faster than the chosen rate (arcsec per second, RA as an angle, and Dec); 0, 0 to stop.
     void setRateOffsets(double raArcsecPerSec, double decArcsecPerSec);
     /// The mount's own settings (a built-in driver that has them: OnStep): read them (settingsRead() when they're
     /// in), change one (read again after), and the last read.
-    bool hasSettings() const;
+    bool hasSettings() const { return capabilities().settings; }
     void readSettings();
     void changeSetting(const QString& key, const QString& value);
     std::vector<mounts::MountSetting> settings() const;
@@ -106,6 +113,7 @@ private:
     std::optional<mounts::Site> site_;
     std::unique_ptr<mounts::MountWorker> worker_;
     QString builtInRate_;   ///< the move rate picked for a built-in mount
+    mounts::TrackRate trackRate_ = mounts::TrackRate::Sidereal;   ///< as last set from here
     double ra_ = 0, dec_ = 0;
     bool slewing_ = false, pulsing_ = false;
     bool nsBusy_ = false, weBusy_ = false;   // a pulse sent on that axis hasn't finished

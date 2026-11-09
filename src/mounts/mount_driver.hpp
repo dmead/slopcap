@@ -1,7 +1,11 @@
-// The built-in mount drivers' common interface (docs/design/mounts.md §3.2): a few synchronous calls that may block,
-// made only on the mount's own thread (MountWorker), never the GUI's. A driver only translates between these calls and
-// its mount's protocol; polling, emulated guide pulses, the move deadman, J2000 <-> of date and reconnecting are the
-// worker's, written once for every driver.
+// The built-in mount drivers' common interface (docs/design/mounts.md §2.1, §3.2): a few synchronous calls that may
+// block, made only on the mount's own thread (MountWorker), never the GUI's. A driver only translates between these
+// calls and its mount's protocol; polling, emulated guide pulses, the move deadman, J2000 <-> of date, refusing what a
+// mount can't do and reconnecting are the worker's, written once for every driver.
+//
+// The core is what every mount's protocol has: identify, where it points and whether it slews, goto, abort, move each
+// way at the mount's own speeds and stop, sync. The rest is optional, declared in MountInfo (caps, trackRates), and the
+// worker calls an optional one only when the driver declared it.
 #pragma once
 
 #include <functional>
@@ -23,6 +27,10 @@ enum class TrackRate { Sidereal, Lunar, Solar, King };
 enum class PierSide { Unknown, East, West };
 
 inline bool isNorthSouth(Dir d) { return d == Dir::North || d == Dir::South; }
+/// "sidereal", "lunar", "solar", "King"
+inline const char* trackRateName(TrackRate r) {
+    return r == TrackRate::Lunar ? "lunar" : r == TrackRate::Solar ? "solar" : r == TrackRate::King ? "King" : "sidereal";
+}
 
 struct Site {
     double latitude = 0, longitude = 0;   ///< degrees, north and east positive
@@ -44,12 +52,11 @@ struct MountSetting {
     std::string help;    ///< a tooltip; an Action's is asked as a question first when it says "?"
 };
 
+/// What a mount can do besides the core.
 struct Caps {
     bool pulse = false;        ///< timed guide pulses (without: the worker times a move at the slowest rate)
     bool park = false, unpark = false;
     bool tracking = false;     ///< tracking on / off
-    bool trackRates = false;   ///< lunar, solar (and King where there is one)
-    bool sync = false;         ///< "the mount points here"
     bool rateOffsets = false;  ///< tracking a little faster or slower on each axis (a planet's own motion)
     bool settings = false;     ///< settings() / changeSetting(): the mount's own settings
 };
@@ -59,6 +66,7 @@ struct MountInfo {
     std::string model;                ///< what the mount says it is ("Autostar", "On-Step 10.24", "SynScan 4.39.05")
     bool j2000 = false;               ///< reads and writes J2000 coordinates (else of date, JNow)
     std::vector<std::string> rates;   ///< move rates, slowest first; move() takes an index into this
+    std::vector<TrackRate> trackRates;   ///< what setTrackRate() takes (empty: the mount tracks at its own rate)
     Caps caps;
     std::string details;              ///< for the log: link, limits, guide rate ("" when the driver has nothing to add)
     std::vector<std::string> notes;   ///< things found on connecting that the user should hear (a clock that's off)
@@ -69,6 +77,7 @@ struct MountStatus {
     double ra = 0, dec = 0;    ///< hours, degrees: the driver's epoch (MountInfo::j2000); the worker reports JNow
     bool slewing = false;      ///< a goto (or park) under way
     std::optional<bool> tracking, parked;   ///< nullopt: the mount doesn't say
+    std::optional<TrackRate> trackRate;     ///< nullopt: the mount doesn't say
     PierSide pier = PierSide::Unknown;
     bool pulsing = false;      ///< (the worker's: a guide pulse is running)
     bool atHome = false;       ///< at the home position (where an OnStep starts: counterweights down, at the pole)
@@ -82,6 +91,7 @@ using TransportFactory = std::function<std::unique_ptr<ITransport>()>;
 class IMountDriver {
 public:
     virtual ~IMountDriver() = default;
+    // the core
     virtual MountInfo connect() = 0;       ///< open the link, identify the mount (throws MountError)
     virtual void disconnect() {}
     virtual MountStatus poll() = 0;
@@ -89,12 +99,13 @@ public:
     virtual void abort() = 0;              ///< stop gotos and moves (tracking carries on)
     virtual void move(Dir d, int rate) = 0;   ///< that way at rates[rate] until stop(d) or abort()
     virtual void stop(Dir d) = 0;          ///< end the move on d's axis
+    virtual void sync(double ra, double dec) = 0;   ///< "the mount points here"
+    // optional: called only when MountInfo declares it
     virtual void pulse(Dir, int /*ms*/) {} ///< caps.pulse
     virtual void setTracking(bool) {}      ///< caps.tracking
-    virtual void setTrackRate(TrackRate) {}   ///< caps.trackRates
+    virtual void setTrackRate(TrackRate) {}   ///< one of trackRates
     virtual void park() {}                 ///< caps.park
     virtual void unpark() {}               ///< caps.unpark
-    virtual void sync(double /*ra*/, double /*dec*/) {}   ///< caps.sync
     /// caps.rateOffsets: track this much faster than the chosen rate, arcseconds per SI second, RA (as an angle,
     /// 15" = 1 s of time) and Dec; 0, 0 is the plain rate again.
     virtual void setRateOffsets(double /*raArcsecPerSec*/, double /*decArcsecPerSec*/) {}

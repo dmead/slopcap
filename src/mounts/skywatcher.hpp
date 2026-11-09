@@ -57,6 +57,7 @@ private:
     uint32_t timerFreq_ = 0;
     int highSpeed_[2] = {16, 16};
     double trackArcsec_ = 15.041067;   ///< sidereal
+    TrackRate trackRate_ = TrackRate::Sidereal;
     bool trackingOn_ = false;          ///< asked for (tracks once no goto runs)
     double moveRa_ = 0, moveDec_ = 0;  ///< east / west and north / south moves, degrees per second against the sky
     bool gotoActive_ = false, parking_ = false, parked_ = false;

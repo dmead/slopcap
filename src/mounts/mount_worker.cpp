@@ -5,6 +5,8 @@
 
 #include <QMetaObject>
 
+#include <algorithm>
+
 namespace slopcap::mounts {
 
 namespace {
@@ -107,19 +109,28 @@ void MountWorker::pulse(Dir d, int ms) {
     }, true);
 }
 
+// What isn't in the core is refused here, the same way for every mount, when the driver didn't declare it.
+
 void MountWorker::setTracking(bool on) {
     post([this, on] {
+        if (!info_.caps.tracking) throw MountError("this mount can't turn tracking on or off");
         driver_->setTracking(on);
         nextPoll_ = Clock::now();
     });
 }
 
 void MountWorker::setTrackRate(TrackRate r) {
-    post([this, r] { driver_->setTrackRate(r); });
+    post([this, r] {
+        if (std::find(info_.trackRates.begin(), info_.trackRates.end(), r) == info_.trackRates.end())
+            throw MountError(std::string("this mount can't track at the ") + trackRateName(r) + " rate");
+        driver_->setTrackRate(r);
+        nextPoll_ = Clock::now();
+    });
 }
 
 void MountWorker::park() {
     post([this] {
+        if (!info_.caps.park) throw MountError("this mount can't park");
         driver_->park();
         nextPoll_ = Clock::now();
     }, true);
@@ -127,6 +138,7 @@ void MountWorker::park() {
 
 void MountWorker::unpark() {
     post([this] {
+        if (!info_.caps.unpark) throw MountError("this mount can't unpark from SlopCap (its hand controller or a power cycle can)");
         driver_->unpark();
         nextPoll_ = Clock::now();
     });
@@ -162,6 +174,7 @@ void MountWorker::readSettings() {
 
 void MountWorker::changeSetting(const std::string& key, const std::string& value) {
     post([this, key, value] {
+        if (!info_.caps.settings) throw MountError("this mount's own settings can't be changed from SlopCap");
         MountLog::instance().add(MountLog::Kind::Info, "setting " + key + (value.empty() ? std::string() : " = " + value));
         driver_->changeSetting(key, value);
         nextPoll_ = Clock::now();

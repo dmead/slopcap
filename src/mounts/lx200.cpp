@@ -124,8 +124,8 @@ MountInfo Lx200Driver::connect() {
     info.caps.park = !classic;
     info.caps.unpark = onStep;
     info.caps.tracking = !classic;
-    info.caps.trackRates = !classic;
-    info.caps.sync = true;
+    if (onStep) info.trackRates = {TrackRate::Sidereal, TrackRate::Lunar, TrackRate::Solar, TrackRate::King};
+    else if (!classic) info.trackRates = {TrackRate::Sidereal, TrackRate::Lunar};   // (Meade has no solar rate)
     return info;
 }
 

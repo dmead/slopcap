@@ -84,6 +84,38 @@ protocol, so they are one driver too.
 | built-in (`lx200`, `ioptron`, `nexstar`, `skywatcher`) | yes | yes (`dialout` group) | yes (`/dev/cu.*`) |
 | `sim` | yes | yes | yes |
 
+### 2.1 What every mount shares
+
+From the built-in drivers and their protocols as of 2026-11-08; INDI's column is what its standard properties carry
+when the driver defines them.
+
+| | LX200 Classic | Meade Autostar / II | OnStep(X) | NexStar HC | SynScan HC | Sky-Watcher direct | INDI |
+|---|---|---|---|---|---|---|---|
+| Identify; RA / Dec; slewing | yes | yes | yes | once aligned | once aligned | with Settings' site | yes |
+| Goto; abort | yes | yes | yes | yes | yes | yes | yes |
+| Move each way, stop | Guide, Centre, Find, Max | Guide, Centre, Find, Max | 0.25× … Max (10) | 1 … 9 | 1 … 9 | 0.5× … 800× (7) | the driver's names |
+| Sync | yes | yes | yes | yes (HC 4.10 on) | yes | yes (an offset) | not used yet |
+| Guide pulses | timed moves | yes (`:Mg`) | yes | timed moves | timed moves | timed moves | where defined |
+| Tracking on / off | | yes | yes | yes | yes | yes | where defined |
+| Tracking rates | | sidereal, lunar | sidereal, lunar, solar, King | | | sidereal, lunar, solar, King | where defined |
+| Park / unpark | | park only | both | | | both | where defined |
+| Pier side | | | yes | | yes | | not read yet |
+| At home, faults, rate offsets, its own settings | | | yes | | | | |
+
+"Timed moves": SlopCap moves the mount at its slowest speed for the pulse's length (`MountWorker`).
+
+**The core** is the first four rows. Every driver implements them (`IMountDriver`'s pure virtual calls), and the mount
+panel draws them the same way for every mount: where it points and its state, the pad (a pulse per tap, or held moves
+at the mount's own speeds), Stop, Speed, Pulse length, and Settings and log… (the log for every mount). The rest a
+driver declares (`MountInfo::caps`, `MountInfo::trackRates`); `MountWorker` refuses what wasn't declared with the same
+words for every mount ("this mount can't park"), and the panel shows Park, Unpark, Start tracking and the tracking
+rate only where the mount has them (`devices::Mount::capabilities()` and `trackRates()`, the same questions for INDI's
+mounts).
+
+**Per status poll** (every second; four times a second while anything moves): OnStep 3 commands (`:GRH#`, `:GDH#`,
+`:GU#`); Meade 3 (`:GR#`, `:GD#`, `:D#`; 5 on `lx200-onstep`, with `:GU#` and `:Gm#`); NexStar 3 (`e`, `L`, `t`; `J`
+until aligned; SynScan adds `p`); Sky-Watcher 2 (`:j1`, `:j2`; `:f1`, `:f2` during a goto).
+
 ## 3. Architecture
 
 ```

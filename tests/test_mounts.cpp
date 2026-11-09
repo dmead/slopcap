@@ -136,17 +136,17 @@ void conformance(IMountDriver& d, SimMount& sim, const std::string& backend, dou
         sleepMs(450);
         CHECK(d.poll().dec > dec0 + tol);
     }
-    if (info.caps.trackRates) {
-        d.setTrackRate(TrackRate::Lunar);
-        CHECK(sim.state().rate == TrackRate::Lunar);
-        d.setTrackRate(TrackRate::Sidereal);
+    for (const auto r : info.trackRates) {   // each rate it says it has, and back to sidereal
+        d.setTrackRate(r);
+        CHECK(sim.state().rate == r);
+        if (const auto said = d.poll().trackRate) CHECK(*said == r);
     }
-    if (info.caps.sync) {
-        d.sync(12.0, 40.0);
-        st = d.poll();
-        CHECK(raDiffDeg(st.ra, 12.0) < tol + 0.01);
-        CHECK(st.dec == Approx(40.0).margin(tol));
-    }
+    if (!info.trackRates.empty()) d.setTrackRate(TrackRate::Sidereal);
+    // sync is in every driver's core
+    d.sync(12.0, 40.0);
+    st = d.poll();
+    CHECK(raDiffDeg(st.ra, 12.0) < tol + 0.01);
+    CHECK(st.dec == Approx(40.0).margin(tol));
     if (info.caps.park) {
         d.park();
         settle(d);

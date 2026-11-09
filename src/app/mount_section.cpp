@@ -8,6 +8,7 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QTime>
@@ -75,14 +76,33 @@ MountSection::MountSection(devices::Mount& mount, FocusController& fc, QWidget* 
     auto* fixes = new QHBoxLayout;
     fixes->setSpacing(6);
     unpark_ = theme::button("Unpark");
+    park_ = theme::button("Park");
+    park_->setToolTip("Slew to the park position and stop tracking (asks first)");
     track_ = theme::button("Start tracking");
     fixes->addWidget(unpark_);
     fixes->addWidget(track_);
     fixes->addStretch(1);
+    fixes->addWidget(park_);
     on->addLayout(fixes);
+    trackRow_ = new QWidget;
+    auto* tr = new QHBoxLayout(trackRow_);
+    tr->setContentsMargins(0, 0, 0, 0);
+    tr->addWidget(theme::label("Tracking rate", "muted"));
+    tr->addStretch(1);
+    trackRate_ = new QComboBox;
+    trackRate_->setAccessibleName("Tracking rate");
+    trackRate_->setToolTip("Lunar for the Moon, solar for the Sun; sidereal for planets and stars");
+    tr->addWidget(trackRate_);
+    on->addWidget(trackRow_);
     v->addWidget(online_);
     connect(unpark_, &QPushButton::clicked, this, [this] { mount_.unpark(); });
+    connect(park_, &QPushButton::clicked, this, [this] {
+        if (QMessageBox::question(this, "Mount", "Park the mount?\n\nIt slews to its park position and stops tracking.") == QMessageBox::Yes)
+            mount_.park();
+    });
     connect(track_, &QPushButton::clicked, this, [this] { mount_.setTracking(true); });
+    connect(trackRate_, &QComboBox::activated, this,
+            [this](int i) { mount_.setTrackRate(static_cast<mounts::TrackRate>(trackRate_->itemData(i).toInt())); });
 
     // The pad, laid out as seen on the sky: north up, east left.
     pad_ = new QWidget;
@@ -271,8 +291,26 @@ void MountSection::refresh() {
     if (!mount_.canPulse()) state << "no guide pulses";
     if (const auto fault = mount_.fault(); !fault.isEmpty()) state << "⚠ " + fault;
     state_->setText(state.join(" · "));
-    unpark_->setVisible(parked == true);
-    track_->setVisible(parked != true && tracking == false);
+    const auto caps = mount_.capabilities();
+    unpark_->setVisible(caps.unpark && parked == true);
+    park_->setVisible(caps.park && parked != true);
+    park_->setEnabled(!mount_.slewing());
+    track_->setVisible(caps.tracking && parked != true && tracking == false);
+    if (const auto rates = mount_.trackRates(); rates != trackRates_) {
+        const QSignalBlocker block(trackRate_);
+        trackRates_ = rates;
+        trackRate_->clear();
+        for (const auto r : trackRates_) {
+            QString name = mounts::trackRateName(r);
+            name[0] = name[0].toUpper();
+            trackRate_->addItem(name, static_cast<int>(r));
+        }
+    }
+    trackRow_->setVisible(trackRates_.size() > 1);
+    if (const int at = trackRate_->findData(static_cast<int>(mount_.trackRate())); at >= 0 && at != trackRate_->currentIndex()) {
+        const QSignalBlocker block(trackRate_);
+        trackRate_->setCurrentIndex(at);
+    }
     pad_->setEnabled(mount_.canPulse() && parked != true);
 }
 

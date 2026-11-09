@@ -14,6 +14,10 @@ constexpr int kTelescopeInterface = 1;   // INDI::BaseDevice::TELESCOPE_INTERFAC
 const QString kCoords = "EQUATORIAL_EOD_COORD", kGuideNS = "TELESCOPE_TIMED_GUIDE_NS", kGuideWE = "TELESCOPE_TIMED_GUIDE_WE";
 const QString kMotionNS = "TELESCOPE_MOTION_NS", kMotionWE = "TELESCOPE_MOTION_WE", kSlewRate = "TELESCOPE_SLEW_RATE";
 const QString kPark = "TELESCOPE_PARK", kTrack = "TELESCOPE_TRACK_STATE", kAbort = "TELESCOPE_ABORT_MOTION";
+const QString kTrackMode = "TELESCOPE_TRACK_MODE";
+
+/// INDI's TELESCOPE_TRACK_MODE elements, in TrackRate's order (TRACK_KING: some drivers)
+const char* const kTrackModes[] = {"TRACK_SIDEREAL", "TRACK_LUNAR", "TRACK_SOLAR", "TRACK_KING"};
 
 bool isNS(Mount::Direction d) { return d == Mount::Direction::North || d == Mount::Direction::South; }
 mounts::Dir toDir(Mount::Direction d) { return static_cast<mounts::Dir>(static_cast<int>(d)); }   // same order
@@ -153,7 +157,50 @@ bool Mount::atHome() const { return worker_ && worker_->connected() && worker_->
 
 QString Mount::fault() const { return worker_ && worker_->connected() ? QString::fromStdString(worker_->status().fault) : QString(); }
 
-bool Mount::canTrackOwnRate() const { return worker_ && worker_->connected() && worker_->info().caps.rateOffsets; }
+mounts::Caps Mount::capabilities() const {
+    mounts::Caps c;
+    if (worker_) {
+        if (!worker_->connected()) return c;
+        c = worker_->info().caps;
+        c.pulse = true;   // (timed moves where the mount has no pulses)
+        return c;
+    }
+    if (!ready()) return c;
+    auto has = [this](const QString& prop, const char* element) {
+        const auto* p = client_.property(device_, prop);
+        return p && p->elements.count(element);
+    };
+    c.pulse = client_.property(device_, kGuideNS) && client_.property(device_, kGuideWE);
+    c.park = has(kPark, "PARK");
+    c.unpark = has(kPark, "UNPARK");
+    c.tracking = has(kTrack, "TRACK_ON");
+    return c;
+}
+
+std::vector<mounts::TrackRate> Mount::trackRates() const {
+    if (worker_) return worker_->connected() ? worker_->info().trackRates : std::vector<mounts::TrackRate>{};
+    std::vector<mounts::TrackRate> out;
+    if (const auto* p = ready() ? client_.property(device_, kTrackMode) : nullptr)
+        for (int i = 0; i < 4; ++i)
+            if (p->elements.count(kTrackModes[i])) out.push_back(static_cast<mounts::TrackRate>(i));
+    return out;
+}
+
+mounts::TrackRate Mount::trackRate() const {
+    if (worker_) return worker_->connected() ? worker_->status().trackRate.value_or(trackRate_) : trackRate_;
+    if (const auto* p = client_.property(device_, kTrackMode))
+        for (int i = 0; i < 4; ++i)
+            if (auto it = p->elements.find(kTrackModes[i]); it != p->elements.end() && it->second.on()) return static_cast<mounts::TrackRate>(i);
+    return trackRate_;
+}
+
+void Mount::setTrackRate(mounts::TrackRate r) {
+    qInfo() << "mount: track rate" << mounts::trackRateName(r);
+    trackRate_ = r;
+    if (worker_) worker_->setTrackRate(r);
+    else if (ready()) client_.sendSwitch(device_, kTrackMode, kTrackModes[static_cast<int>(r)]);
+    emit stateChanged();
+}
 
 void Mount::setRateOffsets(double raArcsecPerSec, double decArcsecPerSec) {
     if (!canTrackOwnRate()) {
@@ -163,8 +210,6 @@ void Mount::setRateOffsets(double raArcsecPerSec, double decArcsecPerSec) {
     qInfo().noquote() << "mount: rate offsets RA" << raArcsecPerSec << "Dec" << decArcsecPerSec << "arcsec/s";
     worker_->setRateOffsets(raArcsecPerSec, decArcsecPerSec);
 }
-
-bool Mount::hasSettings() const { return worker_ && worker_->connected() && worker_->info().caps.settings; }
 
 void Mount::readSettings() {
     if (hasSettings()) worker_->readSettings();
@@ -181,9 +226,6 @@ void Mount::changeSetting(const QString& key, const QString& value) {
 }
 
 std::vector<mounts::MountSetting> Mount::settings() const { return worker_ ? worker_->settings() : std::vector<mounts::MountSetting>{}; }
-
-// built-in mounts without pulses of their own get timed moves instead (MountWorker)
-bool Mount::canPulse() const { return worker_ ? worker_->connected() : client_.property(device_, kGuideNS) && client_.property(device_, kGuideWE); }
 
 // ---------------------------------------------------------------- INDI
 
@@ -207,7 +249,7 @@ void Mount::onDefined(const QString& dev, const QString& name) {
         emit readyChanged(true);
     }
     // canPulse() needs both guide properties, which drivers define one after the other: say so after either.
-    if (name == kTrack || name == kPark || name == kSlewRate || name == kGuideNS || name == kGuideWE) emit stateChanged();
+    if (name == kTrack || name == kTrackMode || name == kPark || name == kSlewRate || name == kGuideNS || name == kGuideWE) emit stateChanged();
 }
 
 void Mount::ensureConnected() {
@@ -261,9 +303,11 @@ void Mount::onUpdated(const QString& dev, const QString& name) {
         }
         return;
     }
-    if (name == kTrack || name == kPark || name == kSlewRate || name == kMotionNS || name == kMotionWE) {
+    if (name == kTrack || name == kTrackMode || name == kPark || name == kSlewRate || name == kMotionNS || name == kMotionWE) {
         if (const auto* p = client_.property(dev, name); p && p->state == "Alert")
-            emit failed(name == kPark ? "mount couldn't park / unpark" : name == kTrack ? "mount couldn't change tracking" : "mount refused the move");
+            emit failed(name == kPark ? "mount couldn't park / unpark" : name == kTrack ? "mount couldn't change tracking"
+                        : name == kTrackMode                                    ? "mount refused the tracking rate"
+                                                                                : "mount refused the move");
         emit stateChanged();
     }
 }

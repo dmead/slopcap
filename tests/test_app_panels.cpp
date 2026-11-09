@@ -17,6 +17,7 @@
 
 #include <QButtonGroup>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDir>
 #include <QFileInfo>
 #include <QLabel>
@@ -268,6 +269,111 @@ TEST_CASE("panels: an OnStep's own settings and the mount's log", "[app][panels]
     CHECK(waitFor([&] { return fakeSays([&] { return fake.atHome; }); }, 3000));
     CHECK(waitFor([&] { return d->valueOf("horizon") == "9"; }, 3000));
     mount.close();
+}
+
+TEST_CASE("panels: the same mount panel for every mount, and what only some have where they have it", "[app][panels]") {
+    FocusController fc;
+    fc.setServer("localhost:1");
+    auto& m = Modals::get();
+    m.clear();
+    auto shown = [](QWidget* w, QWidget* in) { return w && w->isVisibleTo(in); };
+    auto trackRates = [](MountSection& ms) {
+        QStringList out;
+        for (auto* c : ms.findChildren<QComboBox*>())
+            if (c->accessibleName() == "Tracking rate")
+                for (int i = 0; i < c->count(); ++i) out << c->itemText(i);
+        return out;
+    };
+    // the core: where it points, the pad, its speeds and pulses, Settings and log...
+    auto core = [&](MountSection& ms) {
+        CHECK(labelWith(&ms, "RA ") != nullptr);
+        for (const char* b : {"N", "E", "W", "S", "Stop", "Settings and log…"}) {
+            CAPTURE(b);
+            CHECK(shown(button(&ms, b), &ms));
+            CHECK(button(&ms, b)->isEnabled());
+        }
+        int combos = 0;
+        for (auto* c : ms.findChildren<QComboBox*>())
+            if (c->accessibleName() == "Mount speed") {
+                ++combos;
+                CHECK(c->count() > 2);
+                CHECK(c->itemText(0) == "Guide pulse");
+            }
+        CHECK(combos == 1);
+    };
+    auto open = [&](devices::Mount& mount, std::function<std::unique_ptr<mounts::IMountDriver>()> make) {
+        mount.setSpec("onstep:/dev/fake");   // (any built-in spec: the driver comes from `make`)
+        mount.openWith(std::move(make));
+        REQUIRE(waitFor([&] { return mount.ready() && mount.hasCoords(); }, 5000));
+    };
+
+    SECTION("an LX200 Classic: the core and nothing else") {
+        auto sim = std::make_shared<mounts::SimMount>();
+        devices::Mount mount(fc.indi());
+        MountSection ms(mount, fc);
+        open(mount, [&] {
+            return std::make_unique<mounts::Lx200Driver>(fakeLink(fakeLx200(sim, mounts::Lx200Dialect::MeadeClassic), std::make_shared<LinkState>()),
+                                                         mounts::Lx200Dialect::MeadeClassic);
+        });
+        CHECK(waitFor([&] { return labelWith(&ms, "RA ") != nullptr && mount.slewRates().size() == 4; }, 3000));
+        core(ms);
+        for (const char* b : {"Park", "Unpark", "Start tracking"}) CHECK_FALSE(shown(button(&ms, b), &ms));
+        CHECK(trackRates(ms).isEmpty());
+        mount.close();
+    }
+
+    SECTION("a Meade Autostar: parks but can't unpark, tracks sidereal or lunar") {
+        auto sim = std::make_shared<mounts::SimMount>();
+        devices::Mount mount(fc.indi());
+        MountSection ms(mount, fc);
+        open(mount, [&] {
+            return std::make_unique<mounts::Lx200Driver>(fakeLink(fakeLx200(sim, mounts::Lx200Dialect::Meade), std::make_shared<LinkState>()),
+                                                         mounts::Lx200Dialect::Meade);
+        });
+        CHECK(waitFor([&] { return shown(button(&ms, "Park"), &ms); }, 3000));
+        core(ms);
+        CHECK_FALSE(shown(button(&ms, "Unpark"), &ms));
+        CHECK(trackRates(ms) == QStringList{"Sidereal", "Lunar"});
+        mount.close();
+    }
+
+    SECTION("an OnStep: all of it") {
+        auto sim = std::make_shared<mounts::SimMount>();
+        sim->slewRate = 30;   // (parking in a moment)
+        FakeOnStep fake(sim);
+        devices::Mount mount(fc.indi());
+        MountSection ms(mount, fc);
+        open(mount, [&] {
+            return std::make_unique<mounts::OnStepDriver>(std::vector<mounts::TransportFactory>{fakeLink(fake.device(), std::make_shared<LinkState>())});
+        });
+        CHECK(waitFor([&] { return shown(button(&ms, "Park"), &ms); }, 3000));
+        core(ms);
+        CHECK(trackRates(ms) == QStringList{"Sidereal", "Lunar", "Solar", "King"});
+        // a tracking rate picked here, and what the mount then says
+        QComboBox* rate = nullptr;
+        for (auto* c : ms.findChildren<QComboBox*>())
+            if (c->accessibleName() == "Tracking rate") rate = c;
+        REQUIRE(rate);
+        emit rate->activated(1);
+        CHECK(waitFor([&] { return sim->state().rate == mounts::TrackRate::Lunar; }, 3000));
+        CHECK(waitFor([&] { return mount.trackRate() == mounts::TrackRate::Lunar && rate->currentText() == "Lunar"; }, 3000));
+        // Park asks first; parked, Unpark takes its place and the pad waits
+        m.answer(QMessageBox::No);
+        button(&ms, "Park")->click();
+        REQUIRE(m.done());
+        CHECK(m.lastSeen().contains("Park the mount?"));
+        waitFor([] { return false; }, 300);
+        CHECK_FALSE(sim->state().parked);
+        m.answer(QMessageBox::Yes);
+        button(&ms, "Park")->click();
+        REQUIRE(m.done());
+        CHECK(waitFor([&] { return shown(button(&ms, "Unpark"), &ms); }, 10000));
+        CHECK_FALSE(shown(button(&ms, "Park"), &ms));
+        CHECK_FALSE(button(&ms, "N")->isEnabled());
+        button(&ms, "Unpark")->click();
+        CHECK(waitFor([&] { return shown(button(&ms, "Park"), &ms) && button(&ms, "N")->isEnabled(); }, 5000));
+        mount.close();
+    }
 }
 
 TEST_CASE("panels: settings dialog round trip", "[app][panels]") {

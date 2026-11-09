@@ -150,8 +150,13 @@ traffic, or a smaller ROI); frames dropped by the disk mean the disk can't keep 
 
 ## 8. The mount (optional)
 
-The **Mount** panel on the right shows where the telescope points. **N**, **E**, **W** and **S** send guide pulses
-of the chosen length to nudge the planet back into the ROI; **Stop** halts every motion. Two ways to reach the mount:
+The **Mount** panel on the right shows where the telescope points and what it's doing, and looks the same whatever
+the mount. **N**, **E**, **W** and **S** nudge it: with **Speed** on *Guide pulse*, each tap sends a guide pulse of
+the chosen length to bring the planet back into the ROI; with one of the mount's own speeds picked, it moves while
+you hold the button. **Stop** halts every motion. **Settings and log…** has every command SlopCap sent the mount and
+every reply and error, and the mount's own settings where SlopCap can change them (OnStep). What only some mounts
+have shows only on those: **Park** (it asks first), **Unpark**, **Start tracking**, and **Tracking rate** with the
+rates that mount has (lunar for the Moon, solar for the Sun). Two ways to reach the mount:
 
 - **Through INDI**, with a mount driver running on the same INDI server as the focuser (for a Meade LX200,
   `indi_lx200classic`). Leave Settings → Mount empty.
@@ -192,9 +197,7 @@ of the chosen length to nudge the planet back into the ROI; **Stop** halts every
   the clock (from this computer, in one go), tracking rate and refraction compensation, horizon, overhead and
   meridian limits, automatic flips and the preferred pier side, guide-pulse and goto speeds, backlash, the buzzer,
   and the park position. Nothing is written until you press Apply, and then only what you changed. Its Log tab
-  has every command SlopCap sent the mount and every reply and error. The panel's **Speed** picks how the pad moves
-  it: Guide pulse (a tap, a pulse of the chosen length) or one of the mount's speeds (it moves while you hold the
-  button).
+  has every command SlopCap sent the mount and every reply and error.
 
 ## Afterwards
 

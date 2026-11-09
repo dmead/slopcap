@@ -1,8 +1,9 @@
 // Capture sidebar, under the focuser: the mount, as in the design canvas's "Mount · LX200 (INDI)" panel.
-// A nudge pad (N / E / Stop / W / S) sends guide pulses of the chosen length, or, with one of the mount's speeds
-// picked, moves the mount while a button is held; RA / Dec and the mount's state above it,
-// with Unpark / Start tracking when the mount needs them. Through INDI the mount shares the focuser's server; with
-// one of SlopCap's own drivers (Settings > Mount), Connect opens that.
+// The same for every mount: RA / Dec and the mount's state, a nudge pad (N / E / Stop / W / S) that sends guide pulses
+// of the chosen length or, with one of the mount's speeds picked, moves the mount while a button is held, and Settings
+// and log... What only some mounts have shows where the mount has it: Park, Unpark, Start tracking, the tracking rate.
+// Through INDI the mount shares the focuser's server; with one of SlopCap's own drivers (Settings > Mount), Connect
+// opens that.
 #pragma once
 
 #include "devices/mount.hpp"
@@ -48,8 +49,13 @@ private:
     QWidget* online_ = nullptr;
     QLabel* coords_ = nullptr;
     QLabel* state_ = nullptr;
+    // what only some mounts have, shown where the mount has it (Mount::capabilities, trackRates)
     QPushButton* unpark_ = nullptr;
+    QPushButton* park_ = nullptr;
     QPushButton* track_ = nullptr;
+    QWidget* trackRow_ = nullptr;
+    QComboBox* trackRate_ = nullptr;
+    std::vector<mounts::TrackRate> trackRates_;          ///< as last put in trackRate_
     QWidget* pad_ = nullptr;
     QComboBox* pulse_ = nullptr;
     QWidget* pulseRow_ = nullptr;

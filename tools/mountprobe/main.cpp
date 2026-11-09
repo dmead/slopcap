@@ -131,9 +131,12 @@ int main(int argc, char** argv) {
         std::string rates;
         for (const auto& r : info.rates) rates += (rates.empty() ? "" : ", ") + r;
         std::printf("rates      %s\n", rates.c_str());
-        std::printf("can        %s%s%s%s%s%s%s%s\n", info.caps.pulse ? "pulse " : "", info.caps.park ? "park " : "",
-                    info.caps.unpark ? "unpark " : "", info.caps.tracking ? "tracking " : "", info.caps.trackRates ? "rates " : "",
-                    info.caps.sync ? "sync " : "", info.caps.rateOffsets ? "rate-offsets " : "", info.caps.settings ? "settings" : "");
+        std::string tracks;
+        for (const auto r : info.trackRates) tracks += (tracks.empty() ? "" : ", ") + std::string(trackRateName(r));
+        std::printf("tracking   %s\n", tracks.empty() ? "(its own rate)" : tracks.c_str());
+        std::printf("beyond the core: %s%s%s%s%s%s\n", info.caps.pulse ? "pulse " : "", info.caps.park ? "park " : "",
+                    info.caps.unpark ? "unpark " : "", info.caps.tracking ? "tracking-on-off " : "",
+                    info.caps.rateOffsets ? "rate-offsets " : "", info.caps.settings ? "settings" : "");
         for (const auto& n : info.notes) std::printf("NOTE       %s\n", n.c_str());
         const auto s0 = d->poll();
         show("now", s0);

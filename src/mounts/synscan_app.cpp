@@ -82,8 +82,9 @@ MountInfo SynScanAppDriver::connect() {
     caps_.pulse = flag("CanPulseGuideGet");
     caps_.park = flag("CanParkGet");
     caps_.unpark = flag("CanUnparkGet");
-    caps_.tracking = caps_.trackRates = flag("CanSetTrackingGet");
-    caps_.sync = flag("CanSyncGet");
+    caps_.tracking = flag("CanSetTrackingGet");
+    if (caps_.tracking) info.trackRates = {TrackRate::Sidereal, TrackRate::Lunar, TrackRate::Solar, TrackRate::King};
+    canSync_ = flag("CanSyncGet");
     info.caps = caps_;
     // ASCOM's EquatorialCoordinateType: 1 of date (topocentric), 2 J2000
     if (const auto e = tryCall("EquatorialSystemGet"); e && !e->empty()) info.j2000 = e->front() == "2";
@@ -132,6 +133,9 @@ void SynScanAppDriver::setTrackRate(TrackRate r) { call("TrackingRateSet", std::
 
 void SynScanAppDriver::park() { call("Park"); }
 void SynScanAppDriver::unpark() { call("Unpark"); }
-void SynScanAppDriver::sync(double ra, double dec) { call("SyncToCoordinates", num(ra) + "," + num(dec)); }
+void SynScanAppDriver::sync(double ra, double dec) {
+    if (!canSync_) throw MountError("the SynScan app can't sync this mount");
+    call("SyncToCoordinates", num(ra) + "," + num(dec));
+}
 
 }  // namespace slopcap::mounts

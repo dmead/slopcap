@@ -260,8 +260,8 @@ MountInfo OnStepDriver::connect() {
     info.backend = "onstep";
     info.model = (major >= 10 ? "OnStepX " : "OnStep ") + (firmware_.empty() ? product : firmware_);
     for (const char* r : kRateNames) info.rates.emplace_back(r);
-    info.caps.pulse = info.caps.park = info.caps.unpark = info.caps.tracking = info.caps.trackRates = info.caps.sync = true;
-    info.caps.settings = true;
+    info.caps.pulse = info.caps.park = info.caps.unpark = info.caps.tracking = info.caps.settings = true;
+    info.trackRates = {TrackRate::Sidereal, TrackRate::Lunar, TrackRate::Solar, TrackRate::King};
     if (const auto tr = ch_->tryUntil(":GXTR#", '#', 500)) info.caps.rateOffsets = number(trim(*tr)).has_value();
 
     std::string details = "on " + ch_->transport().name();
@@ -335,6 +335,7 @@ MountStatus OnStepDriver::poll() {
     st.ra = ra.value_or(0), st.dec = dec.value_or(0);
     if (const auto s = parseOnStepStatus(ch().until(":GU#", '#', kReplyMs, true))) {
         st.tracking = s->tracking;
+        st.trackRate = s->rate.value_or(TrackRate::Sidereal);   // (:GU# flags lunar, solar and King; none: sidereal)
         st.slewing = s->slewing || s->homing || s->park == 'I';
         st.parked = s->park == 'P';
         st.pier = s->pier;

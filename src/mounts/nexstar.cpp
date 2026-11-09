@@ -74,7 +74,6 @@ MountInfo NexStarDriver::connect() {
     info.j2000 = kind_ == HandController::SynScan;
     info.rates = {"1", "2", "3", "4", "5", "6", "7", "8", "9"};
     info.caps.tracking = true;
-    info.caps.sync = true;
     if (!aligned_) info.model += " (not aligned: no coordinates until it is)";
     return info;
 }

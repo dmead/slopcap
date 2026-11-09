@@ -155,7 +155,8 @@ MountInfo SimDriver::connect() {
     info.backend = "sim";
     info.model = "Simulator";
     info.rates = {"Guide", "Centre", "Find", "Max"};
-    info.caps = {true, true, true, true, true, true};
+    info.caps.pulse = info.caps.park = info.caps.unpark = info.caps.tracking = true;
+    info.trackRates = {TrackRate::Sidereal, TrackRate::Lunar, TrackRate::Solar, TrackRate::King};
     return info;
 }
 
@@ -166,6 +167,7 @@ MountStatus SimDriver::poll() {
     st.ra = s.ra, st.dec = s.dec;
     st.slewing = s.slewing;
     st.tracking = s.tracking;
+    st.trackRate = s.rate;
     st.parked = s.parked;
     st.pier = s.pier;
     return st;

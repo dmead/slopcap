@@ -35,6 +35,7 @@ private:
     TransportFactory open_;
     std::unique_ptr<CommandChannel> ch_;
     Caps caps_;
+    bool canSync_ = false;   ///< (sync is in every driver's core; the app says whether it does it for this mount)
 };
 
 }  // namespace slopcap::mounts
