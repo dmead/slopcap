@@ -82,8 +82,8 @@ job() {   # job NAME COMMAND...: run in the worktree, log to RUN/NAME.log, one l
 }
 coverage_ok=0
 
-linux_release() {   # build, pack, and start the zip in a bare Ubuntu (no Qt, only what a desktop has)
-    docker/build.sh linux-release && tools/package.sh linux || return 1
+linux_release() {   # build, pack, and start the zip in a bare Ubuntu (no Qt, only what a desktop has); the Sony probe too
+    docker/build.sh linux-release && tools/package.sh linux && tools/package.sh sonyprobe-linux || return 1
     if ! docker image inspect ubuntu:26.04 >/dev/null 2>&1; then
         echo "no ubuntu:26.04 image: the start in a bare Ubuntu was skipped (docker pull ubuntu:26.04 to include it)"
         return 0

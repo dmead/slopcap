@@ -53,9 +53,9 @@ jobs:
         run: sudo sysctl vm.mmap_rnd_bits=28
       - name: Build and test
         run: SLOPCAP_REGISTRY= docker/build.sh ${{ matrix.preset }}
-      - name: Package (slopcap-linux-x64.zip)
+      - name: Package (slopcap-linux-x64.zip, and the Sony probe for Ubuntu 22.04 and newer)
         if: matrix.preset == 'linux-release'
-        run: tools/package.sh linux
+        run: tools/package.sh linux && tools/package.sh sonyprobe-linux
       - name: Start the package in a bare Ubuntu (no Qt, only what a desktop has)
         if: matrix.preset == 'linux-release'
         run: |
@@ -71,6 +71,12 @@ jobs:
         with:
           name: slopcap-linux-x64
           path: build/package/slopcap-linux-x64.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: matrix.preset == 'linux-release'
+        with:
+          name: slopcap-sonyprobe-linux-x64
+          path: build/package/tools/slopcap-sonyprobe-linux-x64.zip
           if-no-files-found: error
 
   coverage:

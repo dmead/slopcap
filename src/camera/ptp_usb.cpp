@@ -121,11 +121,4 @@ void UsbTransport::readPayload(std::size_t n, std::vector<uint8_t>& dst) {
     }
 }
 
-#ifdef _WIN32
-// Windows: the camera belongs to Windows' own driver (ptp_wpd.hpp); libusb would need a driver swap.
-std::vector<UsbCameraEntry> listUsbCameras(uint16_t) { return {}; }
-std::unique_ptr<UsbPipe> openUsbCamera(const std::string&) { throw CameraError("USB without Windows' driver: not on Windows"); }
-std::string libusbProblem() { return "not used on Windows (cameras go through Windows' own driver)"; }
-#endif
-
 }  // namespace slopcap::ptp

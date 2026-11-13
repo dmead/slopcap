@@ -189,15 +189,23 @@ private:
 
 }  // namespace
 
-std::vector<DeviceEntry> listDevices() {
+std::vector<DeviceEntry> listDevices(std::string* problem) {
     ensureCom();
+    auto fail = [&](const char* what, HRESULT hr) {
+        if (problem) *problem = std::format("{}: {}", what, hresultText(hr));
+        return std::vector<DeviceEntry>{};
+    };
     Com<IPortableDeviceManager> m;
-    if (FAILED(CoCreateInstance(kClsidManager, nullptr, CLSCTX_INPROC_SERVER, __uuidof(IPortableDeviceManager), m.putVoid()))) return {};
+    HRESULT hr = CoCreateInstance(kClsidManager, nullptr, CLSCTX_INPROC_SERVER, __uuidof(IPortableDeviceManager), m.putVoid());
+    if (hr == REGDB_E_CLASSNOTREG)
+        return fail("Windows Portable Devices isn't installed (a Windows N edition needs the Media Feature Pack)", hr);
+    if (FAILED(hr)) return fail("Windows Portable Devices doesn't start", hr);
     m->RefreshDeviceList();
     DWORD n = 0;
-    if (FAILED(m->GetDevices(nullptr, &n)) || n == 0) return {};
+    if (hr = m->GetDevices(nullptr, &n); FAILED(hr)) return fail("Windows Portable Devices can't list devices", hr);
+    if (n == 0) return {};
     std::vector<LPWSTR> ids(n, nullptr);
-    if (FAILED(m->GetDevices(ids.data(), &n))) return {};
+    if (hr = m->GetDevices(ids.data(), &n); FAILED(hr)) return fail("Windows Portable Devices can't list devices", hr);
     // the two-call pattern of GetDeviceFriendlyName / Description / Manufacturer
     auto text = [&](LPCWSTR id, HRESULT (STDMETHODCALLTYPE IPortableDeviceManager::*get)(LPCWSTR, WCHAR*, DWORD*)) {
         DWORD len = 0;

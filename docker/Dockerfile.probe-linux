@@ -1,0 +1,18 @@
+# The Sony probe for Linux systems older than the build image (Ubuntu 22.04 and newer, glibc 2.35: WSL's Ubuntu among
+# them): built against that glibc, with GCC 13 from Ubuntu's toolchain PPA (std::format) and its C++ runtime linked in.
+#   tools/package.sh sonyprobe-linux     builds this image once, then the probe and its zip
+# (libusb is here only so the zip's probe can be started in this image as a check: the probe loads it at run time.)
+FROM ubuntu:22.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends software-properties-common gpg-agent \
+ && add-apt-repository -y ppa:ubuntu-toolchain-r/test \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends g++-13 python3 libusb-1.0-0 \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV HOME=/tmp
+ENV LANG=C.UTF-8
+LABEL org.opencontainers.image.title="slopcap-probe-linux" \
+      org.opencontainers.image.description="Builds slopcap-sonyprobe for Ubuntu 22.04 and newer (glibc 2.35, GCC 13)"

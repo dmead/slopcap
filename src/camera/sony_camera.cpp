@@ -1,10 +1,9 @@
 #include "camera/sony_camera.hpp"
 
 #include "camera/jpeg_luma.hpp"
+#include "camera/ptp_usb.hpp"
 #ifdef _WIN32
 #include "camera/ptp_wpd.hpp"
-#else
-#include "camera/ptp_usb.hpp"
 #endif
 
 #include <algorithm>
@@ -52,21 +51,19 @@ class SystemSource final : public SonyDeviceSource {
 public:
     std::vector<Entry> list() override {
         std::vector<Entry> out;
-#ifdef _WIN32
+#ifdef _WIN32   // on Windows' own portable-device driver; or on WinUSB (below)
         for (const auto& d : ptp::wpd::listDevices())
             if (ptp::wpd::usbIdsOf(d.id).starts_with(std::format("vid_{:04x}", sony::kUsbVendor)))
                 out.push_back({d.id, !d.name.empty() ? d.name : d.description, {}});
-#else
-        for (const auto& u : ptp::listUsbCameras(sony::kUsbVendor)) out.push_back({u.id, u.model.empty() ? "Sony camera" : u.model, u.problem});
 #endif
+        for (const auto& u : ptp::listUsbCameras(sony::kUsbVendor)) out.push_back({u.id, u.model.empty() ? "Sony camera" : u.model, u.problem});
         return out;
     }
     std::unique_ptr<ptp::Transport> open(const std::string& id) override {
 #ifdef _WIN32
-        return std::make_unique<ptp::wpd::WpdTransport>(ptp::wpd::openDevice(id));
-#else
-        return std::make_unique<ptp::UsbTransport>(ptp::openUsbCamera(id));
+        if (!id.starts_with("winusb:")) return std::make_unique<ptp::wpd::WpdTransport>(ptp::wpd::openDevice(id));
 #endif
+        return std::make_unique<ptp::UsbTransport>(ptp::openUsbCamera(id));
     }
 };
 

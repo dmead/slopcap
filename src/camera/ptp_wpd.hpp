@@ -67,8 +67,9 @@ struct DeviceEntry {
     std::string id;                  ///< the WPD (PnP) device id
     std::string name, manufacturer, description;
 };
-/// Every WPD device (cameras, phones, players). Empty elsewhere than Windows.
-std::vector<DeviceEntry> listDevices();
+/// Every WPD device (cameras, phones, players). Empty elsewhere than Windows. `problem`: why there are none when WPD
+/// itself doesn't work (a Windows N edition without the Media Feature Pack has no WPD), else left empty.
+std::vector<DeviceEntry> listDevices(std::string* problem = nullptr);
 /// Opens one for MTP-extension commands. Throws CameraError (also on non-Windows systems).
 std::unique_ptr<Device> openDevice(const std::string& id);
 /// "vid_054c&pid_094e" from a device id: its USB vendor and product, without the serial number the id also holds.

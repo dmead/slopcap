@@ -184,7 +184,7 @@ Built next to `slopcap` (`build/<preset>/`):
 | `slopcap-bench --camera SPEC …` / `--sim FILE.ser` / `--list` | records through the full capture pipeline and reports frames per second, drops, the frame ring's peak and MB/s |
 | `slopcap-serinfo [--csv] FILE.ser…` | a SER file's header, frames on disk against the header, timestamps, the real frame rate, the frames lost on the way and the longest gap; reads any program's SER files the same way (`--csv`: one line per file) |
 | `slopcap-camprobe [--json]` | what every connected ZWO and QHY camera reports (its controls, readout modes, gain landmarks); the fixtures from real cameras are in `tools/camprobe/fixtures` |
-| `slopcap-sonyprobe [--no-shot] [--shots N] [--no-set] [--live N] [--device N\|TEXT] [--out DIR] [--keep-serial] [--list]` | what a Sony camera in PC Remote mode does over USB: DeviceInfo, Sony's handshake and every property (decoded and raw), live view (`GetObject 0xFFFFC002`), setting the shutter speed and ISO one notch and back (directly or in steps), and pictures, timed from the shutter to the computer; a report in `.txt` and `.json` plus the pictures, in the current folder. The serial number is left out unless `--keep-serial`. Reports from real cameras go in `tools/sonyprobe/fixtures` |
+| `slopcap-sonyprobe [--no-shot] [--shots N] [--no-set] [--live N] [--device N\|TEXT] [--out DIR] [--keep-serial] [--list] [--all-usb]` | what a Sony camera in PC Remote mode does over USB: DeviceInfo, Sony's handshake and every property (decoded and raw), live view (`GetObject 0xFFFFC002`), setting the shutter speed and ISO one notch and back (directly or in steps), and pictures, timed from the shutter to the computer; a report in `.txt` and `.json` plus the pictures, in the current folder, also when it finds no camera. On Windows the report has what Device Manager made of each Sony USB device (driver, class, USB class, problem code), whether Portable Devices works and the edition, with advice (`tools/sonyprobe/diagnose.*`; `--all-usb`: every USB device). The serial number is left out unless `--keep-serial`. Reports from real cameras go in `tools/sonyprobe/fixtures` |
 | `slopcap-diag [--png OUT/] FILE.ser…` | optical diagnostics from planetary recordings: stacks the best frames and reports dispersion, limb sharpness per colour and side, halo and jitter |
 | `slopcap-focusbench FILE.ser [frames] [metric]` | times the focus scorer on a recording |
 | `slopcap-mountprobe SPEC [--settings] [--set KEY=VALUE] [--move] [--log]` | one of SlopCap's own mount drivers without the app: what the mount is, what the driver found on connecting and its state; `--settings` the mount's own settings (OnStep) with their keys, `--set` writes one as the mount panel's Settings and log… does and reads them back, `--move` pulses, moves and a short goto each way (OnStep: then home), `--send CMD` a raw command, `--log` every command and reply |
@@ -223,15 +223,23 @@ deployment target.
 **Sony cameras** need no vendor SDK. `src/camera/ptp.*` is PTP itself over a `ptp::Transport`; Windows' transport
 (`ptp_wpd.*`) sends every operation, Sony's included, through Windows Portable Devices' MTP-extension commands, so the
 camera stays on Windows' own driver (`ptp_wpd_win.cpp` is the COM side; mingw-w64 lacks those keys, so the file defines
-the GUIDs it uses). Linux and macOS use PTP over USB bulk pipes (`ptp_usb.*`) on libusb, loaded at run time
-(`ptp_libusb.cpp` declares the few libusb functions and structures it uses, so the build needs no libusb headers).
+the GUIDs it uses); a camera on WinUSB (Zadig's, or one Windows has no driver for) goes over PTP's USB bulk pipes
+through WinUSB's API instead (`ptp_winusb_win.cpp`). Linux and macOS use PTP over USB bulk pipes (`ptp_usb.*`) on
+libusb, loaded at run time (`ptp_libusb.cpp` declares the few libusb functions and structures it uses, so the build
+needs no libusb headers); a Sony device's vendor-specific interface with a pair of bulk pipes counts as PTP too, as
+gphoto2 finds cameras by their IDs rather than their class.
 `sony_ptp.*` is Sony's extension (the SDIO handshake, all properties in one dataset, values set directly or a notch at a
 time, the shutter buttons, a picture fetched from handle 0xFFFFC001 once ObjectInMemory says so), and
 `sony_camera.*` the `ICamera` that turns pictures into frames, through the baseline JPEG decoder in `jpeg_luma.*`
 (luminance only). The codes follow public descriptions of the protocol (libgphoto2's among them, LGPL: none of its code
 is used). Nothing of it has run against a real Sony yet: `slopcap-sonyprobe` is the first step, and
 `tools/package.sh sonyprobe` packs it on its own (`build/package/tools/slopcap-sonyprobe-windows-x64.zip`, which
-`tools/ci-local.sh`'s windows-exe job makes and lists as `tool:`, never as a release zip). The tests run all of it
+`tools/ci-local.sh`'s windows-exe job makes and lists as `tool:`, never as a release zip), and `tools/package.sh
+sonyprobe-linux` builds it for Ubuntu 22.04 and newer (WSL's included) in `docker/Dockerfile.probe-linux` (glibc 2.35,
+GCC 13 from Ubuntu's toolchain PPA, the C++ runtime linked in) and starts it there once
+(`slopcap-sonyprobe-linux-x64.zip`, made by the linux-release job). Its releases are tagged `sonyprobe-v*` and published
+by hand with `gh release create` as pre-releases (not Latest); the programs' version strings come from the `v*` tags
+alone. The tests run all of it
 against `tests/fakes/fake_sony.*`, a camera behind each seam: the transport, WPD's commands, USB's containers and
 packets.
 
@@ -250,7 +258,7 @@ viewer in full view.
 | `src/camera/touptek_camera.hpp`, `touptek_family.inc` | ToupTek and MallinCam: one backend, a template over the brand, since MallinCam's SDK is ToupTek's under other names (`touptek_camera.cpp`, `mallincam_camera.cpp` bind each brand's symbols) |
 | `src/camera/sim_camera.*` | `SimCamera`: replays a SER recording as a camera (real-time pacing, ROI, drop counting) |
 | `src/camera/open_camera.*` | opens a camera from a spec: `asi[:N]`, `qhy[:N]`, `playerone[:N]`, `touptek[:N]`, `mallincam[:N]`, `sony[:N\|:NAME]`, `sim:FILE.ser`, `sim-loop:FILE.ser` |
-| `src/camera/ptp*`, `sony_ptp.*`, `sony_camera.*`, `jpeg_luma.*` | Sony cameras in PC Remote mode: PTP over WPD (Windows) or libusb, Sony's extension, test shots as frames, the JPEG's luminance (see Platform notes) |
+| `src/camera/ptp*`, `sony_ptp.*`, `sony_camera.*`, `jpeg_luma.*` | Sony cameras in PC Remote mode: PTP over WPD or WinUSB (Windows) or libusb, Sony's extension, test shots as frames, the JPEG's luminance (see Platform notes) |
 | `src/pipeline/frame_ring.*` | `FrameRing`: pre-allocated, page-aligned frame slots passed from capture to writer without locks |
 | `src/pipeline/capture_session.*` | `CaptureSession`: the capture and writer threads; counts camera drops apart from ring drops; times and CPU over the capture, the writer's drain apart; the ring's size from free RAM (`recordingRingBytes`) |
 | `src/preview/` | the live view: `LatestFrame` tap, the GPU debayer and stretch (`GlRenderer`), the CPU reference, histograms |

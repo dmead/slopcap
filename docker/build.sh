@@ -70,7 +70,8 @@ fi
 run=(docker run --rm --user "$(id -u):$(id -g)" -v "$REPO:$REPO" -w "$REPO")
 [ -t 0 ] && run+=(-it)
 # the version the programs report, asked of git here: the Windows image has none, and a worktree's .git names a host path
-version=$(cd "$REPO" && git describe --always --dirty 2>/dev/null || true)
+# (the app's own tags only, v0.1.2 and so on: not the Sony probe's, sonyprobe-v0.1.0)
+version=$(cd "$REPO" && git describe --always --dirty --match 'v[0-9]*' 2>/dev/null || true)
 [ -n "$version" ] && run+=(-e "SLOPCAP_GIT=$version")
 if [ -n "${SLOPCAP_WIN_SDK_DLL_DIR:-}" ]; then
     run+=(-v "$(readlink -f "$SLOPCAP_WIN_SDK_DLL_DIR"):/winsdk:ro" -e SLOPCAP_WIN_SDK_DLL_DIR=/winsdk)

@@ -1,7 +1,8 @@
 // PTP over USB, the Still Image class's bulk-only transport (USB Still Image Capture Device Definition): every phase of
 // a transaction is a container (length, type, code, transaction id, payload) on the bulk pipes. The pipes are a seam:
-// libusb on Linux and macOS (ptp_libusb.cpp, loaded at run time, so nothing links against it), a fake in the tests.
-// (On Windows the system's own driver owns the camera: ptp_wpd.hpp.)
+// libusb on Linux and macOS (ptp_libusb.cpp, loaded at run time, so nothing links against it), WinUSB on Windows for a
+// camera given that driver (ptp_winusb_win.cpp: as Zadig installs it), a fake in the tests. (A camera on Windows' own
+// portable-device driver goes through ptp_wpd.hpp instead.)
 #pragma once
 
 #include "camera/ptp.hpp"
@@ -59,18 +60,20 @@ private:
 // ---------------------------------------------------------------- libusb (Linux, macOS)
 
 struct UsbCameraEntry {
-    std::string id;              ///< "usb:BUS:ADDRESS"
+    std::string id;              ///< "usb:BUS:ADDRESS" (libusb), "winusb:PATH" (Windows)
     uint16_t vendor = 0, product = 0;
     std::string manufacturer, model;   ///< from the device's strings, when it could be opened to read them
     std::string problem;         ///< why it couldn't be opened (permissions), empty if it could
+    int interfaceClass = 6;      ///< 6: Still Image; 0xFF: vendor-specific (with bulk pipes)
 };
 
-/// Every connected USB device with a Still Image (PTP) interface; vendor != 0: only that vendor's. Empty when libusb
-/// isn't installed (libusbProblem() says so) and on Windows.
+/// Every connected USB device with a Still Image (PTP) interface; vendor != 0: only that vendor's, also those whose
+/// interface is vendor-specific but has a pair of bulk pipes. Linux and macOS: through libusb (empty when it isn't
+/// installed: libusbProblem() says so). Windows: the devices on the WinUSB driver.
 std::vector<UsbCameraEntry> listUsbCameras(uint16_t vendor = 0);
 /// The camera's bulk pipes, its PTP interface claimed. Throws CameraError (in use, no permission, gone).
 std::unique_ptr<UsbPipe> openUsbCamera(const std::string& id);
-/// Why libusb couldn't be loaded; empty when it could.
+/// Why libusb couldn't be loaded; empty when it could (and on Windows).
 std::string libusbProblem();
 
 }  // namespace slopcap::ptp

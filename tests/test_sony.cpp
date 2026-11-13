@@ -9,6 +9,7 @@
 #include "camera/sony_ptp.hpp"
 #include "fakes/fake_sony.hpp"
 #include "fakes/jpeg_writer.hpp"
+#include "diagnose.hpp"
 #include "probe.hpp"
 
 #include <catch2/catch_approx.hpp>
@@ -834,4 +835,36 @@ TEST_CASE("sony probe: a report from the fake camera", "[sony][probe]") {
     CHECK(sonyprobe::Json("a\"\\\n\t\r\x01").dump() == "\"a\\\"\\\\\\n\\t\\r\\u0001\"");
     CHECK(sonyprobe::Json::array().dump() == "[]");
     CHECK(sonyprobe::Json::object().dump() == "{}");
+}
+
+TEST_CASE("sony probe: what to do when Windows hides the camera", "[sony][probe]") {
+    using sonyprobe::UsbRow;
+    using sonyprobe::advice;
+    auto row = [](std::string service, std::string cls, std::string usbClass, unsigned problem) {
+        return UsbRow{"VID_054C&PID_094E", "ILCE-6000", std::move(cls), std::move(service), std::move(usbClass), problem, true};
+    };
+    CHECK_THAT(advice(row("WUDFWpdMtp", "WPD", "Class_06&SubClass_01&Prot_01", 0)), ContainsSubstring("should see it"));
+    CHECK_THAT(advice(row("WinUSB", "USBDevice", "Class_ff", 0)), ContainsSubstring("through WinUSB"));
+    CHECK_THAT(advice(row("libusbK", "libusbK USB Devices", "Class_ff", 0)), ContainsSubstring("Delete the driver software"));
+    CHECK_THAT(advice(row("libusb0", "libusb-win32 devices", "Class_ff", 0)), ContainsSubstring("choose WinUSB"));
+    CHECK_THAT(advice(row("VBoxUSB", "USB", "Class_06", 0)), ContainsSubstring("usbipd detach"));
+    CHECK_THAT(advice(row("", "", "Class_ff", 28)), ContainsSubstring("vendor-specific"));
+    CHECK_THAT(advice(row("", "", "Class_06", 28)), ContainsSubstring("MTP USB Device"));
+    CHECK_THAT(advice(row("", "", "Class_06", 0)), ContainsSubstring("no driver"));
+    CHECK_THAT(advice(row("WUDFWpdMtp", "WPD", "Class_06", 10)), ContainsSubstring("problem 10"));
+    CHECK_THAT(advice(row("WUDFWpdMtp", "WPD", "Class_06", 43)), ContainsSubstring("problem 43"));
+    CHECK_THAT(advice(row("WUDFWpdMtp", "WPD", "Class_06", 31)), ContainsSubstring("problem 31"));
+    CHECK_THAT(advice(row("usbscan", "Image", "Class_06", 0)), ContainsSubstring("WIA"));
+    CHECK_THAT(advice(row("usbccgp", "USB", "", 0)), ContainsSubstring("composite"));
+    CHECK_THAT(advice(row("SomethingElse", "Thing", "Class_06", 0)), ContainsSubstring("SomethingElse"));
+
+    const auto none = sonyprobe::diagnose({}, "", "Professional, Windows 10 Pro, build 19045");
+    REQUIRE(none.size() == 1);
+    CHECK_THAT(none[0], ContainsSubstring("no Sony USB device"));
+    const auto n = sonyprobe::diagnose({row("", "", "Class_06", 28)}, "Windows Portable Devices isn't installed", "ProfessionalN, Windows 10 Pro N, build 19045");
+    REQUIRE(n.size() == 3);
+    CHECK_THAT(n[0], ContainsSubstring("isn't installed"));
+    CHECK_THAT(n[1], ContainsSubstring("Media Feature Pack"));
+    CHECK_THAT(n[2], ContainsSubstring("VID_054C&PID_094E ILCE-6000"));
+    CHECK(sonyprobe::diagnose({row("WinUSB", "", "", 0)}, "", "Education, Windows 10 Education, build 19045").size() == 1);   // not an N
 }

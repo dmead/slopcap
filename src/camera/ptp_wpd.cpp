@@ -25,6 +25,7 @@ std::string hresultText(int32_t hr) {
         case 0x8007048F: what = "device not connected"; break;
         case 0x800704C7: what = "cancelled"; break;
         case 0x80004005: what = "unspecified failure"; break;
+        case 0x80040154: what = "class not registered"; break;
         case 0x8000FFFF: what = "unexpected failure"; break;
         default: break;
     }
@@ -123,7 +124,7 @@ std::string usbIdsOf(const std::string& id) {
 }
 
 #ifndef _WIN32
-std::vector<DeviceEntry> listDevices() { return {}; }
+std::vector<DeviceEntry> listDevices(std::string*) { return {}; }
 std::unique_ptr<Device> openDevice(const std::string&) { throw CameraError("Windows Portable Devices: only on Windows"); }
 #endif
 

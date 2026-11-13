@@ -48,8 +48,8 @@ target_sources(slopcap_core PRIVATE src/camera/open_camera.cpp)
 target_sources(slopcap_core PRIVATE src/camera/ptp.cpp src/camera/ptp_usb.cpp src/camera/ptp_wpd.cpp src/camera/sony_ptp.cpp
   src/camera/sony_camera.cpp src/camera/jpeg_luma.cpp)
 if(WIN32)
-  target_sources(slopcap_core PRIVATE src/camera/ptp_wpd_win.cpp)
-  target_link_libraries(slopcap_core PUBLIC ole32)
+  target_sources(slopcap_core PRIVATE src/camera/ptp_wpd_win.cpp src/camera/ptp_winusb_win.cpp)
+  target_link_libraries(slopcap_core PUBLIC ole32 setupapi cfgmgr32 winusb)
 else()
   target_sources(slopcap_core PRIVATE src/camera/ptp_libusb.cpp)
   target_link_libraries(slopcap_core PUBLIC ${CMAKE_DL_LIBS})
@@ -254,7 +254,10 @@ target_link_libraries(slopcap-focusbench PRIVATE slopcap_core slopcap_warnings)
 add_executable(slopcap-bench tools/bench/main.cpp)
 target_link_libraries(slopcap-bench PRIVATE slopcap_core slopcap_warnings)
 # What a Sony camera does in PC Remote mode over USB, for a report to send back (tools/sonyprobe).
-add_executable(slopcap-sonyprobe tools/sonyprobe/main.cpp tools/sonyprobe/probe.cpp)
+add_executable(slopcap-sonyprobe tools/sonyprobe/main.cpp tools/sonyprobe/probe.cpp tools/sonyprobe/diagnose.cpp)
+if(WIN32)
+  target_sources(slopcap-sonyprobe PRIVATE tools/sonyprobe/windevices.cpp)
+endif()
 target_link_libraries(slopcap-sonyprobe PRIVATE slopcap_core slopcap_warnings)
 
 if(SLOPCAP_BUILD_CAMPROBE)
@@ -316,7 +319,7 @@ if(SLOPCAP_BUILD_GUI)
     if(NOT "$ENV{SLOPCAP_GIT}" STREQUAL "")
       set(SLOPCAP_GIT "$ENV{SLOPCAP_GIT}")
     else()
-      execute_process(COMMAND git -c safe.directory=* describe --always --dirty WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      execute_process(COMMAND git -c safe.directory=* describe --always --dirty --match v[0-9]* WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                       OUTPUT_VARIABLE SLOPCAP_GIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
     endif()
     if(NOT SLOPCAP_GIT)
@@ -387,7 +390,8 @@ if(SLOPCAP_BUILD_TESTS)
       tests/test_identify.cpp tests/test_dispersion.cpp)
     target_link_libraries(slopcap-tests PRIVATE slopcap_core slopcap_warnings Catch2::Catch2WithMain)
     # Sony cameras against a fake one (tests/fakes/fake_sony.*), the probe's checks included
-    target_sources(slopcap-tests PRIVATE tests/test_sony.cpp tests/fakes/fake_sony.cpp tests/fakes/jpeg_writer.cpp tools/sonyprobe/probe.cpp)
+    target_sources(slopcap-tests PRIVATE tests/test_sony.cpp tests/fakes/fake_sony.cpp tests/fakes/jpeg_writer.cpp tools/sonyprobe/probe.cpp
+      tools/sonyprobe/diagnose.cpp)
     target_include_directories(slopcap-tests PRIVATE tests tools/sonyprobe)
     if(CMAKE_CROSSCOMPILING)
       add_test(NAME unit COMMAND slopcap-tests)   # the Windows build: discovery would have to run the exe here

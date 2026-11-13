@@ -11,11 +11,43 @@
 #   tools/package.sh sonyprobe build/package/tools/slopcap-sonyprobe-windows-x64.zip: the Sony probe on its own, for
 #                              someone with a Sony camera to run (build/windows-static/slopcap-sonyprobe.exe, a README,
 #                              LICENSE, the compiler runtime's licenses). Under tools/: not a release zip.
+#   tools/package.sh sonyprobe-linux
+#                              build/package/tools/slopcap-sonyprobe-linux-x64.zip: the probe for Ubuntu 22.04 and newer
+#                              (WSL's included), built here in its own image (docker/Dockerfile.probe-linux: glibc 2.35,
+#                              GCC 13, its C++ runtime linked in) and started there once. Run from the host, with Docker.
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
-OS=${1:?usage: tools/package.sh linux|windows|macos|sonyprobe}
+OS=${1:?usage: tools/package.sh linux|windows|macos|sonyprobe|sonyprobe-linux}
 cd "$REPO"
+
+if [ "$OS" = sonyprobe-linux ]; then
+    TAG=$(sha256sum < docker/Dockerfile.probe-linux | cut -c1-12)
+    IMG=slopcap-probe-linux:$TAG
+    if ! docker image inspect "$IMG" >/dev/null 2>&1; then
+        ctx=$REPO/docker file=$REPO/docker/Dockerfile.probe-linux
+        if command -v cygpath >/dev/null; then ctx=$(cygpath -m "$ctx") file=$(cygpath -m "$file"); fi
+        docker build -q -t "$IMG" -f "$file" "$ctx"
+    fi
+    OUT=build/package/tools/slopcap-sonyprobe-linux-x64
+    rm -rf "$OUT" "$OUT.zip"
+    mkdir -p "$OUT/licenses"
+    cp tools/package/README-sonyprobe-linux.txt "$OUT/README.txt"
+    cp LICENSE "$OUT/"
+    docker run --rm --user "$(id -u):$(id -g)" -v "$REPO:$REPO" -w "$REPO" -e OUT="$OUT" \
+        -e V="$(git describe --always --dirty --match 'v[0-9]*' 2>/dev/null || echo unknown)" "$IMG" bash -euc '
+        g++-13 -std=c++20 -O2 -DNDEBUG -DSLOPCAP_GIT="\"$V\"" -Isrc -Itools/sonyprobe -o "$OUT/slopcap-sonyprobe" \
+            tools/sonyprobe/main.cpp tools/sonyprobe/probe.cpp tools/sonyprobe/diagnose.cpp src/camera/ptp.cpp \
+            src/camera/ptp_usb.cpp src/camera/ptp_libusb.cpp src/camera/sony_ptp.cpp src/camera/jpeg_luma.cpp \
+            src/analysis/focus.cpp -static-libstdc++ -static-libgcc -ldl -pthread -s
+        chmod 755 "$OUT/slopcap-sonyprobe"
+        cp /usr/share/doc/gcc-13-base/copyright "$OUT/licenses/gcc-runtime.txt"   # (libstdc++ and libgcc are linked in)
+        # it starts on glibc 2.35 and finds libusb (no camera here: it lists none)
+        "$OUT/slopcap-sonyprobe" --list | grep -q "SlopCap Sony probe" || { echo "the probe does not start on Ubuntu 22.04" >&2; exit 1; }
+        python3 tools/package/zipdir.py "$OUT" "$OUT.zip"'
+    echo "$OUT.zip: $(du -h "$OUT.zip" | cut -f1)"
+    exit 0
+fi
 
 # linux is packed in the build image (the libraries it bundles come from there), windows anywhere with Python 3; re-run
 # in the image when that isn't here

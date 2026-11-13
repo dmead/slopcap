@@ -49,8 +49,11 @@ On the camera, before connecting:
 - A full battery, or the camera's mains adapter: test pictures use it up faster than you'd think.
 
 Windows talks to the camera through its own driver: nothing to install. Close Imaging Edge and the Photos app's
-import first, if they're open, as they take the camera over. On Linux, the desktop's camera service (gvfs) may hold the
-camera: if SlopCap says it is in use, unmount it in the file manager (or `gio mount -u gphoto2://*`).
+import first, if they're open, as they take the camera over. If the camera doesn't show up, run the probe (below): it
+says what Windows made of it and what to do. Often that is Device Manager → the camera → Update driver → Browse my
+computer → Let me pick → Portable Devices → **MTP USB Device**; a Windows "N" edition needs the Media Feature Pack
+first; a camera you gave the WinUSB driver (with Zadig) works as it is. On Linux, the desktop's camera service (gvfs)
+may hold the camera: if SlopCap says it is in use, unmount it in the file manager (or `gio mount -u gphoto2://*`).
 
 What to expect:
 
@@ -66,11 +69,13 @@ What to expect:
 - **One channel:** the JPEG's luminance, so the per-colour focus of an astronomy camera isn't available.
 - **No recording** (the Record button is off) and, on the a6000, no live view over USB as far as is known.
 
-**The probe.** `slopcap-sonyprobe` (a zip of its own, `slopcap-sonyprobe-windows-x64.zip`, with its own README) asks the
-camera what it can do: Sony's operations and settings, whether it has live view over USB, whether the shutter speed and
-ISO can be set from the computer, and how long a picture takes to reach it. It takes one picture and moves the shutter
-speed and ISO one notch and back. It writes a report (`sonyprobe-<camera>-<time>.txt` and `.json`, no serial number in
-them) and the picture beside itself.
+**The probe.** `slopcap-sonyprobe` (zips of its own, `slopcap-sonyprobe-windows-x64.zip` and, for Ubuntu 22.04 or
+newer and WSL, `slopcap-sonyprobe-linux-x64.zip`, each with its README) asks the camera what it can do: Sony's
+operations and settings, whether it has live view over USB, whether the shutter speed and ISO can be set from the
+computer, and how long a picture takes to reach it. It takes one picture and moves the shutter speed and ISO one notch
+and back. It writes a report (`sonyprobe-<camera>-<time>.txt` and `.json`, no serial number in them) and the picture
+beside itself; with no camera found, still the report, with what Windows made of each Sony USB device (its driver,
+class and any Device Manager problem) and what to do about it.
 
 ## 2. Get a good image
 

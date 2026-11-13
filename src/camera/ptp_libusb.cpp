@@ -126,23 +126,27 @@ Lib& lib() {
     return l;
 }
 
-/// The Still Image interface of a device and its bulk endpoints.
+/// The PTP interface of a device and its bulk endpoints.
 struct PtpInterface {
-    int number = -1;
+    int number = -1, cls = 0;
     uint8_t in = 0, out = 0;
     std::size_t packet = 512;
 };
 
-std::optional<PtpInterface> findInterface(Lib& l, libusb_device* dev) {
+/// The Still Image interface; with `vendorClass` also, failing that, a vendor-specific one with a pair of bulk pipes (a
+/// camera in a remote-control mode may describe itself so: gphoto2 finds such cameras by their IDs, not their class).
+std::optional<PtpInterface> findInterface(Lib& l, libusb_device* dev, bool vendorClass) {
     libusb_config_descriptor* cfg = nullptr;
     if (l.get_active_config_descriptor(dev, &cfg) != 0 && l.get_config_descriptor(dev, 0, &cfg) != 0) return std::nullopt;
-    std::optional<PtpInterface> found;
+    std::optional<PtpInterface> found, fallback;
     for (int i = 0; i < cfg->bNumInterfaces && !found; ++i) {
         const auto& itf = cfg->interface[i];
-        if (itf.num_altsetting < 1 || itf.altsetting[0].bInterfaceClass != kImageClass) continue;
+        if (itf.num_altsetting < 1) continue;
         const auto& alt = itf.altsetting[0];
+        if (alt.bInterfaceClass != kImageClass && !(vendorClass && alt.bInterfaceClass == 0xFF)) continue;
         PtpInterface p;
         p.number = alt.bInterfaceNumber;
+        p.cls = alt.bInterfaceClass;
         for (int e = 0; e < alt.bNumEndpoints; ++e) {
             const auto& ep = alt.endpoint[e];
             if ((ep.bmAttributes & 3) != 2) continue;   // bulk only (the interrupt pipe carries events: not used)
@@ -150,10 +154,10 @@ std::optional<PtpInterface> findInterface(Lib& l, libusb_device* dev) {
             else p.out = ep.bEndpointAddress;
             if (ep.wMaxPacketSize) p.packet = ep.wMaxPacketSize & 0x7FF;
         }
-        if (p.in && p.out) found = p;
+        if (p.in && p.out) (p.cls == kImageClass ? found : fallback) = p;
     }
     l.free_config_descriptor(cfg);
-    return found;
+    return found ? found : fallback;
 }
 
 std::string idOf(Lib& l, libusb_device* dev) {
@@ -214,8 +218,9 @@ std::vector<UsbCameraEntry> listUsbCameras(uint16_t vendor) {
     for (long i = 0; i < n; ++i) {
         libusb_device_descriptor d{};
         if (l.get_device_descriptor(devs[i], &d) != 0 || (vendor && d.idVendor != vendor)) continue;
-        if (!findInterface(l, devs[i])) continue;
-        UsbCameraEntry e{idOf(l, devs[i]), d.idVendor, d.idProduct, {}, {}, {}};
+        const auto itf = findInterface(l, devs[i], vendor != 0);
+        if (!itf) continue;
+        UsbCameraEntry e{idOf(l, devs[i]), d.idVendor, d.idProduct, {}, {}, {}, itf->cls};
         libusb_device_handle* h = nullptr;
         if (const int err = l.open(devs[i], &h); err != 0) {
             e.problem = openProblem(l, err);
@@ -240,7 +245,7 @@ std::unique_ptr<UsbPipe> openUsbCamera(const std::string& id) {
     std::string problem = std::format("no USB camera {} (unplugged?)", id);
     for (long i = 0; i < n && !pipe; ++i) {
         if (idOf(l, devs[i]) != id) continue;
-        const auto itf = findInterface(l, devs[i]);
+        const auto itf = findInterface(l, devs[i], true);
         if (!itf) {
             problem = std::format("{} has no PTP interface (is the camera in PC Remote mode?)", id);
             break;
