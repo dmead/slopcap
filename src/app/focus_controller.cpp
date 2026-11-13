@@ -24,6 +24,7 @@ FocusController::FocusController(QObject* parent) : QObject(parent), focuser_(in
     connect(&settle_, &QTimer::timeout, this, [this] {
         if (state_ == State::Settling) {
             collected_ = 0;
+            collectFrom_ = std::chrono::steady_clock::now();
             state_ = State::Collecting;
         }
     });
@@ -98,6 +99,8 @@ void FocusController::onFrame(const LatestFrame::Frame& frame, Bayer bayer) {
     emit liveUpdated();
 
     if (state_ != State::Collecting || s.channels == 0) return;
+    // a stills camera's picture taken while the focuser moved or settled arrives seconds later: not this position's
+    if (fi.exposureStart && *fi.exposureStart < collectFrom_) return;
     const int pos = focuser_.position();
     std::vector<analysis::Metric> ms = {analysis::Metric::Gradient, analysis::Metric::Laplacian, analysis::Metric::Variance};
     if (settings_.fourier) ms.push_back(analysis::Metric::Fourier);
@@ -221,7 +224,7 @@ std::vector<int> FocusController::extension() const {
 
 void FocusController::complete() {
     const auto [lo, hi] = std::minmax_element(positions_.begin(), positions_.end());
-    QString why = QString("Sweep complete · %1 positions × %2 frames").arg(positions_.size()).arg(settings_.frames);
+    QString why = QString("Sweep complete · %1 positions × %2 frame%3").arg(positions_.size()).arg(settings_.frames).arg(settings_.frames == 1 ? "" : "s");
     if (*lo < std::min(settings_.from, settings_.to) || *hi > std::max(settings_.from, settings_.to))
         why += QString(" · carried on to %1–%2").arg(*lo).arg(*hi);
     std::optional<int> dest;

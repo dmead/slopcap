@@ -8,18 +8,37 @@
 #                              SLOPCAP_WIN_SDK_DLL_DIR set it has the camera drivers inside)
 #   tools/package.sh macos     build/macos-release/SlopCap.app (tools/macos-app.sh), on a Mac, with
 #                              SLOPCAP_MAC_LICENSES set (Qt's and the fonts' license texts: see below)
+#   tools/package.sh sonyprobe build/package/tools/slopcap-sonyprobe-windows-x64.zip: the Sony probe on its own, for
+#                              someone with a Sony camera to run (build/windows-static/slopcap-sonyprobe.exe, a README,
+#                              LICENSE, the compiler runtime's licenses). Under tools/: not a release zip.
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
-OS=${1:?usage: tools/package.sh linux|windows|macos}
+OS=${1:?usage: tools/package.sh linux|windows|macos|sonyprobe}
 cd "$REPO"
 
 # linux is packed in the build image (the libraries it bundles come from there), windows anywhere with Python 3; re-run
 # in the image when that isn't here
 in_image() { [ -e /usr/include/libqhy/qhyccd.h ] && [ -d "/usr/lib/$(uname -m)-linux-gnu/qt6" ]; }
-if { [ "$OS" = linux ] && ! in_image; } || { [ "$OS" = windows ] && ! python3 -c '' 2>/dev/null; }; then
+if { [ "$OS" = linux ] && ! in_image; } || { [ "$OS" != linux ] && [ "$OS" != macos ] && ! python3 -c '' 2>/dev/null; }; then
     TAG=$(sha256sum < docker/Dockerfile | cut -c1-12)
     exec docker run --rm --user "$(id -u):$(id -g)" -v "$REPO:$REPO" -w "$REPO" "slopcap-build:$TAG" tools/package.sh "$OS"
+fi
+
+if [ "$OS" = sonyprobe ]; then
+    B=build/windows-static
+    [ -f $B/slopcap-sonyprobe.exe ] || { echo "no $B/slopcap-sonyprobe.exe: docker/build.sh windows-static first" >&2; exit 1; }
+    [ -d $B/licenses/mingw-runtime ] || { echo "no $B/licenses: docker/build.sh windows-static puts them there" >&2; exit 1; }
+    OUT=build/package/tools/slopcap-sonyprobe-windows-x64
+    rm -rf "$OUT" "$OUT.zip"
+    mkdir -p "$OUT/licenses"
+    cp $B/slopcap-sonyprobe.exe "$OUT/"
+    cp tools/package/README-sonyprobe.txt "$OUT/README.txt"
+    cp LICENSE "$OUT/"
+    cp -r $B/licenses/mingw-runtime "$OUT/licenses/"
+    python3 tools/package/zipdir.py "$OUT" "$OUT.zip"
+    echo "$OUT.zip: $(du -h "$OUT.zip" | cut -f1)"
+    exit 0
 fi
 
 case $OS in

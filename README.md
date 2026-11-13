@@ -3,7 +3,8 @@
 <p align="center"><img src="docs/images/saturn.png" width="600" alt="Saturn, 4 August 2022"></p>
 
 **SlopCap records video of the planets, the Moon and the Sun** from ZWO, QHY, Player One, ToupTek and MallinCam
-astronomy cameras, on Windows, Linux and macOS. It gets every frame onto the disk, shows a live picture that keeps up,
+astronomy cameras, on Windows, Linux and macOS (and focuses with a Sony mirrorless camera on USB, untested so far on a
+real one). It gets every frame onto the disk, shows a live picture that keeps up,
 and helps with everything that decides how sharp the result will be: collimation, focus for each colour, atmospheric
 dispersion, and knowing what you're pointed at. Its recordings go straight into AutoStakkert!, PIPP and WinJUPOS. It can
 also send the camera's picture to other computers on the network, point to point, for a projector at an outreach night

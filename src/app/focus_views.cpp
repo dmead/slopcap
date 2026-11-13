@@ -368,6 +368,17 @@ SweepPanel::SweepPanel(FocusController& fc, QWidget* parent) : QWidget(parent), 
 
 void SweepPanel::setHeader(QWidget* w) { header_->addWidget(w); }
 
+void SweepPanel::setStills(bool on) {
+    if (on == stills_) return;
+    stills_ = on;
+    if (on) videoFrames_ = frames_->value();
+    frames_->setRange(on ? 1 : 5, 2000);
+    frames_->setSingleStep(on ? 1 : 10);
+    frames_->setValue(on ? 1 : videoFrames_);
+    frames_->setToolTip(on ? "Pictures scored at each position: one is enough from a stills camera (each takes a second or more)"
+                           : "Frames scored at each position");
+}
+
 std::array<bool, 3> SweepPanel::channelsShown() const {
     return {channel_[0]->isChecked(), channel_[1]->isChecked(), channel_[2]->isChecked()};
 }

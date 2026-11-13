@@ -2,6 +2,8 @@
 //   "sim:FILE.ser"  replay a recording in real time      "sim-fast:FILE.ser"  as fast as possible
 //   "sim-loop:FILE.ser"  in real time, over and over (demos, long tests)
 //   "asi" / "asi:N" ZWO camera N (default 0)            "qhy" / "qhy:N"       QHY camera N
+//   "sony" / "sony:N" / "sony:NAME"  a Sony camera on USB in PC Remote mode (src/camera/sony_camera.hpp): the first,
+//                    the N-th, or the first whose model contains NAME
 #pragma once
 
 #include "camera/camera.hpp"

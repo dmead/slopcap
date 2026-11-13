@@ -35,6 +35,7 @@ struct CameraInfo {
     Bayer bayer = Bayer::None;   ///< None = mono
     std::vector<int> bins;       ///< supported binning factors
     std::vector<int> bitDepths;  ///< output sample depths the camera can deliver (8, 16)
+    bool stills = false;         ///< every frame is a picture taken on its own (a stills camera): a second or more each
 };
 
 struct ControlInfo {
@@ -68,6 +69,9 @@ struct FrameInfo {
     Roi roi;
     int bitDepth = 8;                                    ///< 8 or 16 (samples are little-endian)
     std::size_t bytes = 0;
+    /// When the exposure began on this computer's steady clock, where the backend knows it (a stills camera: the
+    /// shutter press). A focus sweep doesn't count a frame exposed before the focuser had settled.
+    std::optional<std::chrono::steady_clock::time_point> exposureStart;
 };
 
 enum class ReadResult { Ok, Timeout, EndOfStream };

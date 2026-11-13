@@ -19,7 +19,8 @@ or `mallincam.dll`); a file there wins. An exe you build yourself without the dr
 SharpCap's folder has them all (it calls the last two `ToupCam.dll` and `MallinCam.dll`; either name works).
 
 The camera itself still needs the vendor's USB driver (the one SharpCap and FireCapture use too). If the camera works
-in SharpCap, it works in SlopCap.
+in SharpCap, it works in SlopCap. A Sony camera in PC Remote mode needs nothing: Windows' own camera driver does (see
+[A Sony camera, for focusing](user-guide.md#a-sony-camera-for-focusing)).
 
 **Remote viewing** needs SlopCap allowed through the Windows firewall on the computer that shares its camera. Windows
 asks the first time you share; choose *Private networks*. See [Remote viewing](remote-viewing.md) for the command that
@@ -45,7 +46,8 @@ build/linux-release/slopcap
 ```
 
 The INDI packages bring the camera drivers (ZWO, QHY, Player One, ToupTek, MallinCam) and their USB permission rules,
-so cameras work without root.
+so cameras work without root. A Sony camera (PC Remote mode) goes through libusb, which every desktop has; the
+permission to open it usually comes from libgphoto2's rules, which desktops also have.
 They also bring `indiserver` and the device drivers for the focuser and the mount. A typical setup runs `indiserver`
 as a user service that starts with the computer, for example for a Gemini EAF focuser:
 

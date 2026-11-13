@@ -43,6 +43,17 @@ add_library(slopcap_core STATIC
   src/util/memory_info.cpp
 )
 target_sources(slopcap_core PRIVATE src/camera/open_camera.cpp)
+# Sony cameras in PC Remote mode: PTP with Sony's extension, through Windows' own driver (WPD) or libusb (loaded at run
+# time), no vendor SDK; the pictures' JPEG decoded here.
+target_sources(slopcap_core PRIVATE src/camera/ptp.cpp src/camera/ptp_usb.cpp src/camera/ptp_wpd.cpp src/camera/sony_ptp.cpp
+  src/camera/sony_camera.cpp src/camera/jpeg_luma.cpp)
+if(WIN32)
+  target_sources(slopcap_core PRIVATE src/camera/ptp_wpd_win.cpp)
+  target_link_libraries(slopcap_core PUBLIC ole32)
+else()
+  target_sources(slopcap_core PRIVATE src/camera/ptp_libusb.cpp)
+  target_link_libraries(slopcap_core PUBLIC ${CMAKE_DL_LIBS})
+endif()
 target_include_directories(slopcap_core PUBLIC src)
 # Lets SLOPCAP_SIMD_SUM (src/util/simd.hpp) vectorize float reductions; enables the pragma only, no OpenMP runtime.
 if(NOT MSVC)
@@ -242,6 +253,9 @@ add_executable(slopcap-focusbench tools/focusbench/main.cpp)
 target_link_libraries(slopcap-focusbench PRIVATE slopcap_core slopcap_warnings)
 add_executable(slopcap-bench tools/bench/main.cpp)
 target_link_libraries(slopcap-bench PRIVATE slopcap_core slopcap_warnings)
+# What a Sony camera does in PC Remote mode over USB, for a report to send back (tools/sonyprobe).
+add_executable(slopcap-sonyprobe tools/sonyprobe/main.cpp tools/sonyprobe/probe.cpp)
+target_link_libraries(slopcap-sonyprobe PRIVATE slopcap_core slopcap_warnings)
 
 if(SLOPCAP_BUILD_CAMPROBE)
   if(WIN32 AND NOT WIN_SDK_DLL_DIR)
@@ -309,6 +323,7 @@ if(SLOPCAP_BUILD_GUI)
       set(SLOPCAP_GIT unknown)
     endif()
     target_compile_definitions(slopcap PRIVATE SLOPCAP_GIT="${SLOPCAP_GIT}")
+    target_compile_definitions(slopcap-sonyprobe PRIVATE SLOPCAP_GIT="${SLOPCAP_GIT}")
     # macOS: build/<preset>/SlopCap.app. tools/macos-app.sh makes it self-contained (Qt inside) and signs it.
     if(APPLE)
       set_target_properties(slopcap PROPERTIES
@@ -371,6 +386,9 @@ if(SLOPCAP_BUILD_TESTS)
     add_executable(slopcap-tests tests/test_ser.cpp tests/test_sim_camera.cpp tests/test_pipeline.cpp tests/test_direct_writer.cpp tests/test_preview.cpp tests/test_focus.cpp tests/test_sweep.cpp tests/test_collimation.cpp
       tests/test_identify.cpp tests/test_dispersion.cpp)
     target_link_libraries(slopcap-tests PRIVATE slopcap_core slopcap_warnings Catch2::Catch2WithMain)
+    # Sony cameras against a fake one (tests/fakes/fake_sony.*), the probe's checks included
+    target_sources(slopcap-tests PRIVATE tests/test_sony.cpp tests/fakes/fake_sony.cpp tests/fakes/jpeg_writer.cpp tools/sonyprobe/probe.cpp)
+    target_include_directories(slopcap-tests PRIVATE tests tools/sonyprobe)
     if(CMAKE_CROSSCOMPILING)
       add_test(NAME unit COMMAND slopcap-tests)   # the Windows build: discovery would have to run the exe here
     else()
@@ -400,7 +418,8 @@ if(SLOPCAP_BUILD_TESTS)
       # executable), all under a real QApplication; needs a screen (Xvfb in docker/build.sh).
       if(TARGET Qt6::Test)
         add_executable(slopcap-app-tests tests/app_main.cpp tests/app_harness.cpp tests/test_app_window.cpp tests/test_app_focus.cpp
-          tests/test_app_panels.cpp tests/test_app_remote.cpp tests/test_app_program.cpp tests/test_app_adc.cpp tests/fakes/fake_mounts.cpp)
+          tests/test_app_panels.cpp tests/test_app_remote.cpp tests/test_app_program.cpp tests/test_app_adc.cpp tests/fakes/fake_mounts.cpp
+          tests/test_app_sony.cpp tests/fakes/fake_sony.cpp tests/fakes/jpeg_writer.cpp)
         target_link_libraries(slopcap-app-tests PRIVATE slopcap_app slopcap_warnings Catch2::Catch2 Qt6::Test)
         target_compile_definitions(slopcap-app-tests PRIVATE SLOPCAP_PROGRAM="$<TARGET_FILE:slopcap>")
         add_dependencies(slopcap-app-tests slopcap)

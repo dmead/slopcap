@@ -86,6 +86,8 @@ public:
     SweepPanel(FocusController& fc, QWidget* parent = nullptr);
     std::array<bool, 3> channelsShown() const;
     void setHeader(QWidget* w);   ///< above the settings, scrolling with them (the window: the camera and the focuser)
+    /// A stills camera (a picture takes a second or more): one picture a position, not dozens of frames.
+    void setStills(bool on);
 
 signals:
     void displayChanged();   ///< metric or channel visibility changed
@@ -99,6 +101,8 @@ private:
     QButtonGroup* presets_ = nullptr;
     QSpinBox *from_ = nullptr, *to_ = nullptr, *step_ = nullptr, *frames_ = nullptr, *settle_ = nullptr;
     QLabel* follows_ = nullptr;
+    bool stills_ = false;
+    int videoFrames_ = 60;  ///< Frames / step as it was before a stills camera set it to 1
     bool follow_ = true;    ///< the range stays centred on the focuser until From or To is set by hand
     bool setting_ = false;  ///< the panel itself is changing From / To
     QComboBox* metric_ = nullptr;

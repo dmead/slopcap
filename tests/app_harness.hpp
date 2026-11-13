@@ -215,6 +215,7 @@ struct MainWindowProbe {
     std::function<void()>& testBeforeWrite{w.testBeforeWrite_};
 
     void updateStats() { w.updateStats(); }
+    void disconnectCamera() { w.disconnectCamera(); }
     QString targetName() const { return w.targetName(); }
     /// Wait until the preview has shown a frame from the current session.
     bool waitForFrames(int frames = 3, int ms = 15000);

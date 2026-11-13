@@ -100,8 +100,8 @@ linux_release() {   # build, pack, and start the zip in a bare Ubuntu (no Qt, on
         ls -l /tmp/rec/*.ser /tmp/shot.png'
 }
 
-windows_exe() {
-    docker/build.sh windows-static && tools/package.sh windows
+windows_exe() {   # also the Sony probe on its own (build/package/tools/: not a release zip)
+    docker/build.sh windows-static && tools/package.sh windows && tools/package.sh sonyprobe
 }
 
 windows_tests() {   # every test program for Windows, run here when this is Windows (tools/windows-tests.sh)
@@ -154,6 +154,9 @@ done
 for z in "$WT"/build/package/*.zip; do   # (the hash lets tools/release.sh check that it publishes this run's zip)
     [ -f "$z" ] && echo "  package: $z  sha256 $(sha256sum < "$z" | cut -c1-64)" | tee -a "$SUMMARY"
 done
+for z in "$WT"/build/package/tools/*.zip; do   # tools to hand out (the Sony probe), never part of a release
+    [ -f "$z" ] && echo "  tool: $z  sha256 $(sha256sum < "$z" | cut -c1-64)" | tee -a "$SUMMARY"
+done
 echo "  logs: $RUN" | tee -a "$SUMMARY"
 [ $failed = 0 ] && echo "all jobs passed" | tee -a "$SUMMARY" || echo "SOME JOBS FAILED" | tee -a "$SUMMARY"
 
@@ -163,7 +166,7 @@ if [ -n "$UPLOAD" ]; then
     else
         dest=$UPLOAD/$(basename "$RUN")
         up=done
-        for f in "$WT"/build/package/*.zip "$SUMMARY"; do
+        for f in "$WT"/build/package/*.zip "$WT"/build/package/tools/*.zip "$SUMMARY"; do
             [ -f "$f" ] || continue
             "${RCLONE:-rclone}" copyto -q --no-traverse "$(native "$f")" "$dest/$(basename "$f")" || up=FAILED
         done

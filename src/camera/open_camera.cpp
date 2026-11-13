@@ -1,6 +1,7 @@
 #include "camera/open_camera.hpp"
 
 #include "camera/sim_camera.hpp"
+#include "camera/sony_camera.hpp"
 #ifdef SLOPCAP_HAVE_ASI
 #include "camera/asi_camera.hpp"
 #endif
@@ -94,7 +95,13 @@ std::unique_ptr<ICamera> openCamera(std::string_view spec) {
         throw CameraError("this build has no MallinCam support (SDK not found at build time)");
 #endif
     }
-    throw CameraError(std::format("unknown camera spec '{}' (use asi[:N], qhy[:N], playerone[:N], touptek[:N], mallincam[:N], sim:FILE.ser)", spec));
+    if (spec.starts_with("sony")) {   // no SDK: Windows' own driver, or libusb
+        if (spec.size() > 4 && spec[4] != ':') throw CameraError(std::format("bad camera spec '{}'", spec));
+        return std::make_unique<SonyCamera>(spec.size() > 5 ? spec.substr(5) : std::string_view());
+    }
+    throw CameraError(std::format("unknown camera spec '{}' (use asi[:N], qhy[:N], playerone[:N], touptek[:N], mallincam[:N], sony[:N], "
+                                  "sim:FILE.ser)",
+                                  spec));
 }
 
 std::vector<std::string> listCameras() {
@@ -128,6 +135,9 @@ std::vector<std::string> listCameras() {
     else
         for (const auto& c : MallinCamCamera::list()) out.push_back(std::format("mallincam:{}  {}", c.index, c.model));
 #endif
+    const auto sony = SonyCamera::list();
+    for (std::size_t i = 0; i < sony.size(); ++i)
+        out.push_back(std::format("sony:{}  {}{}", i, sony[i].model, sony[i].problem.empty() ? "" : "  (" + sony[i].problem + ")"));
     return out;
 }
 

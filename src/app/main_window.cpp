@@ -307,7 +307,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             pendingSweep_ = false;
             const int at = focus_->focuser().position(), range = pendingRange_ ? pendingRange_ : 350;
             SweepSettings s;
-            s.from = std::max(0, at - range), s.to = at + range, s.step = pendingStep_ ? pendingStep_ : 50, s.frames = pendingFrames_ ? pendingFrames_ : 60;
+            s.from = std::max(0, at - range), s.to = at + range, s.step = pendingStep_ ? pendingStep_ : 50;
+            s.frames = pendingFrames_ ? pendingFrames_ : cam_ && cam_->info().stills ? 1 : 60;
             QTimer::singleShot(500, this, [this, s] { focus_->startSweep(s); });
         }
     });
@@ -1061,7 +1062,10 @@ void MainWindow::populateCameraUi() {
     const bool have = static_cast<bool>(cam_);
     noCamera_->setVisible(!have);
     cameraBox_->setVisible(have);
-    record_->setEnabled(have);
+    const bool stills = have && cam_->info().stills;
+    record_->setEnabled(have && !stills);   // a stills camera's pictures are for focusing, not a recording
+    sweepPanel_->setStills(stills);
+    focus_->setSmoothing(stills ? 1 : 9);   // the live score: each picture on its own, not the median of the last 9
     folder_->setEnabled(!remote_);
     limit_->setEnabled(!remote_);
     theme::setDot(cameraDot_, have ? theme::kGood : theme::kGrey);
@@ -1620,7 +1624,7 @@ void MainWindow::stopSession() {
 }
 
 void MainWindow::toggleRecording() {
-    if (!cam_) return;
+    if (!cam_ || (!remote_ && cam_->info().stills)) return;   // (Ctrl+R: the button is off for a stills camera)
     if (remote_) {
         const bool on = !remote_->status()["recording"].toBool();
         qInfo().noquote() << "record: asking" << remote_->serverName() << "to" << (on ? "start" : "stop");

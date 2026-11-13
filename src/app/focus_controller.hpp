@@ -16,6 +16,7 @@
 #include <QTimer>
 
 #include <array>
+#include <chrono>
 #include <deque>
 #include <memory>
 #include <optional>
@@ -112,6 +113,7 @@ private:
     int lowLimit_ = 0, highLimit_ = 0;   ///< how far past the range extensions may go
     analysis::FocusTarget target_ = analysis::FocusTarget::Green;
     QTimer settle_;
+    std::chrono::steady_clock::time_point collectFrom_;   ///< when the focuser had settled at this position
     analysis::SweepAnalysis analysis_;
     std::unique_ptr<QFile> csv_;
     std::unique_ptr<QTextStream> csvOut_;

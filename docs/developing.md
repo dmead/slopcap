@@ -184,6 +184,7 @@ Built next to `slopcap` (`build/<preset>/`):
 | `slopcap-bench --camera SPEC …` / `--sim FILE.ser` / `--list` | records through the full capture pipeline and reports frames per second, drops, the frame ring's peak and MB/s |
 | `slopcap-serinfo [--csv] FILE.ser…` | a SER file's header, frames on disk against the header, timestamps, the real frame rate, the frames lost on the way and the longest gap; reads any program's SER files the same way (`--csv`: one line per file) |
 | `slopcap-camprobe [--json]` | what every connected ZWO and QHY camera reports (its controls, readout modes, gain landmarks); the fixtures from real cameras are in `tools/camprobe/fixtures` |
+| `slopcap-sonyprobe [--no-shot] [--shots N] [--no-set] [--live N] [--device N\|TEXT] [--out DIR] [--keep-serial] [--list]` | what a Sony camera in PC Remote mode does over USB: DeviceInfo, Sony's handshake and every property (decoded and raw), live view (`GetObject 0xFFFFC002`), setting the shutter speed and ISO one notch and back (directly or in steps), and pictures, timed from the shutter to the computer; a report in `.txt` and `.json` plus the pictures, in the current folder. The serial number is left out unless `--keep-serial`. Reports from real cameras go in `tools/sonyprobe/fixtures` |
 | `slopcap-diag [--png OUT/] FILE.ser…` | optical diagnostics from planetary recordings: stacks the best frames and reports dispersion, limb sharpness per colour and side, halo and jitter |
 | `slopcap-focusbench FILE.ser [frames] [metric]` | times the focus scorer on a recording |
 | `slopcap-mountprobe SPEC [--settings] [--set KEY=VALUE] [--move] [--log]` | one of SlopCap's own mount drivers without the app: what the mount is, what the driver found on connecting and its state; `--settings` the mount's own settings (OnStep) with their keys, `--set` writes one as the mount panel's Settings and log… does and reads them back, `--move` pulses, moves and a short goto each way (OnStep: then home), `--send CMD` a raw command, `--log` every command and reply |
@@ -219,6 +220,21 @@ runs on the macOS version Homebrew's Qt and libraries were built for and newer: 
 they're installed on, so an app made on macOS 27 needs 27. Reaching older versions would take Qt built with a lower
 deployment target.
 
+**Sony cameras** need no vendor SDK. `src/camera/ptp.*` is PTP itself over a `ptp::Transport`; Windows' transport
+(`ptp_wpd.*`) sends every operation, Sony's included, through Windows Portable Devices' MTP-extension commands, so the
+camera stays on Windows' own driver (`ptp_wpd_win.cpp` is the COM side; mingw-w64 lacks those keys, so the file defines
+the GUIDs it uses). Linux and macOS use PTP over USB bulk pipes (`ptp_usb.*`) on libusb, loaded at run time
+(`ptp_libusb.cpp` declares the few libusb functions and structures it uses, so the build needs no libusb headers).
+`sony_ptp.*` is Sony's extension (the SDIO handshake, all properties in one dataset, values set directly or a notch at a
+time, the shutter buttons, a picture fetched from handle 0xFFFFC001 once ObjectInMemory says so), and
+`sony_camera.*` the `ICamera` that turns pictures into frames, through the baseline JPEG decoder in `jpeg_luma.*`
+(luminance only). The codes follow public descriptions of the protocol (libgphoto2's among them, LGPL: none of its code
+is used). Nothing of it has run against a real Sony yet: `slopcap-sonyprobe` is the first step, and
+`tools/package.sh sonyprobe` packs it on its own (`build/package/tools/slopcap-sonyprobe-windows-x64.zip`, which
+`tools/ci-local.sh`'s windows-exe job makes and lists as `tool:`, never as a release zip). The tests run all of it
+against `tests/fakes/fake_sony.*`, a camera behind each seam: the transport, WPD's commands, USB's containers and
+packets.
+
 **Remote viewing.** The protocol is described at the top of `src/net/protocol.hpp`. `tools/remote-test.sh FILE.ser`
 runs it end to end in three containers on one Docker network: an observatory server, a desktop viewer and a projector
 viewer in full view.
@@ -233,7 +249,8 @@ viewer in full view.
 | `src/camera/asi_camera.*`, `qhy_camera.*`, `playerone_camera.*` | the ZWO, QHY and Player One backends (built when their SDKs are found) |
 | `src/camera/touptek_camera.hpp`, `touptek_family.inc` | ToupTek and MallinCam: one backend, a template over the brand, since MallinCam's SDK is ToupTek's under other names (`touptek_camera.cpp`, `mallincam_camera.cpp` bind each brand's symbols) |
 | `src/camera/sim_camera.*` | `SimCamera`: replays a SER recording as a camera (real-time pacing, ROI, drop counting) |
-| `src/camera/open_camera.*` | opens a camera from a spec: `asi[:N]`, `qhy[:N]`, `playerone[:N]`, `touptek[:N]`, `mallincam[:N]`, `sim:FILE.ser`, `sim-loop:FILE.ser` |
+| `src/camera/open_camera.*` | opens a camera from a spec: `asi[:N]`, `qhy[:N]`, `playerone[:N]`, `touptek[:N]`, `mallincam[:N]`, `sony[:N\|:NAME]`, `sim:FILE.ser`, `sim-loop:FILE.ser` |
+| `src/camera/ptp*`, `sony_ptp.*`, `sony_camera.*`, `jpeg_luma.*` | Sony cameras in PC Remote mode: PTP over WPD (Windows) or libusb, Sony's extension, test shots as frames, the JPEG's luminance (see Platform notes) |
 | `src/pipeline/frame_ring.*` | `FrameRing`: pre-allocated, page-aligned frame slots passed from capture to writer without locks |
 | `src/pipeline/capture_session.*` | `CaptureSession`: the capture and writer threads; counts camera drops apart from ring drops; times and CPU over the capture, the writer's drain apart; the ring's size from free RAM (`recordingRingBytes`) |
 | `src/preview/` | the live view: `LatestFrame` tap, the GPU debayer and stretch (`GlRenderer`), the CPU reference, histograms |
@@ -242,6 +259,6 @@ viewer in full view.
 | `src/net/` | remote viewing: protocol, frame codec (lossless and JPEG), discovery, rate control, server and client |
 | `src/app/` | the GUI: main window, focus, collimation and ADC panels, mount, settings, full view, session log |
 | `tools/` | the command-line tools above, packaging (`package.sh`), coverage, macOS and remote-test scripts; `tools/perf/` compares SlopCap with SharpCap and FireCapture (its README has the procedure) |
-| `tests/` | Catch2 tests; `tests/fakes/` the camera SDK fakes; `tests/app_harness.*` the application tests' helpers |
+| `tests/` | Catch2 tests; `tests/fakes/` the camera SDK fakes, the mounts' and a Sony camera's (with a small JPEG encoder); `tests/app_harness.*` the application tests' helpers |
 
 The design, its reasoning and the to-do list are in [PLAN.md](../PLAN.md).

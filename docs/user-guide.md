@@ -31,6 +31,47 @@ and its settings for next time.
 No camera to hand? **Replay a recording…** in the same menu plays an existing `.ser` file as if it were a camera,
 in real time. Everything below works on a replay, which is a good way to learn SlopCap indoors.
 
+### A Sony camera, for focusing
+
+A Sony mirrorless camera on USB (an a6000, for instance) can be used to **focus**, not to record: SlopCap takes test
+pictures with it and scores each one at full resolution. It's listed as `sony:0 ILCE-6000`. **No real Sony has run this
+yet**: it was written from public descriptions of Sony's protocol and tested against a simulated camera. If you have
+one, run the probe first (below) and send its report.
+
+On the camera, before connecting:
+
+- **MENU → Setup → USB Connection → PC Remote** (the camera then belongs to the computer while it's connected).
+- **Mode dial on M**, so SlopCap can set the shutter speed and ISO. In other modes the camera sets them, and SlopCap
+  takes pictures as they come.
+- **Quality: Fine or Extra fine**, or RAW & JPEG. SlopCap reads the JPEG; with RAW alone there is nothing for it.
+- On a telescope, with no electronic lens: **MENU → Custom Settings → Release w/o Lens → Enable**, or the shutter won't
+  fire. With a lens, set it to manual focus (MF) so each picture is taken at once.
+- A full battery, or the camera's mains adapter: test pictures use it up faster than you'd think.
+
+Windows talks to the camera through its own driver: nothing to install. Close Imaging Edge and the Photos app's
+import first, if they're open, as they take the camera over. On Linux, the desktop's camera service (gvfs) may hold the
+camera: if SlopCap says it is in use, unmount it in the file manager (or `gio mount -u gphoto2://*`).
+
+What to expect:
+
+- **Every frame is a picture.** SlopCap presses the shutter, waits for the picture, downloads it (a second or so for
+  24 megapixels over the a6000's USB 2) and shows its luminance, black and white, full size; a smaller **ROI** is a crop
+  of it. Opening the camera takes one picture, to learn its size. Pictures follow one another while the camera is
+  connected: **Interval** under All controls puts that many seconds between them. The shutter is mechanical and wears,
+  so disconnect the camera when you're done focusing.
+- **Controls:** **Exposure** goes to the nearest shutter speed the camera has, **ISO** to the nearest ISO.
+- **Focusing by hand:** turn the focuser and watch the sharpness bar: each picture is scored on its own.
+- **A sweep** with an electronic focuser takes one picture at each position (**Frames / step** is 1 while a Sony is
+  connected), and doesn't count a picture that was taken while the focuser was still moving or settling.
+- **One channel:** the JPEG's luminance, so the per-colour focus of an astronomy camera isn't available.
+- **No recording** (the Record button is off) and, on the a6000, no live view over USB as far as is known.
+
+**The probe.** `slopcap-sonyprobe` (a zip of its own, `slopcap-sonyprobe-windows-x64.zip`, with its own README) asks the
+camera what it can do: Sony's operations and settings, whether it has live view over USB, whether the shutter speed and
+ISO can be set from the computer, and how long a picture takes to reach it. It takes one picture and moves the shutter
+speed and ISO one notch and back. It writes a report (`sonyprobe-<camera>-<time>.txt` and `.json`, no serial number in
+them) and the picture beside itself.
+
 ## 2. Get a good image
 
 - **Exposure** is in milliseconds; short exposures (a few ms) freeze the seeing. The camera's maximum frame rate is
@@ -93,6 +134,9 @@ The camera stays in view on the Focus tab: the top of its left column shows the 
 with the box focus is scored in (**Target** / **Frame**); double-click it for the full preview. The other way round,
 while a sweep runs (and after it), its curves show small in a corner of the preview on the other tabs: click them for
 the Focus tab, or × to hide them until the next sweep.
+
+With a Sony camera every frame is a picture taken on purpose: a sweep takes one at each position (see
+[A Sony camera, for focusing](#a-sony-camera-for-focusing)).
 
 With the focal ratio and the focuser's microns per step entered in Settings → Optics, the chart also shows the
 critical focus zone: how far you can be from perfect focus before it shows. Each sweep's numbers are saved as a CSV
