@@ -5,6 +5,7 @@
 #include "app/focus_views.hpp"
 #include "app_harness.hpp"
 #include "camera/jpeg_luma.hpp"
+#include "camera/open_camera.hpp"
 #include "camera/sony_camera.hpp"
 #include "devices/focuser.hpp"
 #include "fakes/fake_sony.hpp"
@@ -20,6 +21,8 @@
 #include <QTest>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
 
 using namespace slopcap;
 using namespace slopcap::app;
@@ -45,6 +48,10 @@ TEST_CASE("sony: a stills camera in the window", "[app][sony]") {
     Modals::get().clear();
     clearSettings();
     Sonys s;
+    s.source.problem = "no permission";   // listed all the same, with why it may not open
+    const auto lines = listCameras();
+    CHECK(std::ranges::find(lines, std::string("sony:0  ILCE-6000  (no permission)")) != lines.end());
+    s.source.problem.clear();
     MainWindow w;
     MainWindowProbe p(w);
     w.show();

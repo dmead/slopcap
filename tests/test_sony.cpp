@@ -608,10 +608,7 @@ TEST_CASE("sony camera: finding and opening", "[sony][camera]") {
         CHECK(i.bitDepths == std::vector<int>{8});
         CHECK(f.cam.shots.load() == 1);   // the picture that gave the size (the one left over was dropped first)
     }
-    Fixture f;
-    f.source.problem = "no permission";
-    const auto lines = listCameras();
-    CHECK(std::ranges::find(lines, std::string("sony:0  ILCE-6000  (no permission)")) != lines.end());
+    Fixture f;   // (the camera list is in test_app_sony.cpp: listing here would call the real vendor SDKs, which leak)
     CHECK(openCamera("sony:0")->info().model == "ILCE-6000");
     CHECK(openCamera("sony:ILCE")->info().model == "ILCE-6000");
     CHECK_THAT(errorOf([] { openCamera("sony:3"); }), ContainsSubstring("no Sony camera 3"));
