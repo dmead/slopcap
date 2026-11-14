@@ -50,6 +50,33 @@ void SonyCam::setUnplugged(bool gone) {
     unplugged_ = gone;
 }
 
+void SonyCam::event(uint16_t code, uint32_t param) {
+    ptp::Writer w;
+    w.u32(16).u16(4).u16(code).u32(0).u32(param);
+    events_.push_back(w.take());
+    if (events_.size() > 100) events_.pop_front();   // (nobody reads them through the plain transport)
+}
+
+std::optional<std::vector<uint8_t>> SonyCam::takeEvent() {
+    std::lock_guard l(m_);
+    if (events_.empty()) return std::nullopt;
+    auto e = std::move(events_.front());
+    events_.pop_front();
+    return e;
+}
+
+int SonyCam::eventsWaiting() const {
+    std::lock_guard l(m_);
+    return static_cast<int>(events_.size());
+}
+
+void SonyCam::resetPtp() {
+    std::lock_guard l(m_);
+    sessionOpen = false;
+    sdioStep = 0;
+    events_.clear();
+}
+
 std::vector<uint16_t> SonyCam::ops() const {
     std::lock_guard l(m_);
     return ops_;
@@ -92,13 +119,16 @@ std::vector<uint8_t> SonyCam::props() {
     const auto now = Clock::now();
     const auto ready = std::ranges::count_if(objects_, [&](const Object& o) { return o.readyAt <= now; });
     const int64_t q = quality == Quality::Jpeg ? 0x03 : quality == Quality::RawOnly ? 0x10 : 0x13;
-    const uint8_t on = manual ? 1 : 0;
+    const uint8_t on = manual ? 1 : 0, set = flaggedFixed ? 0 : 1;
+    const bool zero = readsSinceHandshake_++ < zeroReads;   // (a camera still catching up after the handshake)
     std::vector<sony::Prop> p = {
-        {sony::kCompression, ptp::kUint8, 1, 1, 3, q, F::Enum, 0, 0, 0, {2, 3, 0x10, 0x13}},
+        {sony::kCompression, ptp::kUint8, static_cast<uint8_t>(qualitySettable ? 1 : 0), 1, 3, q, F::Enum, 0, 0, 0, {2, 3, 0x10, 0x13}},
         {sony::kExposureProgram, ptp::kUint16, 0, 1, 2, program, F::Enum, 0, 0, 0, {1, 2, 3, 4}},
         {sony::kFocusMode, ptp::kUint16, 1, 1, 2, 1, F::Enum, 0, 0, 0, {1, 2, 0x8004}},
-        {sony::kShutterSpeed, ptp::kUint32, 1, on, shutter, shutter, listValues ? F::Enum : F::None, 0, 0, 0, listValues ? shutterList : std::vector<int64_t>{}},
-        {sony::kIso, ptp::kUint32, 1, on, sony::kIsoAuto, iso, listValues ? F::Enum : F::None, 0, 0, 0, listValues ? isoList : std::vector<int64_t>{}},
+        {sony::kShutterSpeed, ptp::kUint32, set, on, shutter, zero ? 0 : shutter, listValues ? F::Enum : F::None, 0, 0, 0,
+         listValues ? shutterList : std::vector<int64_t>{}},
+        {sony::kIso, ptp::kUint32, set, on, sony::kIsoAuto, zero ? 0 : iso, listValues ? F::Enum : F::None, 0, 0, 0,
+         listValues ? isoList : std::vector<int64_t>{}},
         {sony::kObjectInMemory, ptp::kUint16, 0, 1, 0x8000, 0x8000 + ready, F::None, 0, 0, 0, {}},
         {sony::kBatteryLevel, ptp::kInt8, 0, 1, 0, 80, F::Range, 0, 100, 1, {}},
         {sony::kSaveDestination, ptp::kUint16, 1, 1, 1, 1, F::Enum, 0, 0, 0, {1, 0x10, 0x11}},
@@ -156,6 +186,7 @@ ptp::Response SonyCam::handle(uint16_t op, std::span<const uint32_t> params, ptp
             sdioStep = static_cast<int>(p0);
             if (p0 == 3) {
                 busyLeft_ = busyAfterHandshake;
+                readsSinceHandshake_ = 0;
                 for (int i = 0; i < leftover; ++i) objects_.push_back({ptp::kFormatJpeg, jpegOf(width, height, 0), width, height, now, 0});
                 leftover = 0;
             }
@@ -185,8 +216,10 @@ ptp::Response SonyCam::handle(uint16_t op, std::span<const uint32_t> params, ptp
                 ++directSets;
             } else if (p0 == sony::kCompression) {
                 const int64_t v = r.u8();
+                if (!qualitySettable) return {ptp::kAccessDenied, {}};
                 quality = v == 0x10 ? Quality::RawOnly : v == 0x13 ? Quality::RawPlusJpeg : Quality::Jpeg;
             }
+            event(0xC203, p0);   // a property changed
             return {ptp::kOk, {}};
         }
         case sony::kSetControlDeviceB: {
@@ -196,6 +229,7 @@ ptp::Response SonyCam::handle(uint16_t op, std::span<const uint32_t> params, ptp
                 if (p0 == sony::kS2Button && v == sony::kButtonDown) {
                     ++shots;
                     if (!noPicture) addShot(now + std::chrono::milliseconds(shotMs));
+                    event(0xC203, sony::kObjectInMemory);
                 }
             } else if (p0 == sony::kShutterSpeed || p0 == sony::kIso) {
                 const int64_t v = r.u8();
@@ -204,12 +238,14 @@ ptp::Response SonyCam::handle(uint16_t op, std::span<const uint32_t> params, ptp
                 if (p0 == sony::kShutterSpeed) step(shutter, shutterList, dir);
                 else step(iso, isoList, dir);
                 ++stepsTaken;
+                event(0xC203, p0);
             }
             return {ptp::kOk, {}};
         }
         case ptp::kGetObjectInfo:
         case ptp::kGetObject: {
             if (op == ptp::kGetObject && p0 == sony::kLiveViewObject) {
+                if (liveViewSilent) return {0, {}};   // (no answer at all: the transports wait for one)
                 if (!liveView) return {ptp::kInvalidObjectHandle, {}};
                 ++liveFrames;
                 ptp::Writer w;
@@ -248,9 +284,15 @@ public:
     ptp::Response transact(uint16_t op, std::span<const uint32_t> params, ptp::Data phase, std::span<const uint8_t> out,
                            std::vector<uint8_t>* in) override {
         if (in) in->clear();
-        return c_.handle(op, params, phase, out, in);
+        const auto r = c_.handle(op, params, phase, out, in);
+        if (r.code == 0) throw ptp::LinkError("fake: no answer in time");
+        return r;
     }
     std::string kind() const override { return "direct"; }
+    bool recover() override {
+        c_.resetPtp();
+        return true;
+    }
 
 private:
     SonyCam& c_;
@@ -286,6 +328,10 @@ ptp::wpd::Values WpdDevice::send(ptp::wpd::Command c, const ptp::wpd::Values& in
         case C::ExecuteRead: {
             Context ctx{static_cast<uint16_t>(in.opCode.value_or(0)), in.params, {}, 0, false, {}};
             ctx.response = cam_.handle(ctx.op, ctx.params, ptp::Data::In, {}, &ctx.data);
+            if (ctx.response.code == 0) {   // no answer: the driver times out
+                out.hresult = static_cast<int32_t>(0x80070079);
+                break;
+            }
             out.totalSize = ctx.data.size();
             ctx.data.resize(ctx.data.size() - std::min<std::size_t>(ctx.data.size(), static_cast<std::size_t>(shortBy)));
             out.context = std::format("ctx{}", next_++);
@@ -376,6 +422,7 @@ void UsbPipe::write(std::span<const uint8_t> data) {
     while (c.left() >= 4) params.push_back(c.u32());
     std::vector<uint8_t> in;
     const auto res = cam_.handle(op, params, type == 2 ? ptp::Data::Out : ptp::Data::In, payload, &in);
+    if (res.code == 0) return;   // no answer at all
     if (badContainer) {
         badContainer = false;
         answer(7, 0, tid, {});
@@ -396,7 +443,33 @@ void UsbPipe::write(std::span<const uint8_t> data) {
     answer(3, res.code, tid, rp.data());
 }
 
+std::size_t UsbPipe::readEvent(std::span<uint8_t> buf, std::chrono::milliseconds timeout) {
+    const auto until = std::chrono::steady_clock::now() + timeout;
+    for (;;) {
+        if (auto e = cam_.takeEvent()) {
+            const std::size_t n = std::min(buf.size(), e->size());
+            std::copy_n(e->begin(), n, buf.begin());
+            return n;
+        }
+        if (std::chrono::steady_clock::now() >= until) return 0;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+}
+
+void UsbPipe::reset() {
+    ++resets;
+    out_.clear();
+    outAt_ = 0;
+    zlpDue_ = false;
+    pendingCommand_.clear();
+    cam_.resetPtp();
+}
+
 std::size_t UsbPipe::read(std::span<uint8_t> buf, std::chrono::milliseconds) {
+    if (holdForEvents) {   // the camera won't answer while an event of its waits to be read
+        for (int i = 0; i < 250 && cam_.eventsWaiting() > 0; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        if (cam_.eventsWaiting() > 0) throw ptp::LinkError("fake USB: no answer in time (an event waits)");
+    }
     if (zlpDue_) {
         zlpDue_ = false;
         return 0;

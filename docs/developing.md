@@ -228,8 +228,12 @@ through WinUSB's API instead (`ptp_winusb_win.cpp`). Linux and macOS use PTP ove
 libusb, loaded at run time (`ptp_libusb.cpp` declares the few libusb functions and structures it uses, so the build
 needs no libusb headers); a Sony device's vendor-specific interface with a pair of bulk pipes counts as PTP too, as
 gphoto2 finds cameras by their IDs rather than their class.
-`sony_ptp.*` is Sony's extension (the SDIO handshake, all properties in one dataset, values set directly or a notch at a
-time, the shutter buttons, a picture fetched from handle 0xFFFFC001 once ObjectInMemory says so), and
+PTP over USB reads the camera's interrupt pipe (its events) all the time on a thread of its own, and after a stuck
+transaction `Transport::recover()` sends PTP's Device Reset request and opens a new session. Both came from the first
+a6000 report: no answer at all to a live view request, which spoiled everything after it (and gphoto2's stalls on
+Windows came just as an event arrived). `sony_ptp.*` is Sony's extension (the SDIO handshake, all properties in one
+dataset, values set directly or a notch at a time, the shutter buttons, a picture fetched from handle 0xFFFFC001 once
+ObjectInMemory says so; the a6000's values read 0 for a moment after the handshake, so `settle()` waits for them), and
 `sony_camera.*` the `ICamera` that turns pictures into frames, through the baseline JPEG decoder in `jpeg_luma.*`
 (luminance only). The codes follow public descriptions of the protocol (libgphoto2's among them, LGPL: none of its code
 is used). Nothing of it has run against a real Sony yet: `slopcap-sonyprobe` is the first step, and

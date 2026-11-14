@@ -43,6 +43,19 @@ std::wstring property(HDEVINFO set, SP_DEVINFO_DATA& d, DWORD prop) {
     return s;
 }
 
+/// The USB class its compatible ids give (6: still image, 0xFF: vendor-specific; 0: neither or unknown).
+int usbClassOf(HDEVINFO set, SP_DEVINFO_DATA& d) {
+    DWORD type = 0, size = 0;
+    SetupDiGetDeviceRegistryPropertyW(set, &d, SPDRP_COMPATIBLEIDS, &type, nullptr, 0, &size);
+    if (size < sizeof(wchar_t)) return 0;
+    std::wstring s(size / sizeof(wchar_t) + 1, L'\0');
+    if (!SetupDiGetDeviceRegistryPropertyW(set, &d, SPDRP_COMPATIBLEIDS, &type, reinterpret_cast<BYTE*>(s.data()), size, nullptr)) return 0;
+    std::ranges::transform(s, s.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towupper(c)); });
+    if (s.find(L"CLASS_06") != std::wstring::npos) return 6;
+    if (s.find(L"CLASS_FF") != std::wstring::npos) return 0xFF;
+    return 0;
+}
+
 /// "VID_054C&PID_094E" -> 0x054C, 0x094E
 void idsOf(const std::wstring& hw, uint16_t& vid, uint16_t& pid) {
     std::wstring u = hw;
@@ -89,8 +102,8 @@ std::string lastError(const char* what) {
 
 class WinUsbPipe final : public UsbPipe {
 public:
-    WinUsbPipe(HANDLE file, WINUSB_INTERFACE_HANDLE usb, UCHAR in, UCHAR out, std::size_t packet)
-        : file_(file), usb_(usb), in_(in), out_(out), packet_(packet) {}
+    WinUsbPipe(HANDLE file, WINUSB_INTERFACE_HANDLE usb, UCHAR in, UCHAR out, UCHAR events, UCHAR ifc, std::size_t packet)
+        : file_(file), usb_(usb), in_(in), out_(out), events_(events), ifc_(ifc), packet_(packet) {}
     ~WinUsbPipe() override {
         WinUsb_Free(usb_);
         CloseHandle(file_);
@@ -112,12 +125,35 @@ public:
         return got;
     }
     std::size_t packetSize() const override { return packet_; }
+    bool hasEvents() const override { return events_ != 0; }
+    std::size_t readEvent(std::span<uint8_t> buf, std::chrono::milliseconds t) override {
+        timeout(events_, static_cast<ULONG>(std::clamp<int64_t>(t.count(), 1, 600000)));
+        ULONG got = 0;
+        if (WinUsb_ReadPipe(usb_, events_, buf.data(), static_cast<ULONG>(std::min<std::size_t>(buf.size(), 65536)), &got, nullptr)) return got;
+        const DWORD e = GetLastError();
+        if (e == ERROR_DEVICE_NOT_CONNECTED || e == ERROR_FILE_NOT_FOUND || e == ERROR_BAD_COMMAND) throw LinkError("the camera is gone");
+        if (e != ERROR_SEM_TIMEOUT) Sleep(static_cast<DWORD>(t.count()));   // (a stall: try again later)
+        return 0;
+    }
+    void reset() override {
+        // PTP's Device Reset Request (class-specific, to the interface), then the bulk pipes reset
+        WinUsb_AbortPipe(usb_, in_);
+        WinUsb_AbortPipe(usb_, out_);
+        WINUSB_SETUP_PACKET setup{};
+        setup.RequestType = 0x21;
+        setup.Request = 0x66;
+        setup.Index = ifc_;
+        ULONG n = 0;
+        WinUsb_ControlTransfer(usb_, setup, nullptr, 0, &n, nullptr);
+        WinUsb_ResetPipe(usb_, in_);
+        WinUsb_ResetPipe(usb_, out_);
+    }
 
 private:
     void timeout(UCHAR pipe, ULONG ms) { WinUsb_SetPipePolicy(usb_, pipe, PIPE_TRANSFER_TIMEOUT, sizeof ms, &ms); }
     HANDLE file_;
     WINUSB_INTERFACE_HANDLE usb_;
-    UCHAR in_, out_;
+    UCHAR in_, out_, events_, ifc_;
     std::size_t packet_;
 };
 
@@ -137,7 +173,7 @@ std::vector<UsbCameraEntry> listUsbCameras(uint16_t vendor) {
         idsOf(property(set, d, SPDRP_HARDWAREID), vid, pid);
         if (vendor && vid != vendor) continue;
         const std::wstring path = interfacePath(set, d);
-        UsbCameraEntry e{"winusb:" + utf8(path), vid, pid, utf8(property(set, d, SPDRP_MFG)), {}, {}, 0xFF};
+        UsbCameraEntry e{"winusb:" + utf8(path), vid, pid, utf8(property(set, d, SPDRP_MFG)), {}, {}, usbClassOf(set, d)};
         e.model = utf8(property(set, d, SPDRP_FRIENDLYNAME));
         if (e.model.empty()) e.model = utf8(property(set, d, SPDRP_DEVICEDESC));
         if (path.empty()) e.problem = "on WinUSB, but no device interface registered for it (reinstall the driver)";
@@ -159,12 +195,14 @@ std::unique_ptr<UsbPipe> openUsbCamera(const std::string& id) {
         throw CameraError(why);
     }
     USB_INTERFACE_DESCRIPTOR desc{};
-    UCHAR in = 0, out = 0;
+    UCHAR in = 0, out = 0, events = 0;
     std::size_t packet = 512;
     if (WinUsb_QueryInterfaceSettings(usb, 0, &desc))
         for (UCHAR i = 0; i < desc.bNumEndpoints; ++i) {
             WINUSB_PIPE_INFORMATION p{};
-            if (!WinUsb_QueryPipe(usb, 0, i, &p) || p.PipeType != UsbdPipeTypeBulk) continue;
+            if (!WinUsb_QueryPipe(usb, 0, i, &p)) continue;
+            if (p.PipeType == UsbdPipeTypeInterrupt && (p.PipeId & 0x80)) events = p.PipeId;
+            if (p.PipeType != UsbdPipeTypeBulk) continue;
             if (p.PipeId & 0x80) in = p.PipeId;
             else out = p.PipeId;
             if (p.MaximumPacketSize) packet = p.MaximumPacketSize;
@@ -176,7 +214,7 @@ std::unique_ptr<UsbPipe> openUsbCamera(const std::string& id) {
     }
     WinUsb_ResetPipe(usb, in);   // (as libusb's clear_halt: a pipe left stalled by an earlier program)
     WinUsb_ResetPipe(usb, out);
-    return std::make_unique<WinUsbPipe>(file, usb, in, out, packet);
+    return std::make_unique<WinUsbPipe>(file, usb, in, out, events, desc.bInterfaceNumber, packet);
 }
 
 std::string libusbProblem() { return {}; }

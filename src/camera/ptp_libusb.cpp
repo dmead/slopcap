@@ -4,9 +4,12 @@
 
 #include <dlfcn.h>
 
+#include <algorithm>
 #include <climits>
 #include <format>
 #include <mutex>
+#include <optional>
+#include <thread>
 
 namespace slopcap::ptp {
 
@@ -73,6 +76,8 @@ struct Lib {
     int (*release_interface)(libusb_device_handle*, int) = nullptr;
     int (*set_auto_detach_kernel_driver)(libusb_device_handle*, int) = nullptr;
     int (*bulk_transfer)(libusb_device_handle*, unsigned char, unsigned char*, int, int*, unsigned int) = nullptr;
+    int (*interrupt_transfer)(libusb_device_handle*, unsigned char, unsigned char*, int, int*, unsigned int) = nullptr;
+    int (*control_transfer)(libusb_device_handle*, uint8_t, uint8_t, uint16_t, uint16_t, unsigned char*, uint16_t, unsigned int) = nullptr;
     int (*get_string_descriptor_ascii)(libusb_device_handle*, uint8_t, unsigned char*, int) = nullptr;
     int (*clear_halt)(libusb_device_handle*, unsigned char) = nullptr;
     const char* (*error_name)(int) = nullptr;
@@ -117,6 +122,8 @@ Lib& lib() {
         bind(l, l.release_interface, "libusb_release_interface");
         bind(l, l.set_auto_detach_kernel_driver, "libusb_set_auto_detach_kernel_driver");
         bind(l, l.bulk_transfer, "libusb_bulk_transfer");
+        bind(l, l.interrupt_transfer, "libusb_interrupt_transfer");
+        bind(l, l.control_transfer, "libusb_control_transfer");
         bind(l, l.get_string_descriptor_ascii, "libusb_get_string_descriptor_ascii");
         bind(l, l.clear_halt, "libusb_clear_halt");
         bind(l, l.error_name, "libusb_error_name");
@@ -129,7 +136,7 @@ Lib& lib() {
 /// The PTP interface of a device and its bulk endpoints.
 struct PtpInterface {
     int number = -1, cls = 0;
-    uint8_t in = 0, out = 0;
+    uint8_t in = 0, out = 0, events = 0;   ///< bulk in and out; interrupt in (0: none)
     std::size_t packet = 512;
 };
 
@@ -149,7 +156,8 @@ std::optional<PtpInterface> findInterface(Lib& l, libusb_device* dev, bool vendo
         p.cls = alt.bInterfaceClass;
         for (int e = 0; e < alt.bNumEndpoints; ++e) {
             const auto& ep = alt.endpoint[e];
-            if ((ep.bmAttributes & 3) != 2) continue;   // bulk only (the interrupt pipe carries events: not used)
+            if ((ep.bmAttributes & 3) == 3 && (ep.bEndpointAddress & 0x80)) p.events = ep.bEndpointAddress;   // interrupt in
+            if ((ep.bmAttributes & 3) != 2) continue;
             if (ep.bEndpointAddress & 0x80) p.in = ep.bEndpointAddress;
             else p.out = ep.bEndpointAddress;
             if (ep.wMaxPacketSize) p.packet = ep.wMaxPacketSize & 0x7FF;
@@ -193,6 +201,21 @@ public:
         return static_cast<std::size_t>(got);
     }
     std::size_t packetSize() const override { return p_.packet; }
+    bool hasEvents() const override { return p_.events != 0; }
+    std::size_t readEvent(std::span<uint8_t> buf, std::chrono::milliseconds timeout) override {
+        int got = 0;
+        const int e = l_.interrupt_transfer(h_, p_.events, buf.data(), static_cast<int>(std::min<std::size_t>(buf.size(), INT_MAX)), &got,
+                                            static_cast<unsigned>(timeout.count()));
+        if (e == kErrNoDevice) throw LinkError("the camera is gone");
+        if (e != 0 && e != kErrTimeout) std::this_thread::sleep_for(timeout);   // (a stall or an overflow: try again later)
+        return e == 0 ? static_cast<std::size_t>(got) : 0;
+    }
+    void reset() override {
+        // PTP's Device Reset Request (class-specific, to the interface), then the bulk pipes' halts cleared
+        l_.control_transfer(h_, 0x21, 0x66, 0, static_cast<uint16_t>(p_.number), nullptr, 0, 2000);
+        l_.clear_halt(h_, p_.in);
+        l_.clear_halt(h_, p_.out);
+    }
 
 private:
     std::string problem(int e) const {

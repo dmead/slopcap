@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <format>
 #include <sstream>
 #include <thread>
@@ -549,7 +550,7 @@ TEST_CASE("sony: handshake, settings, shutter", "[sony]") {
         cam.noPicture = true;
         CHECK_THAT(errorOf([&] { s.shoot(100ms); }), ContainsSubstring("Release w/o Lens"));
         std::atomic<int> asked{0};
-        CHECK_FALSE(s.shoot(10s, [&] { return ++asked > 3; }));
+        CHECK_FALSE(s.shoot(300ms, [&] { return ++asked > 3; }));   // (its picture is owed for 300 ms, then given up)
         cam.noPicture = false;
         s.drain();
         // a shot abandoned while the camera works on it: its picture, when it comes, isn't the next shot's
@@ -619,8 +620,16 @@ TEST_CASE("sony camera: finding and opening", "[sony][camera]") {
     f.cam.operations = {ptp::kGetDeviceInfo, ptp::kGetObject};
     CHECK_THAT(errorOf([] { openCamera("sony"); }), ContainsSubstring("set the camera's USB Connection to PC Remote"));
     f.cam.operations = fake::SonyCam().operations;
+    // RAW alone: JPEG Fine while open, RAW again after; one that can't be changed gives nothing to score
     f.cam.quality = fake::SonyCam::Quality::RawOnly;
+    {
+        auto c = openCamera("sony");
+        CHECK(f.cam.quality == fake::SonyCam::Quality::Jpeg);
+    }
+    CHECK(f.cam.quality == fake::SonyCam::Quality::RawOnly);
+    f.cam.qualitySettable = false;
     CHECK_THAT(errorOf([] { openCamera("sony"); }), ContainsSubstring("sent no JPEG"));
+    f.cam.qualitySettable = true;
     f.cam.quality = fake::SonyCam::Quality::Jpeg;
     f.cam.model = "Unknown-1";
     CHECK(openCamera("sony")->info().pixelUm == 0);
@@ -867,4 +876,105 @@ TEST_CASE("sony probe: what to do when Windows hides the camera", "[sony][probe]
     CHECK_THAT(n[1], ContainsSubstring("Media Feature Pack"));
     CHECK_THAT(n[2], ContainsSubstring("VID_054C&PID_094E ILCE-6000"));
     CHECK(sonyprobe::diagnose({row("WinUSB", "", "", 0)}, "", "Education, Windows 10 Education, build 19045").size() == 1);   // not an N
+}
+
+TEST_CASE("ptp over USB: events read all the time; a stuck transaction recovered", "[sony][usb]") {
+    {   // a camera that answers only once its events are read: the transport reads them on the side
+        fake::SonyCam cam;
+        auto pipe = std::make_unique<fake::UsbPipe>(cam);
+        auto* p = pipe.get();
+        p->holdForEvents = true;
+        ptp::UsbTransport t(std::move(pipe));
+        sony::Session s(t, 5);
+        s.connect();
+        REQUIRE(s.shoot(5s));
+        const auto ev = t.events();
+        CHECK(std::ranges::any_of(ev, [](const ptp::Event& e) { return e.code == 0xC203 && e.params == std::vector<uint32_t>{sony::kObjectInMemory}; }));
+        // no answer at all: the error says where it stuck; recover() resets and opens a new session
+        cam.liveViewSilent = true;
+        CHECK_THAT(errorOf([&] { s.liveView(); }), ContainsSubstring("operation 0x1009, waiting for its answer"));
+        REQUIRE(t.recover());
+        CHECK(p->resets == 1);
+        sony::Session again(t, 5);
+        CHECK_NOTHROW(again.connect());
+        CHECK(again.shoot(5s));
+        cam.fail[ptp::kOpenSession] = ptp::kGeneralError;
+        CHECK_FALSE(t.recover());
+    }
+    {   // the same camera without its events read: stuck as soon as one waits
+        fake::SonyCam cam;
+        auto pipe = std::make_unique<fake::UsbPipe>(cam);
+        pipe->interruptPipe = false;
+        pipe->holdForEvents = true;
+        ptp::UsbTransport t(std::move(pipe));
+        sony::Session s(t, 5);
+        s.connect();
+        CHECK_THAT(errorOf([&] { s.shoot(5s); }), ContainsSubstring("an event waits"));
+        CHECK(t.events().empty());
+    }
+    {   // the plain transport has neither
+        fake::SonyCam cam;
+        ptp::wpd::WpdTransport w(std::make_unique<fake::WpdDevice>(cam));
+        CHECK(w.events().empty());
+        CHECK_FALSE(w.recover());
+    }
+}
+
+TEST_CASE("sony: values that read 0 until the camera catches up", "[sony]") {
+    fake::SonyCam cam;
+    cam.zeroReads = 3;
+    auto t = fake::directTransport(cam);
+    sony::Session s(*t, 5);
+    s.connect();
+    CHECK(s.prop(sony::kIso)->current == 0);
+    CHECK(s.settle(2s));
+    CHECK(s.prop(sony::kIso)->current == 800);
+    cam.zeroReads = 1000;
+    sony::Session never(*t, 5);
+    never.connect();
+    CHECK_FALSE(never.settle(100ms));
+}
+
+TEST_CASE("sony probe: a camera like the first real a6000", "[sony][probe]") {
+    auto a6000 = [](fake::SonyCam& c) {
+        c.liveViewSilent = true;   // no answer to GetObject 0xFFFFC002
+        c.zeroReads = 2;           // values 0 just after the handshake
+        c.flaggedFixed = true;     // shutter speed and ISO flagged fixed, though notches work
+        c.quality = fake::SonyCam::Quality::RawOnly;
+    };
+    sonyprobe::Options o;
+    o.liveFrames = 2;
+    {
+        fake::SonyCam cam;
+        a6000(cam);
+        auto t = fake::directTransport(cam);
+        std::ostringstream log;
+        std::vector<sonyprobe::File> files;
+        const auto report = sonyprobe::run(*t, o, log, files).dump();
+        CHECK_THAT(log.str(), ContainsSubstring("the camera's values came"));
+        CHECK_THAT(log.str(), ContainsSubstring("flagged not settable, but notches work"));
+        CHECK_THAT(log.str(), ContainsSubstring("RAW+JPEG for the pictures"));
+        CHECK_THAT(log.str(), ContainsSubstring("picture 1: JPEG"));
+        CHECK_THAT(log.str(), ContainsSubstring("live view over USB: no (no answer at all)"));
+        CHECK_THAT(log.str(), ContainsSubstring("recovering (USB reset, new session, Sony handshake): done"));
+        CHECK_THAT(report, ContainsSubstring("\"recovered\": true"));
+        CHECK_THAT(report, ContainsSubstring("propertiesAtEnd"));
+        CHECK_THAT(report, ContainsSubstring("\"trace\""));
+        CHECK(cam.quality == fake::SonyCam::Quality::RawOnly);   // put back
+        CHECK(std::ranges::count_if(files, [](const sonyprobe::File& x) { return x.suffix.ends_with(".jpg"); }) == 1);
+    }
+    {   // over USB, from a camera that holds its answers while an event waits: the events are read on the side
+        fake::SonyCam cam;
+        a6000(cam);
+        auto pipe = std::make_unique<fake::UsbPipe>(cam);
+        pipe->holdForEvents = true;
+        ptp::UsbTransport t(std::move(pipe));
+        std::ostringstream log;
+        std::vector<sonyprobe::File> files;
+        const auto report = sonyprobe::run(t, o, log, files).dump();
+        CHECK_THAT(log.str(), ContainsSubstring("picture 1: JPEG"));
+        CHECK_THAT(log.str(), ContainsSubstring("events from the camera:"));
+        CHECK_THAT(report, ContainsSubstring("\"code\": \"0xC203\""));
+        CHECK_THAT(report, ContainsSubstring("\"recovered\": true"));
+    }
 }

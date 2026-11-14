@@ -17,7 +17,9 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <set>
+#include <thread>
 
 namespace fake {
 
@@ -46,6 +48,11 @@ public:
     int leftover = 0;                   ///< pictures waiting when we connect
     int busyAfterHandshake = 0;         ///< GetAllDevicePropData answers busy this many times
     bool oddProps = true;               ///< an array-typed and a string-typed property in the dataset
+    // as a real a6000 did (its first report, 2026-11-13)
+    bool liveViewSilent = false;        ///< GetObject 0xFFFFC002 gets no answer at all
+    int zeroReads = 0;                  ///< the first this many property reads after the handshake show shutter and ISO as 0
+    bool flaggedFixed = false;          ///< shutter speed and ISO flagged not settable (getSet 0) though notches work
+    bool qualitySettable = true;
     std::map<uint16_t, uint16_t> fail;      ///< operation -> response code it answers
     std::map<uint16_t, int> failTimes;      ///< operation -> how many more times it answers General Error
     std::map<uint16_t, int> linkFailTimes;  ///< operation -> how many more times the link breaks on it
@@ -56,6 +63,10 @@ public:
     /// The scene (luminance, width, height, picture number); default a disc. Change it with setDraw() while streaming.
     void setDraw(std::function<void(uint8_t*, int, int, int)> draw);
     void setUnplugged(bool gone);       ///< every transaction from now on fails as if the cable were pulled
+    /// The next event for the interrupt pipe (a whole PTP event container), if one waits; how many wait.
+    std::optional<std::vector<uint8_t>> takeEvent();
+    int eventsWaiting() const;
+    void resetPtp();                    ///< PTP's Device Reset request: the session and Sony's handshake are gone
 
     // ---- what happened
     std::atomic<int> shots{0}, stepsTaken{0}, directSets{0};
@@ -80,6 +91,9 @@ private:
     std::vector<uint8_t> props();
     void step(int64_t& value, const std::vector<int64_t>& list, int64_t dir);
     void addShot(std::chrono::steady_clock::time_point at);
+    void event(uint16_t code, uint32_t param);   ///< (m_ held)
+    std::deque<std::vector<uint8_t>> events_;
+    int readsSinceHandshake_ = 0;
     mutable std::mutex m_;
     std::function<void(uint8_t*, int, int, int)> draw_;
     bool unplugged_ = false;
@@ -128,7 +142,12 @@ public:
     bool events = false;        ///< an event container before every response
     bool staleResponse = false; ///< one answer to an old transaction before the next response
     bool badContainer = false;  ///< the next answer is of an unknown container type
-    int writes = 0, emptyWrites = 0;
+    bool interruptPipe = true;  ///< has an interrupt pipe, for the camera's events
+    bool holdForEvents = false; ///< answers wait (up to half a second) while an event is unread, then never come
+    bool hasEvents() const override { return interruptPipe; }
+    std::size_t readEvent(std::span<uint8_t> buf, std::chrono::milliseconds timeout) override;
+    void reset() override;
+    int writes = 0, emptyWrites = 0, resets = 0;
 
 private:
     void answer(uint16_t type, uint16_t code, uint32_t tid, std::span<const uint8_t> payload);

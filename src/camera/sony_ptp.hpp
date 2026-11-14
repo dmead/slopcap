@@ -30,6 +30,7 @@ inline constexpr uint16_t kCompression = 0x5004, kFNumber = 0x5007, kFocusMode =
 inline constexpr int64_t kButtonUp = 1, kButtonDown = 2;
 inline constexpr int64_t kStepUp = 0x01, kStepDown = 0xFF;   ///< SetControlDeviceB's one-notch steps (direction learned)
 inline constexpr int64_t kManualExposure = 0x0001;           ///< kExposureProgram: M
+inline constexpr int64_t kQualityFine = 0x03, kQualityRaw = 0x10, kQualityRawJpeg = 0x13;   ///< kCompression
 inline constexpr uint32_t kIsoAuto = 0xFFFFFF;
 // objects
 inline constexpr uint32_t kShotObject = 0xFFFFC001, kLiveViewObject = 0xFFFFC002;
@@ -97,6 +98,10 @@ public:
     const ExtInfo& ext() const { return ext_; }
 
     void refresh();   ///< reads all properties again
+    /// Right after the handshake a camera may report most values as 0 while it catches up (an a6000 did: ISO 0, the
+    /// shutter speed 0): reads the properties again until the ISO (else the shutter speed) is non-zero, for up to
+    /// `max`. True when it was.
+    bool settle(std::chrono::milliseconds max);
     const std::vector<Prop>& props() const { return props_; }
     const Prop* prop(uint16_t code) const;
     const std::vector<uint8_t>& lastPropData() const { return propData_; }   ///< the dataset as read, for the probe

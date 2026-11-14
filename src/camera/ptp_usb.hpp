@@ -7,8 +7,11 @@
 
 #include "camera/ptp.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <memory>
+#include <mutex>
+#include <thread>
 
 namespace slopcap::ptp {
 
@@ -22,19 +25,34 @@ public:
     /// The bulk endpoints' packet size (512 at USB 2 high speed): a transfer that fills whole packets ends with an
     /// empty one.
     virtual std::size_t packetSize() const = 0;
+    /// Whether there is an interrupt pipe, which carries the camera's events.
+    virtual bool hasEvents() const { return false; }
+    /// One transfer from the interrupt pipe: the bytes received, 0 when nothing came in `timeout`. Called from a
+    /// thread of its own while the bulk pipes are in use. Throws LinkError when the camera is gone.
+    virtual std::size_t readEvent(std::span<uint8_t> buf, std::chrono::milliseconds timeout) {
+        (void)buf, (void)timeout;
+        return 0;
+    }
+    /// PTP's Device Reset request (class-specific, 0x66) and the bulk pipes cleared: after a stuck transaction.
+    virtual void reset() {}
 };
 
 class UsbTransport final : public Transport {
 public:
-    /// Takes the pipes and opens a session (one left open by an earlier program is closed and opened again).
+    /// Takes the pipes and opens a session (one left open by an earlier program is closed and opened again). Reads
+    /// the camera's events from the interrupt pipe all the time, on a thread of its own: a camera may hold back its
+    /// answers while an event waits to be read.
     explicit UsbTransport(std::unique_ptr<UsbPipe> pipe, std::chrono::milliseconds timeout = std::chrono::seconds(10));
     ~UsbTransport() override;   ///< closes the session
     UsbTransport(const UsbTransport&) = delete;
     UsbTransport& operator=(const UsbTransport&) = delete;
 
+    /// Throws LinkError naming the operation and the stage it stuck in (sending it, waiting for its answer).
     Response transact(uint16_t op, std::span<const uint32_t> params, Data phase, std::span<const uint8_t> out,
                       std::vector<uint8_t>* in) override;
     std::string kind() const override { return "USB"; }
+    std::vector<Event> events() const override;
+    bool recover() override;
 
 private:
     struct Header {
@@ -48,6 +66,9 @@ private:
     void fill(std::size_t n);                      ///< until pending_ holds n bytes
     Response doTransact(uint16_t op, std::span<const uint32_t> params, Data phase, std::span<const uint8_t> out,
                         std::vector<uint8_t>* in);
+    void openSession();
+    void addEvent(std::span<const uint8_t> container);
+    void readEvents();                             ///< the event thread
 
     std::unique_ptr<UsbPipe> pipe_;
     std::chrono::milliseconds timeout_;
@@ -55,6 +76,11 @@ private:
     bool session_ = false;
     std::vector<uint8_t> pending_;   ///< bytes read but not yet used (a device that skips an empty packet sends more)
     std::size_t pendingPos_ = 0;
+    std::chrono::steady_clock::time_point opened_ = std::chrono::steady_clock::now();
+    mutable std::mutex eventsMutex_;
+    std::vector<Event> events_;
+    std::atomic<bool> stopEvents_{false};
+    std::thread eventThread_;
 };
 
 // ---------------------------------------------------------------- libusb (Linux, macOS)

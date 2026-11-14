@@ -102,6 +102,12 @@ SonyCamera::SonyCamera(std::string_view which) {
     if (!dev.supports(sony::kSdioConnect))
         throw CameraError(std::format("{} doesn't offer remote control over USB: set the camera's USB Connection to PC Remote", info_.model));
     s_->connect();
+    s_->settle(std::chrono::seconds(3));   // (the values read 0 until the camera has caught up)
+    // RAW alone gives nothing to score: JPEG Fine while we have the camera (put back when we let go of it)
+    if (const auto* q = s_->prop(sony::kCompression); q && q->current == sony::kQualityRaw && q->settable()) {
+        s_->setValue(sony::kCompression, sony::kQualityFine, [](int64_t v) { return static_cast<double>(v); });
+        restoreQuality_ = sony::kQualityRaw;
+    }
 
     if (const auto* p = s_->prop(sony::kShutterSpeed); p && p->form == sony::Prop::Form::Enum)
         for (auto v : p->values)
@@ -133,7 +139,11 @@ SonyCamera::SonyCamera(std::string_view which) {
 SonyCamera::~SonyCamera() {
     try {
         stopStream();
-    } catch (const std::exception&) {
+        if (restoreQuality_) {
+            std::lock_guard io(io_);
+            s_->setValue(sony::kCompression, *restoreQuality_, [](int64_t v) { return static_cast<double>(v); });
+        }
+    } catch (const std::exception&) {   // (unplugged: nothing to put back)
     }
 }
 

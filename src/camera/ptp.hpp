@@ -52,6 +52,13 @@ struct Response {
 
 enum class Data { None, In, Out };
 
+/// One of the camera's events (its interrupt pipe): when it came, since the transport opened, its code and parameters.
+struct Event {
+    double atMs = 0;
+    uint16_t code = 0;
+    std::vector<uint32_t> params;
+};
+
 /// One PTP session with a camera. Not thread-safe: callers serialise transactions.
 class Transport {
 public:
@@ -62,6 +69,11 @@ public:
                               std::vector<uint8_t>* in) = 0;
     /// What carries it, for reports: "WPD" or "USB".
     virtual std::string kind() const = 0;
+    /// The camera's events so far, where the transport reads them (PTP over USB: its interrupt pipe, all the time).
+    virtual std::vector<Event> events() const { return {}; }
+    /// After a transaction got stuck: a fresh session (PTP's Device Reset request, cleared pipes, OpenSession). False
+    /// where the transport can't. A vendor's own state (Sony's handshake) has to be set up again.
+    virtual bool recover() { return false; }
 };
 
 /// Transactions that must succeed (they throw CameraError naming `what` and the response otherwise).

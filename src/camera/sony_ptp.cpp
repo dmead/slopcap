@@ -284,6 +284,17 @@ void Session::refresh() {
     props_ = parseAllProps(propData_, ext_.version, &stoppedAt_);
 }
 
+bool Session::settle(std::chrono::milliseconds max) {
+    return waitFor(
+        [&] {
+            refresh();
+            if (const Prop* p = prop(kIso)) return p->current != 0;
+            if (const Prop* p = prop(kShutterSpeed)) return p->current != 0;
+            return true;
+        },
+        max);
+}
+
 const Prop* Session::prop(uint16_t code) const {
     const auto it = std::ranges::find(props_, code, &Prop::code);
     return it == props_.end() ? nullptr : &*it;

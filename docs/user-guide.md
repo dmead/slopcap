@@ -43,7 +43,8 @@ On the camera, before connecting:
 - **MENU → Setup → USB Connection → PC Remote** (the camera then belongs to the computer while it's connected).
 - **Mode dial on M**, so SlopCap can set the shutter speed and ISO. In other modes the camera sets them, and SlopCap
   takes pictures as they come.
-- **Quality: Fine or Extra fine**, or RAW & JPEG. SlopCap reads the JPEG; with RAW alone there is nothing for it.
+- **Quality: Fine**, or RAW & JPEG. SlopCap reads the JPEG: a camera set to RAW alone is switched to Fine while
+  SlopCap has it, and back to RAW afterwards.
 - On a telescope, with no electronic lens: **MENU → Custom Settings → Release w/o Lens → Enable**, or the shutter won't
   fire. With a lens, set it to manual focus (MF) so each picture is taken at once.
 - A full battery, or the camera's mains adapter: test pictures use it up faster than you'd think.

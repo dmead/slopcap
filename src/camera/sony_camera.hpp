@@ -2,8 +2,9 @@
 // shot, taken, downloaded and decoded to its luminance, full resolution, 8-bit mono (the ROI is a crop of it). Shots
 // follow one another while streaming, "Interval" seconds apart if set. Controls: "Exposure" (microseconds, set to the
 // nearest shutter speed the camera has) and "ISO", both only with the mode dial on M, and "Interval". Opening the
-// camera takes one picture: its size is the frame size. Windows reaches the camera through its own driver (WPD),
-// Linux and macOS through libusb.
+// camera takes one picture: its size is the frame size. A camera set to RAW alone is set to JPEG Fine while it is
+// open, and back to RAW after. Windows reaches the camera through its own driver (WPD) or WinUSB, Linux and macOS
+// through libusb.
 #pragma once
 
 #include "camera/camera.hpp"
@@ -78,6 +79,7 @@ private:
     std::atomic<int> waitingForIo_{0};         ///< callers queued for io_: the next shot waits for them
     CameraInfo info_;
     std::vector<int64_t> shutterList_, isoList_;   ///< what the camera offers, when it says (else a standard series)
+    std::optional<int64_t> restoreQuality_;        ///< the camera's own Quality, when we changed it
 
     mutable std::mutex state_;                 ///< everything below, and the cache
     mutable Cache cache_;
