@@ -50,17 +50,69 @@ void UsbTransport::openSession() {
     session_ = true;
 }
 
-bool UsbTransport::recover() {
+bool UsbTransport::recover(std::string* how) {
+    // As the Still Image class has it: the transaction cancelled, so the camera abandons its data phase; what was
+    // already on its way taken in (a camera that ignores the cancel sends the rest of its picture, and takes no new
+    // command until it has); how it is; PTP's Device Reset, the pipes cleared (a camera may stall them to end a
+    // transfer); anything more taken in; a new session. Each step is tried whatever the one before did.
+    std::string log;
+    auto note = [&](const std::string& s) { log += (log.empty() ? "" : "; ") + s; };
     session_ = false;
     pending_.clear();
     pendingPos_ = 0;
     try {
-        pipe_->reset();
-        openSession();
-        return true;
-    } catch (const std::exception&) {
-        return false;
+        pipe_->cancel(lastTid_);
+        note(std::format("transaction {} cancelled", lastTid_));
+    } catch (const std::exception& e) {
+        note(std::format("cancel: {}", e.what()));
     }
+    std::string drained;
+    drain(drained);
+    note(drained);
+    try {
+        uint16_t st = pipe_->status();
+        for (int i = 0; i < 30 && st == kDeviceBusy; ++i) {   // busy until it has abandoned the transfer
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            st = pipe_->status();
+        }
+        if (st) note("camera status " + responseText(st));
+    } catch (const std::exception& e) {
+        note(std::format("status: {}", e.what()));
+    }
+    try {
+        pipe_->reset();
+        note("reset");
+    } catch (const std::exception& e) {
+        note(std::format("reset: {}", e.what()));
+    }
+    if (drain(drained)) note(drained);
+    bool ok = false;
+    try {
+        openSession();
+        ok = true;
+        note("new session");
+    } catch (const std::exception& e) {
+        note(std::format("new session: {}", e.what()));
+    }
+    if (how) *how = log;
+    return ok;
+}
+
+std::size_t UsbTransport::drain(std::string& note) {
+    // until a read gets nothing for half a second, or a minute has gone (a picture as large as any is in by then)
+    std::vector<uint8_t> buf(64 * 1024);
+    std::size_t total = 0;
+    const auto t0 = std::chrono::steady_clock::now();
+    std::string end = "still coming after a minute";
+    try {
+        while (std::chrono::steady_clock::now() - t0 < std::chrono::minutes(1)) total += pipe_->read(buf, std::chrono::milliseconds(500));
+    } catch (const std::exception& e) {
+        end = e.what();
+    }
+    const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    note = total ? std::format("took in {} bytes still on their way in {:.1f} s, until: {}", total, secs, end)
+                 : std::format("nothing on its way ({})", end);
+    return total;
 }
 
 std::vector<Event> UsbTransport::events() const {
@@ -104,6 +156,7 @@ Response UsbTransport::doTransact(uint16_t op, std::span<const uint32_t> params,
                                   std::vector<uint8_t>* in) {
     if (params.size() > 5) throw Error(std::format("PTP operation 0x{:04X}: {} parameters (at most 5)", op, params.size()));
     const uint32_t tid = tid_++;
+    lastTid_ = tid;
     std::vector<uint8_t> scratch;
     auto& data = in && phase == Data::In ? *in : scratch;
     const char* stage = "sending it";
@@ -137,6 +190,8 @@ Response UsbTransport::doTransact(uint16_t op, std::span<const uint32_t> params,
             return r;
         }
     } catch (const LinkError& e) {
+        pending_.clear();   // (the rest of a broken container: of no use to the next transaction)
+        pendingPos_ = 0;
         throw LinkError(std::format("{} (operation 0x{:04X}, {}{})", e.what(), op, stage,
                                     data.empty() ? std::string() : std::format(", {} bytes in", data.size())));
     }

@@ -229,9 +229,13 @@ libusb, loaded at run time (`ptp_libusb.cpp` declares the few libusb functions a
 needs no libusb headers); a Sony device's vendor-specific interface with a pair of bulk pipes counts as PTP too, as
 gphoto2 finds cameras by their IDs rather than their class.
 PTP over USB reads the camera's interrupt pipe (its events) all the time on a thread of its own, and after a stuck
-transaction `Transport::recover()` sends PTP's Device Reset request and opens a new session. Both came from the first
-a6000 report: no answer at all to a live view request, which spoiled everything after it (and gphoto2's stalls on
-Windows came just as an event arrived). `sony_ptp.*` is Sony's extension (the SDIO handshake, all properties in one
+transaction `Transport::recover()` cancels it (PTP's Cancel request), takes in whatever the camera still sends, asks its
+status, sends PTP's Device Reset request and opens a new session, saying what each step got. These came from the a6000
+reports: no answer at all to a live view request, which spoiled everything after it (and gphoto2's stalls on Windows
+came just as an event arrived); then a picture's download that broke a few milliseconds in, the camera sending the
+rest regardless, through the reset. On WinUSB every transfer is overlapped, with an event per pipe, waited for and
+aborted by `ptp_winusb_win.cpp` itself (no pipe timeout policy, no blocking calls from two threads), bulk-in transfers
+are 64 KB at most, the interrupt pipe keeps one read out from call to call, and errors carry Windows' number. `sony_ptp.*` is Sony's extension (the SDIO handshake, all properties in one
 dataset, values set directly or a notch at a time, the shutter buttons, a picture fetched from handle 0xFFFFC001 once
 ObjectInMemory says so; the a6000's values read 0 for a moment after the handshake, so `settle()` waits for them), and
 `sony_camera.*` the `ICamera` that turns pictures into frames, through the baseline JPEG decoder in `jpeg_luma.*`

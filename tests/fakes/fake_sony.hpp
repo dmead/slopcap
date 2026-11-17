@@ -53,6 +53,8 @@ public:
     int zeroReads = 0;                  ///< the first this many property reads after the handshake show shutter and ISO as 0
     bool flaggedFixed = false;          ///< shutter speed and ISO flagged not settable (getSet 0) though notches work
     bool qualitySettable = true;
+    // as it did the second time (2026-11-14): a download that broke half way, the camera sending on regardless
+    int keepObjects = 0;                ///< the next this many downloads leave the picture in the camera
     std::map<uint16_t, uint16_t> fail;      ///< operation -> response code it answers
     std::map<uint16_t, int> failTimes;      ///< operation -> how many more times it answers General Error
     std::map<uint16_t, int> linkFailTimes;  ///< operation -> how many more times the link breaks on it
@@ -144,10 +146,18 @@ public:
     bool badContainer = false;  ///< the next answer is of an unknown container type
     bool interruptPipe = true;  ///< has an interrupt pipe, for the camera's events
     bool holdForEvents = false; ///< answers wait (up to half a second) while an event is unread, then never come
+    int breakDownloads = 0;           ///< the next this many GetObject data phases break after breakAfter bytes, the rest still queued
+    std::size_t breakAfter = 4096;
+    bool honorCancel = true;          ///< a Cancel request drops what is queued (false: ignored, as an a6000's seemed to be)
+    bool ignoreReset = false;         ///< a Device Reset leaves what is queued queued
+    int busyStatus = 0;               ///< Get Device Status says busy this many times
+    bool requestsFail = false;        ///< the class requests (cancel, status, reset) fail
     bool hasEvents() const override { return interruptPipe; }
     std::size_t readEvent(std::span<uint8_t> buf, std::chrono::milliseconds timeout) override;
+    void cancel(uint32_t tid) override;
+    uint16_t status() override;
     void reset() override;
-    int writes = 0, emptyWrites = 0, resets = 0;
+    int writes = 0, emptyWrites = 0, resets = 0, cancels = 0;
 
 private:
     void answer(uint16_t type, uint16_t code, uint32_t tid, std::span<const uint8_t> payload);

@@ -31,8 +31,8 @@ void drawSoftDisc(uint8_t* px, int w, int h, double blur) {
 
 SonyCam::SonyCam() {
     operations = {ptp::kGetDeviceInfo, ptp::kOpenSession,  ptp::kCloseSession,         ptp::kGetObjectInfo,       ptp::kGetObject,
-                  ptp::kGetDevicePropDesc, sony::kSdioConnect, sony::kGetSdioExtDeviceInfo, sony::kSetControlDeviceA, sony::kSetControlDeviceB,
-                  sony::kGetAllDevicePropData};
+                  ptp::kGetPartialObject, ptp::kGetDevicePropDesc, sony::kSdioConnect, sony::kGetSdioExtDeviceInfo, sony::kSetControlDeviceA,
+                  sony::kSetControlDeviceB, sony::kGetAllDevicePropData};
     // shortest exposure first, bulb last; ISO: auto, the values, a multi-frame noise reduction variant
     for (int d : {4000, 1000, 500, 250, 125, 60, 15, 4}) shutterList.push_back(sony::shutterValue(1, d));
     for (int n : {10, 40, 150, 300}) shutterList.push_back(sony::shutterValue(n, 10));
@@ -268,9 +268,18 @@ ptp::Response SonyCam::handle(uint16_t op, std::span<const uint32_t> params, ptp
                 data(ptp::packObjectInfo(info));
             } else {
                 data(o.data);
-                objects_.pop_front();
+                if (keepObjects > 0) --keepObjects;
+                else objects_.pop_front();
             }
             return {ptp::kOk, {}};
+        }
+        case ptp::kGetPartialObject: {   // (handle, offset, at most this many bytes): those bytes, and how many
+            if (p0 != sony::kShotObject || objects_.empty() || objects_.front().readyAt > now || params.size() < 3) return {ptp::kInvalidObjectHandle, {}};
+            const auto& d = objects_.front().data;
+            const std::size_t at = std::min<std::size_t>(params[1], d.size()), n = std::min<std::size_t>(params[2], d.size() - at);
+            data({d.begin() + static_cast<std::ptrdiff_t>(at), d.begin() + static_cast<std::ptrdiff_t>(at + n)});
+            if (at + n == d.size()) objects_.pop_front();
+            return {ptp::kOk, {static_cast<uint32_t>(n)}};
         }
         default: return {ptp::kOperationNotSupported, {}};
     }
@@ -289,8 +298,9 @@ public:
         return r;
     }
     std::string kind() const override { return "direct"; }
-    bool recover() override {
+    bool recover(std::string* how = nullptr) override {
         c_.resetPtp();
+        if (how) *how = "fake: reset";
         return true;
     }
 
@@ -456,13 +466,33 @@ std::size_t UsbPipe::readEvent(std::span<uint8_t> buf, std::chrono::milliseconds
     }
 }
 
+void UsbPipe::cancel(uint32_t) {
+    ++cancels;
+    if (requestsFail) throw ptp::LinkError("fake USB: request failed");
+    if (!honorCancel) return;
+    out_.clear();   // the rest of the data phase, and no response
+    outAt_ = 0;
+    zlpDue_ = false;
+}
+
+uint16_t UsbPipe::status() {
+    if (requestsFail) throw ptp::LinkError("fake USB: request failed");
+    if (busyStatus > 0) {
+        --busyStatus;
+        return ptp::kDeviceBusy;
+    }
+    return ptp::kOk;
+}
+
 void UsbPipe::reset() {
     ++resets;
+    pendingCommand_.clear();
+    cam_.resetPtp();
+    if (requestsFail) throw ptp::LinkError("fake USB: request failed");
+    if (ignoreReset) return;
     out_.clear();
     outAt_ = 0;
     zlpDue_ = false;
-    pendingCommand_.clear();
-    cam_.resetPtp();
 }
 
 std::size_t UsbPipe::read(std::span<uint8_t> buf, std::chrono::milliseconds) {
@@ -479,6 +509,11 @@ std::size_t UsbPipe::read(std::span<uint8_t> buf, std::chrono::milliseconds) {
     while (!out_.empty() && n < buf.size()) {
         const auto& c = out_.front();
         const std::size_t take = std::min(buf.size() - n, c.size() - outAt_);
+        if (breakDownloads > 0 && c[4] == 2 && (c[6] | c[7] << 8) == ptp::kGetObject && outAt_ < breakAfter && outAt_ + take > breakAfter) {
+            --breakDownloads;   // the bytes of this transfer lost; the rest of the container still to come
+            outAt_ = breakAfter;
+            throw ptp::LinkError("fake USB: the transfer failed");
+        }
         std::copy_n(c.begin() + static_cast<std::ptrdiff_t>(outAt_), take, buf.begin() + static_cast<std::ptrdiff_t>(n));
         n += take;
         outAt_ += take;

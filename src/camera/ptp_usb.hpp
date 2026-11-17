@@ -20,7 +20,8 @@ public:
     virtual ~UsbPipe() = default;
     /// One bulk-out transfer of all of `data` (empty: a zero-length packet). Throws Error.
     virtual void write(std::span<const uint8_t> data) = 0;
-    /// One bulk-in transfer into `buf`: the bytes received (0: a zero-length packet). Throws Error, also on a timeout.
+    /// One bulk-in transfer into `buf`, or into its start (a pipe may take less at a time): the bytes received (0: a
+    /// zero-length packet). Throws Error, also on a timeout.
     virtual std::size_t read(std::span<uint8_t> buf, std::chrono::milliseconds timeout) = 0;
     /// The bulk endpoints' packet size (512 at USB 2 high speed): a transfer that fills whole packets ends with an
     /// empty one.
@@ -33,7 +34,14 @@ public:
         (void)buf, (void)timeout;
         return 0;
     }
-    /// PTP's Device Reset request (class-specific, 0x66) and the bulk pipes cleared: after a stuck transaction.
+    /// PTP's Cancel request (class-specific, 0x64) for transaction `tid`: the camera abandons its data phase. Throws
+    /// Error when the request fails.
+    virtual void cancel(uint32_t tid) { (void)tid; }
+    /// PTP's Get Device Status request (0x67): the camera's state as a response code (OK: ready, device busy, transaction
+    /// cancelled); 0 where the pipe can't ask. Throws Error when the request fails.
+    virtual uint16_t status() { return 0; }
+    /// PTP's Device Reset request (class-specific, 0x66) and the bulk pipes cleared: after a stuck transaction. Throws
+    /// Error when the request fails (the pipes are cleared all the same).
     virtual void reset() {}
 };
 
@@ -52,7 +60,7 @@ public:
                       std::vector<uint8_t>* in) override;
     std::string kind() const override { return "USB"; }
     std::vector<Event> events() const override;
-    bool recover() override;
+    bool recover(std::string* how = nullptr) override;
 
 private:
     struct Header {
@@ -67,12 +75,14 @@ private:
     Response doTransact(uint16_t op, std::span<const uint32_t> params, Data phase, std::span<const uint8_t> out,
                         std::vector<uint8_t>* in);
     void openSession();
+    std::size_t drain(std::string& note);          ///< takes in what the camera still sends: how much, and what ended it
     void addEvent(std::span<const uint8_t> container);
     void readEvents();                             ///< the event thread
 
     std::unique_ptr<UsbPipe> pipe_;
     std::chrono::milliseconds timeout_;
     uint32_t tid_ = 0;
+    uint32_t lastTid_ = 0;           ///< the transaction last begun (the one to cancel when it got stuck)
     bool session_ = false;
     std::vector<uint8_t> pending_;   ///< bytes read but not yet used (a device that skips an empty packet sends more)
     std::size_t pendingPos_ = 0;

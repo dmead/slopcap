@@ -3,9 +3,10 @@ SlopCap Sony probe, for Linux
 
 This small program asks a Sony camera what it can do over USB when a computer
 controls it ("PC Remote"), so that SlopCap, a free astronomy capture program, can
-learn to use it for focusing. It takes one picture, and changes the shutter speed
-and the ISO one notch and back again. It changes nothing else on the camera and
-installs nothing.
+learn to use it for focusing. It takes one picture, as a Fine JPEG the way
+SlopCap will (the camera's Quality is put back after), and changes the shutter
+speed and the ISO one notch and back again. It changes nothing else on the
+camera and installs nothing.
 
 It runs on Ubuntu 22.04 or newer (or another Linux with glibc 2.35 or newer), and
 in WSL on Windows. It needs libusb (sudo apt install libusb-1.0-0; gphoto2 brings

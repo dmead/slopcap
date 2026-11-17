@@ -3,9 +3,10 @@ SlopCap Sony probe
 
 This small program asks a Sony camera what it can do over USB when a computer
 controls it ("PC Remote"), so that SlopCap, a free astronomy capture program, can
-learn to use it for focusing. It takes one picture, and changes the shutter speed
-and the ISO one notch and back again. It changes nothing else on the camera and
-installs nothing on the computer.
+learn to use it for focusing. It takes one picture, as a Fine JPEG the way
+SlopCap will (the camera's Quality is put back after), and changes the shutter
+speed and the ISO one notch and back again. It changes nothing else on the
+camera and installs nothing on the computer.
 
 You need: the camera (an a6000, or another Sony Alpha or NEX), its USB cable, a
 charged battery, and a Windows 10 or 11 computer.

@@ -16,7 +16,7 @@ namespace slopcap::ptp {
 
 // operations
 inline constexpr uint16_t kGetDeviceInfo = 0x1001, kOpenSession = 0x1002, kCloseSession = 0x1003, kGetObjectInfo = 0x1008,
-                          kGetObject = 0x1009, kGetDevicePropDesc = 0x1014;
+                          kGetObject = 0x1009, kGetDevicePropDesc = 0x1014, kGetPartialObject = 0x101B;
 // responses
 inline constexpr uint16_t kOk = 0x2001, kGeneralError = 0x2002, kSessionNotOpen = 0x2003, kOperationNotSupported = 0x2005,
                           kParameterNotSupported = 0x2006, kInvalidObjectHandle = 0x2009, kAccessDenied = 0x200F, kDeviceBusy = 0x2019,
@@ -71,9 +71,14 @@ public:
     virtual std::string kind() const = 0;
     /// The camera's events so far, where the transport reads them (PTP over USB: its interrupt pipe, all the time).
     virtual std::vector<Event> events() const { return {}; }
-    /// After a transaction got stuck: a fresh session (PTP's Device Reset request, cleared pipes, OpenSession). False
-    /// where the transport can't. A vendor's own state (Sony's handshake) has to be set up again.
-    virtual bool recover() { return false; }
+    /// After a transaction got stuck: a fresh session (PTP over USB: the transaction cancelled, what the camera still
+    /// sends taken in, PTP's Device Reset request, cleared pipes, OpenSession). False where the transport can't. `how`,
+    /// if given, gets what was done and what the camera said, for reports. A vendor's own state (Sony's handshake) has
+    /// to be set up again.
+    virtual bool recover(std::string* how = nullptr) {
+        (void)how;
+        return false;
+    }
 };
 
 /// Transactions that must succeed (they throw CameraError naming `what` and the response otherwise).

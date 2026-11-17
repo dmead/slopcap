@@ -210,11 +210,26 @@ public:
         if (e != 0 && e != kErrTimeout) std::this_thread::sleep_for(timeout);   // (a stall or an overflow: try again later)
         return e == 0 ? static_cast<std::size_t>(got) : 0;
     }
+    void cancel(uint32_t tid) override {
+        // PTP's Cancel Request (class-specific, to the interface): the cancellation code 0x4001 and the transaction
+        unsigned char d[6] = {0x01, 0x40, static_cast<unsigned char>(tid), static_cast<unsigned char>(tid >> 8),
+                              static_cast<unsigned char>(tid >> 16), static_cast<unsigned char>(tid >> 24)};
+        const int e = l_.control_transfer(h_, 0x21, 0x64, 0, static_cast<uint16_t>(p_.number), d, sizeof d, 2000);
+        if (e < 0) throw LinkError(std::format("USB cancel request: {}", problem(e)));
+    }
+    uint16_t status() override {
+        // PTP's Get Device Status Request: its length, then a response code (then the endpoints it stalled)
+        unsigned char d[64] = {};
+        const int e = l_.control_transfer(h_, 0xA1, 0x67, 0, static_cast<uint16_t>(p_.number), d, sizeof d, 2000);
+        if (e < 0) throw LinkError(std::format("USB status request: {}", problem(e)));
+        return e >= 4 ? static_cast<uint16_t>(d[2] | d[3] << 8) : 0;
+    }
     void reset() override {
         // PTP's Device Reset Request (class-specific, to the interface), then the bulk pipes' halts cleared
-        l_.control_transfer(h_, 0x21, 0x66, 0, static_cast<uint16_t>(p_.number), nullptr, 0, 2000);
+        const int e = l_.control_transfer(h_, 0x21, 0x66, 0, static_cast<uint16_t>(p_.number), nullptr, 0, 2000);
         l_.clear_halt(h_, p_.in);
         l_.clear_halt(h_, p_.out);
+        if (e < 0) throw LinkError(std::format("USB reset request: {}", problem(e)));
     }
 
 private:

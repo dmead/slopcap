@@ -802,6 +802,7 @@ TEST_CASE("sony probe: a report from the fake camera", "[sony][probe]") {
     fake::SonyCam cam;
     cam.liveView = true;
     cam.quality = fake::SonyCam::Quality::RawPlusJpeg;
+    cam.qualitySettable = false;   // (else Fine for the pictures)
     cam.direct = fake::SonyCam::Direct::Refused;
     auto t = fake::directTransport(cam);
     std::ostringstream log;
@@ -912,6 +913,47 @@ TEST_CASE("ptp over USB: events read all the time; a stuck transaction recovered
         CHECK_THAT(errorOf([&] { s.shoot(5s); }), ContainsSubstring("an event waits"));
         CHECK(t.events().empty());
     }
+    {   // a download broken half way, the camera sending on regardless: the rest taken in, a new session
+        fake::SonyCam cam;
+        cam.keepObjects = 1;
+        auto pipe = std::make_unique<fake::UsbPipe>(cam);
+        auto* p = pipe.get();
+        p->breakDownloads = 1;
+        p->breakAfter = 1000;
+        p->honorCancel = false;
+        p->ignoreReset = true;
+        p->busyStatus = 2;
+        ptp::UsbTransport t(std::move(pipe));
+        sony::Session s(t, 5);
+        s.connect();
+        CHECK_THAT(errorOf([&] { s.shoot(5s); }), ContainsSubstring("the transfer failed (operation 0x1009, reading its data)"));
+        std::string how;
+        REQUIRE(t.recover(&how));
+        CHECK_THAT(how, ContainsSubstring("cancelled"));
+        CHECK_THAT(how, ContainsSubstring("took in"));
+        CHECK_THAT(how, ContainsSubstring("camera status 0x2001 OK"));
+        CHECK_THAT(how, ContainsSubstring("new session"));
+        CHECK(p->cancels == 1);
+        CHECK(p->busyStatus == 0);
+        sony::Session again(t, 5);
+        again.connect();
+        again.refresh();
+        REQUIRE(again.objectsInMemory() == 1);   // the picture still there
+        CHECK(again.fetch().data.size() > 1000);
+        // a camera that heeds the cancel: nothing left to take in
+        p->honorCancel = true;
+        p->breakDownloads = 1;
+        CHECK_THROWS_AS(again.shoot(5s), ptp::LinkError);
+        REQUIRE(t.recover(&how));
+        CHECK_THAT(how, ContainsSubstring("nothing on its way"));
+        // the requests themselves failing: said so, and the session opened all the same
+        p->requestsFail = true;
+        REQUIRE(t.recover(&how));
+        CHECK_THAT(how, ContainsSubstring("cancel: fake USB: request failed"));
+        CHECK_THAT(how, ContainsSubstring("status: fake USB"));
+        CHECK_THAT(how, ContainsSubstring("reset: fake USB"));
+        CHECK(t.recover());
+    }
     {   // the plain transport has neither
         fake::SonyCam cam;
         ptp::wpd::WpdTransport w(std::make_unique<fake::WpdDevice>(cam));
@@ -953,10 +995,10 @@ TEST_CASE("sony probe: a camera like the first real a6000", "[sony][probe]") {
         const auto report = sonyprobe::run(*t, o, log, files).dump();
         CHECK_THAT(log.str(), ContainsSubstring("the camera's values came"));
         CHECK_THAT(log.str(), ContainsSubstring("flagged not settable, but notches work"));
-        CHECK_THAT(log.str(), ContainsSubstring("RAW+JPEG for the pictures"));
+        CHECK_THAT(log.str(), ContainsSubstring("Quality RAW: Fine (JPEG) for the pictures"));
         CHECK_THAT(log.str(), ContainsSubstring("picture 1: JPEG"));
         CHECK_THAT(log.str(), ContainsSubstring("live view over USB: no (no answer at all)"));
-        CHECK_THAT(log.str(), ContainsSubstring("recovering (USB reset, new session, Sony handshake): done"));
+        CHECK_THAT(log.str(), ContainsSubstring("recovering (cancel, take in what's left, USB reset, new session, Sony handshake): done"));
         CHECK_THAT(report, ContainsSubstring("\"recovered\": true"));
         CHECK_THAT(report, ContainsSubstring("propertiesAtEnd"));
         CHECK_THAT(report, ContainsSubstring("\"trace\""));
@@ -976,5 +1018,74 @@ TEST_CASE("sony probe: a camera like the first real a6000", "[sony][probe]") {
         CHECK_THAT(log.str(), ContainsSubstring("events from the camera:"));
         CHECK_THAT(report, ContainsSubstring("\"code\": \"0xC203\""));
         CHECK_THAT(report, ContainsSubstring("\"recovered\": true"));
+    }
+}
+
+TEST_CASE("sony probe: a camera like the a6000 the second time", "[sony][probe]") {
+    // Its picture's download broke 6 ms in and the camera sent on regardless (the cancel and the reset ignored); the
+    // shutter speed at 1/4000, where a notch up goes nowhere; Quality RAW+JPEG.
+    auto a6000 = [](fake::SonyCam& c) {
+        c.flaggedFixed = true;
+        c.stepSign = -1;
+        c.shutter = sony::shutterValue(1, 4000);
+        c.quality = fake::SonyCam::Quality::RawPlusJpeg;
+        c.liveViewSilent = true;
+    };
+    auto probe = [](fake::SonyCam& cam, int breaks, std::string& log) {
+        auto pipe = std::make_unique<fake::UsbPipe>(cam);
+        pipe->breakDownloads = breaks;
+        pipe->honorCancel = false;
+        pipe->ignoreReset = true;
+        ptp::UsbTransport t(std::move(pipe));
+        sonyprobe::Options o;
+        o.liveFrames = 1;
+        std::ostringstream out;
+        std::vector<sonyprobe::File> files;
+        const auto report = sonyprobe::run(t, o, out, files).dump();
+        log = out.str();
+        return std::pair{report, std::ranges::count_if(files, [](const sonyprobe::File& x) { return x.suffix.ends_with(".jpg"); })};
+    };
+    std::string log;
+    {   // downloaded again once the link is back
+        fake::SonyCam cam;
+        a6000(cam);
+        cam.keepObjects = 1;
+        const auto [report, jpegs] = probe(cam, 1, log);
+        CHECK_THAT(log, ContainsSubstring("notches work (1/4000 -> 1/1000 -> 1/4000)"));
+        CHECK_THAT(log, ContainsSubstring("Quality RAW+JPEG: Fine (JPEG) for the pictures"));
+        CHECK_THAT(log, ContainsSubstring("picture 1: FAILED: fake USB: the transfer failed"));
+        CHECK_THAT(log, ContainsSubstring("took in"));
+        CHECK_THAT(log, ContainsSubstring("(downloaded again)"));
+        CHECK_THAT(report, ContainsSubstring("\"object\": \"JPEG, "));
+        CHECK_THAT(report, ContainsSubstring("\"recovery\": "));
+        CHECK(jpegs == 1);
+        CHECK(cam.quality == fake::SonyCam::Quality::RawPlusJpeg);   // put back
+    }
+    {   // broken again: in pieces
+        fake::SonyCam cam;
+        a6000(cam);
+        cam.keepObjects = 2;
+        const auto [report, jpegs] = probe(cam, 2, log);
+        CHECK_THAT(log, ContainsSubstring("picture 1: download again: FAILED"));
+        CHECK_THAT(log, ContainsSubstring("(downloaded in pieces)"));
+        CHECK_THAT(report, ContainsSubstring("\"pieces\": 1"));
+        CHECK_THAT(report, ContainsSubstring("\"responseParams\""));
+        CHECK(jpegs == 1);
+    }
+    {   // gone from the camera with the broken download: said so, no pieces tried
+        fake::SonyCam cam;
+        a6000(cam);
+        const auto [report, jpegs] = probe(cam, 1, log);
+        CHECK_THAT(log, ContainsSubstring("holds no picture any more"));
+        CHECK_THAT(log, !ContainsSubstring("in pieces"));
+        CHECK(jpegs == 0);
+    }
+    {   // a value that a notch moves neither way
+        fake::SonyCam cam;
+        a6000(cam);
+        cam.shutterList = {sony::shutterValue(1, 4000)};
+        const auto [report, jpegs] = probe(cam, 0, log);
+        CHECK_THAT(log, ContainsSubstring("set Shutter speed: flagged not settable; a notch either way didn't move it"));
+        CHECK(jpegs == 1);
     }
 }

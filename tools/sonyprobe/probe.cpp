@@ -4,6 +4,7 @@
 #include "camera/jpeg_luma.hpp"
 #include "camera/sony_ptp.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <format>
@@ -166,6 +167,16 @@ Json listProps(const sony::Session& s) {
     return props;
 }
 
+/// "JPEG, 6.1 MB, 6000 x 4000, DSC01234.JPG": an ObjectInfo dataset in a line.
+std::string objectSummary(const std::vector<uint8_t>& d) {
+    try {
+        const auto o = ptp::parseObjectInfo(d);
+        return std::format("{}, {}, {} x {}, {}", ptp::formatName(o.format), kb(o.compressedSize), o.imageWidth, o.imageHeight, o.filename);
+    } catch (const std::exception& e) {
+        return std::format("(unreadable: {})", e.what());
+    }
+}
+
 /// Every transaction through it, timed, into the report: where a camera got stuck shows in the last ones.
 class Tracer final : public ptp::Transport {
 public:
@@ -186,7 +197,13 @@ public:
             auto r = t_.transact(op, params, phase, out, in);
             e["ms"] = msSince(t0);
             e["response"] = hex4(r.code);
+            if (!r.params.empty()) {
+                Json p = Json::array();
+                for (auto x : r.params) p.push(std::format("0x{:X}", x));
+                e["responseParams"] = std::move(p);
+            }
             if (in && phase == ptp::Data::In) e["in"] = in->size();
+            if (op == ptp::kGetObjectInfo && r.ok() && in) e["object"] = objectSummary(*in);
             add(std::move(e));
             return r;
         } catch (const std::exception& x) {
@@ -198,7 +215,7 @@ public:
     }
     std::string kind() const override { return t_.kind(); }
     std::vector<ptp::Event> events() const override { return t_.events(); }
-    bool recover() override { return t_.recover(); }
+    bool recover(std::string* how = nullptr) override { return t_.recover(how); }
     Json take() { return std::move(trace_); }
 
 private:
@@ -240,6 +257,24 @@ Json handshakeDiagnosis(ptp::Transport& t, std::ostream& log) {
     return d;
 }
 
+/// The picture the camera holds with GetPartialObject, a megabyte a transaction: where one large GetObject breaks.
+sony::ShotObject fetchInPieces(ptp::Transport& t, Json& r) {
+    constexpr uint32_t kPiece = 1 << 20;
+    const auto t0 = Clock::now();
+    sony::ShotObject o;
+    o.info = ptp::parseObjectInfo(ptp::receive(t, ptp::kGetObjectInfo, {sony::kShotObject}, "picture information"));
+    int pieces = 0;
+    for (; pieces < 1024; ++pieces) {
+        const uint32_t at = static_cast<uint32_t>(o.data.size());
+        const auto d = ptp::receive(t, ptp::kGetPartialObject, {sony::kShotObject, at, kPiece}, std::format("the piece at byte {}", at));
+        o.data.insert(o.data.end(), d.begin(), d.end());
+        if (d.size() < kPiece || (o.info.compressedSize && o.data.size() >= o.info.compressedSize)) break;
+    }
+    r["pieces"] = pieces + 1;
+    o.downloadMs = msSince(t0);
+    return o;
+}
+
 }  // namespace
 
 Json run(ptp::Transport& raw, const Options& o, std::ostream& log, std::vector<File>& files) {
@@ -247,10 +282,13 @@ Json run(ptp::Transport& raw, const Options& o, std::ostream& log, std::vector<F
     Json cam = Json::object();
     Json steps = Json::array();
     auto s = std::make_unique<sony::Session>(t);
-    // After a transaction got stuck: PTP's own reset, a new session, Sony's handshake again; then the next check.
+    // After a transaction got stuck: the transport's recovery (over USB: cancel, take in what is left, PTP's own
+    // reset, a new session), Sony's handshake again; then the next check.
     auto recover = [&](Json& rec) {
-        log << "  recovering (USB reset, new session, Sony handshake): ";
-        bool ok = t.recover();
+        log << "  recovering (cancel, take in what's left, USB reset, new session, Sony handshake): ";
+        std::string how;
+        bool ok = t.recover(&how);
+        if (!how.empty()) rec["recovery"] = how;
         if (ok) {
             try {
                 s = std::make_unique<sony::Session>(t);
@@ -263,8 +301,10 @@ Json run(ptp::Transport& raw, const Options& o, std::ostream& log, std::vector<F
         }
         rec["recovered"] = ok;
         log << (ok ? "done\n" : "failed\n");
+        if (!how.empty()) log << "    (" << how << ")\n";
         return ok;
     };
+    bool lastStuck = false, lastRecovered = false;   // the last step's link broke; it came back
     auto step = [&](const std::string& what, auto&& fn) {
         const auto t0 = Clock::now();
         Json rec = Json::object();
@@ -283,7 +323,8 @@ Json run(ptp::Transport& raw, const Options& o, std::ostream& log, std::vector<F
         }
         rec["ok"] = ok;
         rec["ms"] = msSince(t0);
-        if (stuck) recover(rec);
+        lastStuck = stuck;
+        lastRecovered = stuck && recover(rec);
         steps.push(std::move(rec));
         return ok;
     };
@@ -391,13 +432,18 @@ Json run(ptp::Transport& raw, const Options& o, std::ostream& log, std::vector<F
         auto notch = [&](uint16_t code, int64_t dir, Json& j) -> std::optional<int64_t> {
             const int64_t was = s->prop(code)->current;
             const uint16_t r = s->setB(code, ptp::kUint8, dir);
-            j[dir == sony::kStepUp ? "stepUpAnswer" : "stepDownAnswer"] = ptp::responseText(r);
-            for (int i = 0; i < 15; ++i) {
+            std::optional<int64_t> moved;
+            for (int i = 0; i < 15 && !moved; ++i) {
                 std::this_thread::sleep_for(100ms);
                 s->refresh();
-                if (s->prop(code)->current != was) return s->prop(code)->current;
+                if (s->prop(code)->current != was) moved = s->prop(code)->current;
             }
-            return std::nullopt;
+            Json n = Json::object();
+            n["direction"] = dir == sony::kStepUp ? "up" : "down";
+            n["answer"] = ptp::responseText(r);
+            n["moved"] = moved ? sony::formatValue(code, *moved) : "no";
+            j["notches"].push(std::move(n));
+            return moved;
         };
         auto test = [&](uint16_t code, double (*order)(int64_t), std::vector<int64_t> standard) {
             Json j = Json::object();
@@ -412,18 +458,24 @@ Json run(ptp::Transport& raw, const Options& o, std::ostream& log, std::vector<F
                 j["from"] = sony::formatValue(code, from);
                 j["getSet"] = p->getSet;
                 j["enabled"] = p->enabled;
-                if (!p->settable()) {   // the a6000 calls them fixed even on M: try a notch anyway
-                    const auto moved = notch(code, sony::kStepUp, j);
+                if (!p->settable()) {   // the a6000 calls them fixed even on M: try a notch anyway, the other way too
+                    int64_t backDir = sony::kStepDown;
+                    auto moved = notch(code, sony::kStepUp, j);
+                    if (!moved) {   // at the end of its range that way (1/4000 s, say)
+                        moved = notch(code, sony::kStepDown, j);
+                        backDir = sony::kStepUp;
+                    }
                     if (!moved) {
-                        j["result"] = "flagged not settable, and a notch didn't move it";
-                        log << std::format("  set {}: flagged not settable; a notch didn't move it\n", name(code));
+                        j["result"] = "flagged not settable, and a notch either way didn't move it";
+                        log << std::format("  set {}: flagged not settable; a notch either way didn't move it\n", name(code));
                         return;
                     }
-                    const auto back = notch(code, sony::kStepDown, j);
+                    const auto back = notch(code, backDir, j);
+                    const std::string backText = back ? sony::formatValue(code, *back) : "(didn't move back)";
                     j["result"] = std::format("flagged not settable, but notches work: {} -> {} -> {}", sony::formatValue(code, from),
-                                              sony::formatValue(code, *moved), back ? sony::formatValue(code, *back) : "(didn't move back)");
-                    log << std::format("  set {}: flagged not settable, but notches work ({} -> {})\n", name(code), sony::formatValue(code, from),
-                                       sony::formatValue(code, *moved));
+                                              sony::formatValue(code, *moved), backText);
+                    log << std::format("  set {}: flagged not settable, but notches work ({} -> {} -> {})\n", name(code),
+                                       sony::formatValue(code, from), sony::formatValue(code, *moved), backText);
                     return;
                 }
                 const auto& choices = p->form == sony::Prop::Form::Enum && !p->values.empty() ? p->values : standard;
@@ -455,33 +507,85 @@ Json run(ptp::Transport& raw, const Options& o, std::ostream& log, std::vector<F
         cam["setTests"] = std::move(tests);
     }
 
-    // ---- pictures (RAW alone has no JPEG: RAW+JPEG for them, and back)
+    // ---- pictures, as SlopCap takes them: JPEG alone (Fine), the camera's Quality put back after
     if (o.shot) {
         std::optional<int64_t> quality;
         step("Quality for the pictures", [&](Json& r) {
             const auto* q = s->prop(sony::kCompression);
             if (!q) return;
             r["was"] = sony::formatValue(sony::kCompression, q->current);
-            if (q->current != sony::kQualityRaw) return;
+            if (q->current != sony::kQualityRaw && q->current != sony::kQualityRawJpeg) return;
             if (!q->settable()) {
-                log << "  Quality is RAW and can't be set from here: no JPEG to score (set Fine on the camera)\n";
+                if (q->current == sony::kQualityRaw)
+                    log << "  Quality is RAW and can't be set from here: no JPEG to score (set Fine on the camera)\n";
                 return;
             }
-            s->setValue(sony::kCompression, sony::kQualityRawJpeg, asIs);
-            quality = sony::kQualityRaw;
+            const int64_t was = q->current;
+            s->setValue(sony::kCompression, sony::kQualityFine, asIs);
+            quality = was;
             r["now"] = sony::formatValue(sony::kCompression, s->prop(sony::kCompression)->current);
-            log << "  Quality RAW: RAW+JPEG for the pictures (put back after)\n";
+            log << std::format("  Quality {}: Fine (JPEG) for the pictures, as SlopCap takes them (put back after)\n",
+                               sony::formatValue(sony::kCompression, was));
         });
         step("drop pictures left in the camera", [&](Json& j) { j["dropped"] = s->drain(); });
         Json shots = Json::array();
+        // a picture's files into the report and beside it, its JPEG decoded and scored
+        auto record = [&](int n, const sony::Shot& shot, const char* how) {
+            Json pic = Json::object();
+            if (how) pic["how"] = how;
+            pic["pressMs"] = shot.pressMs;
+            Json objs = Json::array();
+            int k = 0;
+            for (const auto& ob : shot.objects) {
+                Json x = Json::object();
+                x["format"] = ptp::formatName(ob.info.format);
+                x["bytes"] = ob.data.size();
+                x["infoSize"] = ob.info.compressedSize;
+                x["width"] = ob.info.imageWidth;
+                x["height"] = ob.info.imageHeight;
+                x["filename"] = ob.info.filename;
+                x["readyMs"] = ob.readyMs;
+                x["downloadMs"] = ob.downloadMs;
+                objs.push(std::move(x));
+                log << std::format("  picture {}: {} {}, {}downloaded in {:.2f} s{}\n", n, ptp::formatName(ob.info.format), kb(ob.data.size()),
+                                   ob.readyMs > 0 ? std::format("ready {:.2f} s after the shutter, ", ob.readyMs / 1000) : "", ob.downloadMs / 1000,
+                                   how ? std::format(" ({})", how) : "");
+                const std::string ext = ob.info.format == ptp::kFormatJpeg ? "jpg" : ob.info.format == ptp::kFormatSonyArw ? "arw" : "bin";
+                files.push_back({std::format("shot{}{}.{}", n, k++ ? std::format("-{}", k) : "", ext), ob.data});
+            }
+            pic["objects"] = std::move(objs);
+            if (const auto* jp = shot.jpeg()) {
+                std::vector<uint8_t> luma;
+                const auto d0 = Clock::now();
+                const auto sz = slopcap::jpeg::decodeLuma(jp->data, luma);
+                const double dms = msSince(d0);
+                const auto score = slopcap::analysis::scoreFrame(std::as_bytes(std::span(luma)), sz.width, sz.height, 8, slopcap::Bayer::None);
+                pic["decodeMs"] = dms;
+                pic["lumaWidth"] = sz.width;
+                pic["lumaHeight"] = sz.height;
+                pic["sharpness"] = score.channels ? score.ch[0].sharpness : 0.0;
+                log << std::format("  picture {}: luminance {} x {} decoded in {:.2f} s; focus score {:.4g}\n", n, sz.width, sz.height,
+                                   dms / 1000, score.channels ? score.ch[0].sharpness : 0.0);
+            } else {
+                log << std::format("  picture {}: no JPEG (Quality set to RAW alone?)\n", n);
+            }
+            shots.push(std::move(pic));
+        };
+        // what the camera still holds, after a download broke and the link was recovered
+        auto held = [&](Json& r) {
+            s->refresh();
+            r["objectsInMemory"] = s->objectsInMemory();
+            if (s->objectsInMemory() == 0) throw slopcap::CameraError("the camera holds no picture any more");
+        };
+        const bool partial = std::ranges::find(di.operations, ptp::kGetPartialObject) != di.operations.end();
         for (int n = 1; n <= o.shots; ++n) {
-            step(std::format("picture {}", n), [&](Json&) {
+            const bool ok = step(std::format("picture {}", n), [&](Json&) {
                 const auto* sp = s->prop(sony::kShutterSpeed);
                 const double secs = sp ? sony::shutterSeconds(sp->current).value_or(30) : 30;
                 const auto timeout = std::chrono::milliseconds(static_cast<int64_t>((2 * secs + 15) * 1000));
                 auto shot = s->shoot(timeout);
                 if (!shot) throw slopcap::CameraError("no picture");
-                // RAW+JPEG: the second file may come a moment later
+                // RAW+JPEG (Quality not settable): the second file may come a moment later
                 const auto t0 = Clock::now();
                 while (n == 1 && msSince(t0) < 3000) {
                     s->refresh();
@@ -492,43 +596,22 @@ Json run(ptp::Transport& raw, const Options& o, std::ostream& log, std::vector<F
                         std::this_thread::sleep_for(100ms);
                     }
                 }
-                Json pic = Json::object();
-                pic["pressMs"] = shot->pressMs;
-                Json objs = Json::array();
-                int k = 0;
-                for (const auto& ob : shot->objects) {
-                    Json x = Json::object();
-                    x["format"] = ptp::formatName(ob.info.format);
-                    x["bytes"] = ob.data.size();
-                    x["infoSize"] = ob.info.compressedSize;
-                    x["width"] = ob.info.imageWidth;
-                    x["height"] = ob.info.imageHeight;
-                    x["filename"] = ob.info.filename;
-                    x["readyMs"] = ob.readyMs;
-                    x["downloadMs"] = ob.downloadMs;
-                    objs.push(std::move(x));
-                    log << std::format("  picture {}: {} {}, ready {:.2f} s after the shutter, downloaded in {:.2f} s\n", n,
-                                       ptp::formatName(ob.info.format), kb(ob.data.size()), ob.readyMs / 1000, ob.downloadMs / 1000);
-                    const std::string ext = ob.info.format == ptp::kFormatJpeg ? "jpg" : ob.info.format == ptp::kFormatSonyArw ? "arw" : "bin";
-                    files.push_back({std::format("shot{}{}.{}", n, k++ ? std::format("-{}", k) : "", ext), ob.data});
-                }
-                pic["objects"] = std::move(objs);
-                if (const auto* jp = shot->jpeg()) {
-                    std::vector<uint8_t> luma;
-                    const auto d0 = Clock::now();
-                    const auto sz = slopcap::jpeg::decodeLuma(jp->data, luma);
-                    const double dms = msSince(d0);
-                    const auto score = slopcap::analysis::scoreFrame(std::as_bytes(std::span(luma)), sz.width, sz.height, 8, slopcap::Bayer::None);
-                    pic["decodeMs"] = dms;
-                    pic["lumaWidth"] = sz.width;
-                    pic["lumaHeight"] = sz.height;
-                    pic["sharpness"] = score.channels ? score.ch[0].sharpness : 0.0;
-                    log << std::format("  picture {}: luminance {} x {} decoded in {:.2f} s; focus score {:.4g}\n", n, sz.width, sz.height,
-                                       dms / 1000, score.channels ? score.ch[0].sharpness : 0.0);
-                } else {
-                    log << std::format("  picture {}: no JPEG (Quality set to RAW alone?)\n", n);
-                }
-                shots.push(std::move(pic));
+                record(n, *shot, nullptr);
+            });
+            if (ok || !lastStuck || !lastRecovered) continue;
+            // the download broke, the link is back: the picture may still be in the camera; whole again, then in pieces
+            const bool again = step(std::format("picture {}: download again", n), [&](Json& r) {
+                held(r);
+                sony::Shot shot;
+                shot.objects.push_back(s->fetch());
+                record(n, shot, "downloaded again");
+            });
+            if (again || !lastStuck || !lastRecovered || !partial) continue;
+            step(std::format("picture {}: in pieces (GetPartialObject)", n), [&](Json& r) {
+                held(r);
+                sony::Shot shot;
+                shot.objects.push_back(fetchInPieces(t, r));
+                record(n, shot, "downloaded in pieces");
             });
         }
         cam["pictures"] = std::move(shots);
