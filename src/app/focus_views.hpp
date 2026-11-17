@@ -64,20 +64,28 @@ private:
     QLabel* offlineText_ = nullptr;
 };
 
+/// The Capture tab's focuser: the controls, the live sharpness, and a sweep run from here (the presets and Run, with the
+/// rest of the sweep's settings on the Focus tab; MainWindow keeps the two in step).
 class FocuserSection : public QWidget {
     Q_OBJECT
 public:
     FocuserSection(FocusController& fc, QWidget* parent = nullptr);
+    void showPreset(int id);   ///< 0 coarse, 1 fine, as the Focus tab's sweep panel has it (no signal)
 
 signals:
     void openFocusMode();
     void openSettings();
+    void presetClicked(int id);   ///< 0 coarse, 1 fine
+    void runClicked();            ///< Run sweep, or Stop sweep while one runs
 
 private:
     void refresh();
     FocusController& fc_;
     ChannelBars* bars_ = nullptr;
     QLabel* note_ = nullptr;
+    QButtonGroup* presets_ = nullptr;
+    QPushButton* run_ = nullptr;
+    QLabel* status_ = nullptr;
 };
 
 class SweepPanel : public QWidget {
@@ -86,9 +94,13 @@ public:
     SweepPanel(FocusController& fc, QWidget* parent = nullptr);
     std::array<bool, 3> channelsShown() const;
     void setHeader(QWidget* w);   ///< above the settings, scrolling with them (the window: the camera and the focuser)
+    int presetId() const;         ///< 0 coarse, 1 fine (the last picked; the range may have been set by hand since)
+    void choosePreset(int id);    ///< as clicking it here (from the Capture tab's focuser)
+    void runOrStop();             ///< as clicking Run sweep / Stop sweep here, with these settings
 
 signals:
-    void displayChanged();   ///< metric or channel visibility changed
+    void displayChanged();       ///< metric or channel visibility changed
+    void presetChosen(int id);   ///< a preset clicked here
 
 private:
     void preset(int halfRange, int step);

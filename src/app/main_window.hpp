@@ -193,6 +193,7 @@ private:
     QString autoName_, pendingAutoName_, autoDetail_, autoNotes_;
     bool pendingSweep_ = false;
     int pendingRange_ = 0, pendingStep_ = 0, pendingFrames_ = 0;
+    bool sweepFromCapture_ = false;   ///< the running sweep was started from the Capture tab: the window stays there
     Mode mode_ = Capture;
 
     // remote viewing

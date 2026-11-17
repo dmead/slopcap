@@ -15,6 +15,7 @@
 #include <QPainterPath>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QTableWidget>
 #include <QVBoxLayout>
@@ -207,9 +208,36 @@ FocuserSection::FocuserSection(FocusController& fc, QWidget* parent) : QWidget(p
     note_ = theme::label("", "muted");
     note_->setWordWrap(true);
     v->addWidget(note_);
+
+    // A sweep from here, without leaving the preview: the presets and Run; step, frames and the rest are the Focus tab's
+    auto* seg = new QHBoxLayout;
+    seg->setSpacing(6);
+    presets_ = new QButtonGroup(this);
+    auto* coarse = theme::button("Coarse ±1500");
+    auto* fine = theme::button("Fine ±350");
+    for (auto* b : {coarse, fine}) {
+        b->setCheckable(true);
+        seg->addWidget(b);
+    }
+    presets_->addButton(coarse, 0);
+    presets_->addButton(fine, 1);
+    fine->setChecked(true);
+    v->addLayout(seg);
+    connect(presets_, &QButtonGroup::idClicked, this, &FocuserSection::presetClicked);
+    status_ = theme::label("", "muted");
+    status_->setWordWrap(true);
+    status_->setVisible(false);
+    v->addWidget(status_);
+    run_ = theme::button("Run sweep");
+    run_->setMinimumHeight(34);
+    run_->setToolTip("A focus sweep with the Focus tab's settings; the curves come in over the preview");
+    v->addWidget(run_);
+    connect(run_, &QPushButton::clicked, this, &FocuserSection::runClicked);
+
     auto* links = new QHBoxLayout;
     links->setSpacing(6);
-    auto* sweep = theme::button("Run RGB focus sweep →");
+    auto* sweep = theme::button("Sweep settings, curves →");
+    sweep->setToolTip("The Focus tab: step, frames, settle, scoring, and the sweep's curves");
     auto* settings = theme::button("⚙");
     settings->setToolTip("Focuser settings: server, backlash, approach direction, optics");
     settings->setFixedWidth(36);
@@ -220,6 +248,11 @@ FocuserSection::FocuserSection(FocusController& fc, QWidget* parent) : QWidget(p
     connect(settings, &QPushButton::clicked, this, &FocuserSection::openSettings);
 
     connect(&fc_, &FocusController::focuserChanged, this, &FocuserSection::refresh);
+    connect(&fc_, &FocusController::sweepStateChanged, this, &FocuserSection::refresh);
+    connect(&fc_, &FocusController::sweepProgress, this, [this](const QString& text) {
+        status_->setText(text);
+        status_->setVisible(!text.isEmpty());
+    });
     connect(&fc_, &FocusController::liveUpdated, this, [this] {
         const auto& l = fc_.live();
         bars_->setValues(l.last.channels, l.fraction, l.clipped);
@@ -227,9 +260,22 @@ FocuserSection::FocuserSection(FocusController& fc, QWidget* parent) : QWidget(p
     refresh();
 }
 
+void FocuserSection::showPreset(int id) {
+    if (auto* b = presets_->button(id)) {
+        const QSignalBlocker block(presets_);
+        b->setChecked(true);
+    }
+}
+
 void FocuserSection::refresh() {
     auto& f = fc_.focuser();
-    note_->setText(f.ready() ? QString("Backlash %1 steps — moves finish %2.").arg(f.backlash()).arg(f.approachOutward() ? "outward" : "inward") : "");
+    const bool ok = f.ready();
+    note_->setText(ok ? QString("Backlash %1 steps — moves finish %2.").arg(f.backlash()).arg(f.approachOutward() ? "outward" : "inward") : "");
+    run_->setEnabled(ok);
+    run_->setText(fc_.sweeping() ? "Stop sweep" : ok ? "Run sweep" : "Connect the focuser first");
+    run_->setProperty("variant", fc_.sweeping() ? "stop" : "accent");
+    theme::restyle(run_);
+    for (auto* b : presets_->buttons()) b->setEnabled(!fc_.sweeping());
 }
 
 // ---------------------------------------------------------------- SweepPanel
@@ -263,8 +309,14 @@ SweepPanel::SweepPanel(FocusController& fc, QWidget* parent) : QWidget(parent), 
     presets_->addButton(fine, 1);
     fine->setChecked(true);
     v->addWidget(seg);
-    connect(coarse, &QPushButton::clicked, this, [this] { preset(1500, 150); });
-    connect(fine, &QPushButton::clicked, this, [this] { preset(350, 50); });
+    connect(coarse, &QPushButton::clicked, this, [this] {
+        preset(1500, 150);
+        emit presetChosen(0);
+    });
+    connect(fine, &QPushButton::clicked, this, [this] {
+        preset(350, 50);
+        emit presetChosen(1);
+    });
 
     auto* grid = new QGridLayout;
     grid->setSpacing(8);
@@ -348,18 +400,7 @@ SweepPanel::SweepPanel(FocusController& fc, QWidget* parent) : QWidget(parent), 
     bar->addWidget(status_);
     bar->addWidget(run_);
     outer->addLayout(bar);
-    connect(run_, &QPushButton::clicked, this, [this] {
-        if (fc_.sweeping()) {
-            fc_.stopSweep();
-            return;
-        }
-        SweepSettings s;
-        s.from = from_->value(), s.to = to_->value(), s.step = step_->value(), s.frames = frames_->value(), s.settleMs = settle_->value();
-        s.fourier = fourier_->isChecked();
-        s.extend = extend_->isChecked();
-        s.goToBest = goToBest_->isChecked();
-        fc_.startSweep(s);
-    });
+    connect(run_, &QPushButton::clicked, this, &SweepPanel::runOrStop);
     connect(&fc_, &FocusController::sweepProgress, status_, &QLabel::setText);
     connect(&fc_, &FocusController::sweepStateChanged, this, &SweepPanel::refresh);
     connect(&fc_, &FocusController::focuserChanged, this, &SweepPanel::refresh);
@@ -370,6 +411,29 @@ void SweepPanel::setHeader(QWidget* w) { header_->addWidget(w); }
 
 std::array<bool, 3> SweepPanel::channelsShown() const {
     return {channel_[0]->isChecked(), channel_[1]->isChecked(), channel_[2]->isChecked()};
+}
+
+int SweepPanel::presetId() const { return std::max(0, presets_->checkedId()); }
+
+void SweepPanel::choosePreset(int id) {
+    if (auto* b = presets_->button(id)) {
+        b->setChecked(true);
+        if (id == 0) preset(1500, 150);
+        else preset(350, 50);
+    }
+}
+
+void SweepPanel::runOrStop() {
+    if (fc_.sweeping()) {
+        fc_.stopSweep();
+        return;
+    }
+    SweepSettings s;
+    s.from = from_->value(), s.to = to_->value(), s.step = step_->value(), s.frames = frames_->value(), s.settleMs = settle_->value();
+    s.fourier = fourier_->isChecked();
+    s.extend = extend_->isChecked();
+    s.goToBest = goToBest_->isChecked();
+    fc_.startSweep(s);
 }
 
 void SweepPanel::preset(int halfRange, int step) {

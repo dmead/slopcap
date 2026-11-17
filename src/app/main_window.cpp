@@ -299,7 +299,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(focus_, &FocusController::sweepStateChanged, this, [this](bool running) {
         if (running) curveDismissed_ = false;   // a new sweep: its curves show over the preview again
         updateFocusMode();
-        if (running) setMode(Focus);
+        // to the Focus tab, unless it was run from the Capture tab: there it stays, the curves over the preview
+        if (running && !sweepFromCapture_) setMode(Focus);
+        if (!running) sweepFromCapture_ = false;
     });
     connect(focus_, &FocusController::focuserChanged, this, [this] {
         updateFocusMode();
@@ -719,6 +721,14 @@ QWidget* MainWindow::buildCaptureRight() {
     v->addWidget(tAuto_);
     auto* focuser = new FocuserSection(*focus_);
     connect(focuser, &FocuserSection::openFocusMode, this, [this] { setMode(Focus); });
+    // its sweep is the Focus tab's (one set of settings): the presets kept in step both ways, Run runs that panel's
+    focuser->showPreset(sweepPanel_->presetId());
+    connect(focuser, &FocuserSection::presetClicked, sweepPanel_, &SweepPanel::choosePreset);
+    connect(sweepPanel_, &SweepPanel::presetChosen, focuser, &FocuserSection::showPreset);
+    connect(focuser, &FocuserSection::runClicked, this, [this] {
+        sweepFromCapture_ = !focus_->sweeping();
+        sweepPanel_->runOrStop();
+    });
     connect(focuser, &FocuserSection::openSettings, this, [this] {
         SettingsDialog d(settings_, this);
         if (d.exec() == QDialog::Accepted) {

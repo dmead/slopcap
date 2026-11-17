@@ -337,6 +337,28 @@ TEST_CASE("focus: a sweep from outside focus finds it; camera and focuser on eve
     pump(200);
     w.setFullView(false);
 
+    // run from the Capture tab: its focuser has the presets and Run, with the Focus tab's settings; the window stays on
+    // Capture, the curves over the preview, and Stop there ends it
+    auto* section = p.right->widget(MainWindow::Capture)->findChild<FocuserSection*>();
+    REQUIRE(section);
+    button(section, "Coarse ±1500")->click();
+    CHECK(button(sp, "Coarse ±1500")->isChecked());
+    CHECK(waitFor([&] { return spins[0]->value() == std::max(0, focuser.position() - 1500); }, 3000));
+    button(sp, "Fine ±350")->click();   // and the other way
+    CHECK(button(section, "Fine ±350")->isChecked());
+    CHECK(waitFor([&] { return spins[0]->value() == std::max(0, focuser.position() - 350); }, 3000));
+    button(section, "Run sweep")->click();
+    REQUIRE(p.focus->sweeping());
+    CHECK(p.mode == MainWindow::Capture);
+    CHECK_FALSE(button(section, "Coarse ±1500")->isEnabled());
+    CHECK(waitFor([&] { return p.curveInset->isVisible(); }, 3000));
+    CHECK(waitFor([&] { return labelWith(section, "Position ") != nullptr; }, 20000));
+    button(section, "Stop sweep")->click();
+    CHECK(waitFor([&] { return !p.focus->sweeping(); }, 20000));
+    CHECK(p.mode == MainWindow::Capture);
+    CHECK(waitFor([&] { return button(section, "Run sweep") != nullptr && button(section, "Coarse ±1500")->isEnabled(); }, 3000));
+    CHECK(waitFor([&] { return !focuser.moving(); }, 20000));
+
     // a sweep set by hand, with neither extension nor the move at the end: it stays where it finished
     p.modes->button(MainWindow::Focus)->click();
     spins[0]->setValue(4900);

@@ -76,7 +76,9 @@ green and blue images don't come to focus at exactly the same place, and SlopCap
    bar is the best seen so far. **STOP**, above them, halts the focuser at once (and ends a sweep where it is). The
    focuser's position, STOP and step buttons are on every tab (Capture and Focus in the side column, Collimate and
    ADC at the bottom of the right one), and all of them work the same focuser.
-3. **Run a sweep:** **Run RGB focus sweep →** (or the Focus tab) opens the sweep. **Coarse ±1500** or **Fine ±350**
+3. **Run a sweep:** from the Capture tab's focuser panel, under the sharpness bars, or on the Focus tab. Run from
+   Capture, the window stays on the live preview and the curves come in over its corner; the Focus tab (**Sweep
+   settings, curves →**) has the rest of the settings, which both share. **Coarse ±1500** or **Fine ±350**
    sets the range around the focuser, and the range then follows the focuser wherever it goes, so it's always centred
    on where you are now. Set From or To yourself and the range stays put until you pick a preset again. Then **Run
    sweep**. SlopCap moves the focuser through the range, scores every frame and fits a curve per colour. If the
