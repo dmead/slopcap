@@ -22,7 +22,8 @@ std::string utc(int64_t ticks) {
     return std::format("{:%Y-%m-%d %H:%M:%S} UTC", tp);
 }
 
-std::string iso(std::chrono::system_clock::time_point tp) {
+template <class Duration>   // libc++'s file_clock::to_sys gives an __int128 duration, not system_clock's
+std::string iso(std::chrono::sys_time<Duration> tp) {
     return std::format("{:%Y-%m-%dT%H:%M:%S}Z", std::chrono::floor<std::chrono::milliseconds>(tp));
 }
 
