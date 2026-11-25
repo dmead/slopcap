@@ -168,6 +168,8 @@ struct MainWindowProbe {
     CollimationPanel*& collim{w.collim_};
     AdcPanel*& adc{w.adc_};
     MountSection*& mountSection{w.mountSection_};
+    devices::FilterWheel*& wheel{w.wheel_};
+    FilterWheelSection*& wheelSection{w.wheelSection_};
     QStackedWidget*& left{w.left_};
     QStackedWidget*& right{w.right_};
     preview::HistogramWidget*& histogram{w.histogram_};

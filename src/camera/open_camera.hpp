@@ -26,5 +26,7 @@ void prepareCameras();
 /// tests' fake SDKs live in the test program itself, so they replace that check. nullptr restores it.
 using SdkLoadCheck = bool (*)(const char* dll);
 void setSdkLoadCheck(SdkLoadCheck check);
+/// That check, for the other vendor SDKs (the filter wheel's): always true off Windows.
+bool sdkAvailable(const char* dll);
 
 }  // namespace slopcap

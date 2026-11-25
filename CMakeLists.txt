@@ -41,6 +41,7 @@ add_library(slopcap_core STATIC
   src/util/nap.cpp
   src/util/cpu_time.cpp
   src/util/memory_info.cpp
+  src/devices/wheel.cpp
 )
 target_sources(slopcap_core PRIVATE src/camera/open_camera.cpp)
 target_include_directories(slopcap_core PUBLIC src)
@@ -77,6 +78,17 @@ if(WIN32)
     target_link_libraries(slopcap_core PUBLIC ${QHY_DELAYLIB})
     target_compile_definitions(slopcap_core PUBLIC SLOPCAP_HAVE_QHY)
     set(SLOPCAP_QHY_HEADERS ${QHY_COMPAT} /usr/include/libqhy)
+  endif()
+  # ZWO's filter wheel SDK: its header ships with libasi
+  if(WIN_SDK_DLL_DIR AND EXISTS ${WIN_SDK_DLL_DIR}/EFW_filter.dll AND EXISTS /usr/include/libasi/EFW_filter.h)
+    set(CORE_SDK_INC ${CMAKE_CURRENT_BINARY_DIR}/core-sdk-include)
+    file(MAKE_DIRECTORY ${CORE_SDK_INC})
+    file(CREATE_LINK /usr/include/libasi ${CORE_SDK_INC}/libasi SYMBOLIC)
+    target_include_directories(slopcap_core PRIVATE ${CORE_SDK_INC})
+    slopcap_delay_import(${WIN_SDK_DLL_DIR}/EFW_filter.dll EFW_DELAYLIB)
+    target_link_libraries(slopcap_core PUBLIC ${EFW_DELAYLIB})
+    target_compile_definitions(slopcap_core PUBLIC SLOPCAP_HAVE_EFW)
+    set(SLOPCAP_EFW_HEADERS ${CORE_SDK_INC})
   endif()
   # Player One, ToupTek, MallinCam: the DLL from WIN_SDK_DLL_DIR (SharpCap's folder has all three), the header from the
   # INDI packages in the build image, linked into a private include folder (all of /usr/include would bring Linux's)
@@ -196,6 +208,14 @@ else()
     target_compile_definitions(slopcap_core PUBLIC SLOPCAP_HAVE_ASI)
     set(SLOPCAP_ASI_HEADERS ${SLOPCAP_ASI_INCLUDE})
   endif()
+  find_path(SLOPCAP_EFW_INCLUDE libasi/EFW_filter.h)
+  find_library(SLOPCAP_EFW_LIB EFWFilter)
+  if(SLOPCAP_EFW_INCLUDE AND SLOPCAP_EFW_LIB)
+    target_include_directories(slopcap_core PRIVATE ${SLOPCAP_EFW_INCLUDE})
+    target_link_libraries(slopcap_core PUBLIC ${SLOPCAP_EFW_LIB})
+    target_compile_definitions(slopcap_core PUBLIC SLOPCAP_HAVE_EFW)
+    set(SLOPCAP_EFW_HEADERS ${SLOPCAP_EFW_INCLUDE})
+  endif()
   find_path(SLOPCAP_QHY_INCLUDE qhyccd.h PATHS /usr/include/libqhy NO_DEFAULT_PATH)
   find_library(SLOPCAP_QHY_LIB qhyccd PATHS /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu NO_DEFAULT_PATH)
   if(SLOPCAP_QHY_INCLUDE AND SLOPCAP_QHY_LIB)
@@ -269,7 +289,7 @@ if(SLOPCAP_BUILD_GUI)
     add_executable(slopcap-mountprobe tools/mountprobe/main.cpp)
     target_link_libraries(slopcap-mountprobe PRIVATE slopcap_mounts slopcap_warnings)
     # Devices (focuser and mount over INDI, the mount also through slopcap_mounts). Qt Core + Network only.
-    add_library(slopcap_devices STATIC src/devices/indi_client.cpp src/devices/focuser.cpp src/devices/mount.cpp)
+    add_library(slopcap_devices STATIC src/devices/indi_client.cpp src/devices/focuser.cpp src/devices/mount.cpp src/devices/filter_wheel.cpp)
     set_target_properties(slopcap_devices PROPERTIES AUTOMOC ON)
     target_include_directories(slopcap_devices PUBLIC src)
     target_link_libraries(slopcap_devices PUBLIC slopcap_mounts Qt6::Core Qt6::Network PRIVATE slopcap_warnings)
@@ -290,12 +310,17 @@ if(SLOPCAP_BUILD_GUI)
     # The application's windows and panels: a library, so the tests drive the same code the program runs.
     add_library(slopcap_app STATIC src/app/main_window.cpp src/app/theme.cpp src/app/focus_controller.cpp
       src/app/focus_views.cpp src/app/collimation_panel.cpp src/app/settings_dialog.cpp src/app/mount_section.cpp src/app/mount_settings_dialog.cpp
+      src/app/filter_wheel_section.cpp
       src/app/raw_histogram.cpp src/app/session_log.cpp src/app/full_view_bar.cpp src/app/adc_panel.cpp src/app/live_inset.cpp)
     set_target_properties(slopcap_app PROPERTIES AUTOMOC ON)
     target_link_libraries(slopcap_app PUBLIC slopcap_gui slopcap_net PRIVATE slopcap_warnings)
     # qt_add_executable: with a static Qt it also links the platform plugin (qwindows) into the exe
     qt_add_executable(slopcap WIN32 MACOSX_BUNDLE src/app/main.cpp)
     set_target_properties(slopcap PROPERTIES AUTOMOC ON)
+    if(WIN32)
+      enable_language(RC)
+      target_sources(slopcap PRIVATE src/app/resources/slopcap.rc)   # the icon
+    endif()
     # The build's git version, for the session log and the remote-viewing handshake: SLOPCAP_GIT from the environment
     # when set (docker/build.sh asks git on the host: the Windows image has no git, and a worktree's .git points at a
     # host path), else git here ("unknown" outside a checkout, or when git refuses one it doesn't own).
@@ -341,7 +366,7 @@ if(SLOPCAP_BUILD_GUI)
     # One-file Windows build: the camera SDK DLLs ride inside the exe and are extracted on first use.
     if(WIN32 AND SLOPCAP_SINGLE_EXE AND WIN_SDK_DLL_DIR)
       set(sdk_files "")
-      foreach(f ASICamera2.dll qhyccd.dll PlayerOneCamera.dll toupcam.dll mallincam.dll)
+      foreach(f ASICamera2.dll qhyccd.dll PlayerOneCamera.dll toupcam.dll mallincam.dll EFW_filter.dll)
         if(EXISTS ${WIN_SDK_DLL_DIR}/${f})
           set_source_files_properties(${WIN_SDK_DLL_DIR}/${f} PROPERTIES QT_RESOURCE_ALIAS ${f})
           list(APPEND sdk_files ${WIN_SDK_DLL_DIR}/${f})
@@ -400,13 +425,19 @@ if(SLOPCAP_BUILD_TESTS)
       # executable), all under a real QApplication; needs a screen (Xvfb in docker/build.sh).
       if(TARGET Qt6::Test)
         add_executable(slopcap-app-tests tests/app_main.cpp tests/app_harness.cpp tests/test_app_window.cpp tests/test_app_focus.cpp
-          tests/test_app_panels.cpp tests/test_app_remote.cpp tests/test_app_program.cpp tests/test_app_adc.cpp tests/fakes/fake_mounts.cpp)
+          tests/test_app_panels.cpp tests/test_app_remote.cpp tests/test_app_program.cpp tests/test_app_adc.cpp tests/test_app_wheel.cpp
+          tests/fakes/fake_mounts.cpp)
         target_link_libraries(slopcap-app-tests PRIVATE slopcap_app slopcap_warnings Catch2::Catch2 Qt6::Test)
         target_compile_definitions(slopcap-app-tests PRIVATE SLOPCAP_PROGRAM="$<TARGET_FILE:slopcap>")
         add_dependencies(slopcap-app-tests slopcap)
         get_target_property(_core_defs slopcap_core INTERFACE_COMPILE_DEFINITIONS)
         # On Windows the fakes take the place of the delay-loaded DLLs (their definitions win at link time), and
         # app_main.cpp tells the backends not to look for the DLLs (SLOPCAP_FAKE_SDKS).
+        if(_core_defs MATCHES "SLOPCAP_HAVE_EFW")
+          target_sources(slopcap-app-tests PRIVATE tests/fakes/fake_efw.cpp)
+          target_include_directories(slopcap-app-tests PRIVATE ${SLOPCAP_EFW_HEADERS})
+          target_compile_definitions(slopcap-app-tests PRIVATE SLOPCAP_FAKE_EFW SLOPCAP_FAKE_SDKS)
+        endif()
         if(_core_defs MATCHES "SLOPCAP_HAVE_ASI")
           target_sources(slopcap-app-tests PRIVATE tests/fakes/fake_asi.cpp tests/test_camera_asi.cpp)
           target_include_directories(slopcap-app-tests PRIVATE ${SLOPCAP_ASI_HEADERS})

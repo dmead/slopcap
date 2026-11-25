@@ -47,6 +47,7 @@ class HistogramWidget;
 class PreviewWidget;
 }
 namespace slopcap::devices {
+class FilterWheel;
 class Mount;
 }
 namespace slopcap::net {
@@ -63,6 +64,7 @@ class FocusChartPanel;
 class FocusController;
 class FocusCurveInset;
 class FocusResultsPanel;
+class FilterWheelSection;
 class FullViewBar;
 class LiveInset;
 class MountSection;
@@ -88,6 +90,8 @@ public:
     void startFocuser(const QString& hostPort, bool sweep, int range, int step, int frames);
     /// Drive the mount with one of SlopCap's own drivers (src/mounts/open_mount.hpp), connecting now; empty: INDI's.
     void openMount(const QString& spec);
+    /// Open the filter wheel (devices/wheel.hpp: efw, efw:N, sim:N); the Filter box then turns it.
+    void openWheel(const QString& spec);
     void setNamedControl(const QString& name, double value);   ///< as if set in the UI (here, or on the server)
 
     // remote viewing (src/net): share this camera, or watch and steer another SlopCap's
@@ -137,6 +141,7 @@ private:
     void updateAutoTarget();
     void updateFocusMode();
     void updateAdcContext();                     ///< the image scale and the target's altitude, for the ADC tool
+    void followWheel();                          ///< the Filter box: the wheel's slot names, and the slot in place
     void writeSidecar(const QString& serPath, const CaptureStats& s, const QDateTime& mid) const;
     QString fileStem(const QDateTime& utc) const;
     QString cameraKey() const;
@@ -170,6 +175,8 @@ private:
     FocusController* focus_ = nullptr;
     devices::Mount* mount_ = nullptr;
     MountSection* mountSection_ = nullptr;
+    devices::FilterWheel* wheel_ = nullptr;
+    FilterWheelSection* wheelSection_ = nullptr;
     RawHistogramSection* rawHist_ = nullptr;
     // Updates that follow the frames run on shown ones (one window composite per frame), at most this often:
     // the readout histogram 10 a second; the live focus score off the Focus tab and outside sweeps (the readouts, the

@@ -139,4 +139,6 @@ void prepareCameras() {
 
 void setSdkLoadCheck(SdkLoadCheck check) { g_sdkLoadCheck = check; }
 
+bool sdkAvailable(const char* dll) { return sdkLoads(dll); }
+
 }  // namespace slopcap

@@ -4,6 +4,7 @@
 #include "app/adc_panel.hpp"
 #include "app/collimation_panel.hpp"
 #include "app/focus_controller.hpp"
+#include "app/filter_wheel_section.hpp"
 #include "app/focus_views.hpp"
 #include "app/full_view_bar.hpp"
 #include "app/live_inset.hpp"
@@ -11,6 +12,7 @@
 #include "app/raw_histogram.hpp"
 #include "app/theme.hpp"
 #include "camera/open_camera.hpp"
+#include "devices/filter_wheel.hpp"
 #include "net/discovery.hpp"
 #include "net/frame_codec.hpp"
 #include "net/remote_client.hpp"
@@ -155,6 +157,8 @@ QPixmap logo(double dpr) {
     return pm;
 }
 
+const QStringList kFilters = {"", "L", "R", "G", "B", "IR", "CH4", "UV"};   ///< the Filter box without a wheel
+
 }  // namespace
 
 // ================================================================ construction
@@ -163,6 +167,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle("SlopCap");
     focus_ = new FocusController(this);
     mount_ = new devices::Mount(focus_->indi(), this);   // same INDI server as the focuser
+    wheel_ = new devices::FilterWheel(this);
     logDevices();
     preview_ = new preview::PreviewWidget;
     collim_ = new CollimationPanel(preview_, this);
@@ -358,6 +363,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     s.mountSpec = st.value("mount/spec").toString();
     s.mountAutoConnect = st.value("mount/autoConnect", false).toBool();
     applySettings(s);
+    connect(wheel_, &devices::FilterWheel::readyChanged, this, &MainWindow::followWheel);
+    connect(wheel_, &devices::FilterWheel::namesChanged, this, &MainWindow::followWheel);
+    connect(wheel_, &devices::FilterWheel::positionChanged, this, &MainWindow::followWheel);
+    if (st.value("wheel/autoConnect", false).toBool()) {
+        const QString spec = st.value("wheel/spec", "efw").toString();
+        QTimer::singleShot(0, this, [this, spec] { wheel_->open(spec); });
+    }
     focus_->setOutputDir(outDir_);
     if (s.focuserAutoConnect) focus_->connectFocuser(s.indiServer);
     populateCameraUi();
@@ -449,7 +461,7 @@ QWidget* MainWindow::buildHeader() {
         h->addLayout(row);
     };
     combo("Target", target_, {"Auto", "Saturn", "Jupiter", "Mars", "Moon", "Sun", "Venus", "Uranus", "Neptune", "Star"});
-    combo("Filter", filter_, {"", "L", "R", "G", "B", "IR", "CH4", "UV"});
+    combo("Filter", filter_, kFilters);
     target_->setToolTip("Used in file names (WinJUPOS style) and sidecars. Auto: the Moon, Mars or an outer planet, "
                         "identified from the image and the mount");
     connect(target_, &QComboBox::currentTextChanged, this, [this] {
@@ -458,7 +470,11 @@ QWidget* MainWindow::buildHeader() {
         identifyClock_.invalidate();
         updateAutoTarget();
     });
-    filter_->setToolTip("Optional: goes into the file name, e.g. 2026-10-17-0315_4-L-Saturn.ser");
+    filter_->setToolTip("Optional: goes into the file name, e.g. 2026-10-17-0315_4-L-Saturn.ser. With a filter wheel "
+                        "connected: its slots, and picking one turns the wheel");
+    connect(filter_, &QComboBox::activated, this, [this] {
+        if (const int slot = wheel_->slotNamed(filter_->currentText()); wheel_->ready() && slot >= 0) wheel_->goTo(slot);
+    });
     for (auto* c : {target_, filter_}) connect(c, &QComboBox::currentTextChanged, this, &MainWindow::updateStats);
 
     const QString pillStyle = QString("QPushButton { border: 1px solid %1; border-radius: 13px; padding: 4px 12px 4px %5px; color: %2; font-family: '%3'; "
@@ -737,6 +753,9 @@ QWidget* MainWindow::buildCaptureRight() {
         }
     });
     v->addWidget(focuser);
+    wheelSection_ = new FilterWheelSection(*wheel_);
+    connect(wheelSection_, &FilterWheelSection::message, this, &MainWindow::message);
+    v->addWidget(wheelSection_);
     mountSection_ = new MountSection(*mount_, *focus_);
     connect(mountSection_, &MountSection::message, this, &MainWindow::message);
     v->addWidget(mountSection_);
@@ -1334,6 +1353,34 @@ void MainWindow::logDevices() {
                           << "· pulses" << (mount_->canPulse() ? "yes" : "no");
     });
     connect(mount_, &devices::Mount::failed, this, [](const QString& why) { qWarning().noquote() << "mount: failed:" << why; });
+
+    connect(wheel_, &devices::FilterWheel::readyChanged, this, [this](bool ok) {
+        qInfo().noquote() << "wheel:" << (ok ? "ready" : "closed") << wheel_->spec() << wheel_->model() << "· slots" << wheel_->names().join(',');
+    });
+    connect(wheel_, &devices::FilterWheel::arrived, this, [this](int slot) { qInfo().noquote() << "wheel: at slot" << slot + 1 << wheel_->name(slot); });
+    connect(wheel_, &devices::FilterWheel::failed, this, [](const QString& why) { qWarning().noquote() << "wheel: failed:" << why; });
+}
+
+void MainWindow::openWheel(const QString& spec) {
+    QSettings().setValue("wheel/spec", spec);
+    wheel_->open(spec);
+}
+
+void MainWindow::followWheel() {
+    const QString text = filter_->currentText();
+    const QStringList items = wheel_->ready() ? QStringList{""} + wheel_->names() : kFilters;
+    const int at = wheel_->ready() ? wheel_->position() : -1;
+    {
+        const QSignalBlocker block(filter_);
+        QStringList now;
+        for (int i = 0; i < filter_->count(); ++i) now << filter_->itemText(i);
+        if (now != items) {
+            filter_->clear();
+            filter_->addItems(items);
+        }
+        filter_->setCurrentText(at >= 0 ? wheel_->name(at) : text);
+    }
+    updateStats();
 }
 
 // ================================================================ automatic target

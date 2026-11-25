@@ -1,0 +1,3 @@
+// The program's icon on Windows (Explorer, shortcuts, the taskbar; Qt uses IDI_ICON1 for its windows too):
+// the header's logo (main_window.cpp logo()), drawn at 16 to 256 px.
+IDI_ICON1 ICON "slopcap.ico"

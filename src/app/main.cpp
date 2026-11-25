@@ -3,10 +3,12 @@
 //   slopcap --camera SPEC --serve        share the camera with other SlopCaps on the network
 //   slopcap --connect HOST[:PORT]|auto   watch (and steer) another SlopCap's camera
 //   slopcap --mount lx200:COM3           drive the mount without INDI (--list-mounts for the others)
+//   slopcap --wheel efw                  open the ZWO filter wheel (--list-wheels)
 #include "app/main_window.hpp"
 #include "app/session_log.hpp"
 #include "app/theme.hpp"
 #include "camera/open_camera.hpp"
+#include "devices/wheel.hpp"
 #include "mounts/open_mount.hpp"
 #include "preview/preview_widget.hpp"
 
@@ -37,7 +39,7 @@ namespace {
 /// as missing in the camera menu.
 void prepareCameraSdks() {
     const QString exeDir = QCoreApplication::applicationDirPath();
-    for (const char* name : {"ASICamera2.dll", "qhyccd.dll", "PlayerOneCamera.dll", "toupcam.dll", "mallincam.dll"}) {
+    for (const char* name : {"ASICamera2.dll", "qhyccd.dll", "PlayerOneCamera.dll", "toupcam.dll", "mallincam.dll", "EFW_filter.dll"}) {
         const QString beside = exeDir + "/" + name;
         if (QFile::exists(beside)) {
             LoadLibraryW(reinterpret_cast<const wchar_t*>(QDir::toNativeSeparators(beside).utf16()));
@@ -100,6 +102,8 @@ int main(int argc, char** argv) {
     args.addOption({"mount", "Drive the mount with SlopCap's own driver: lx200:COM3, onstep:tcp://HOST, nexstar:PORT, synscan:PORT, "
                     "skywatcher:PORT or skywatcher:udp://HOST, synscan-app, sim (see --list-mounts).", "SPEC"});
     args.addOption({"list-mounts", "List the mount specs and this computer's serial ports, then quit."});
+    args.addOption({"wheel", "Open the filter wheel: efw, efw:N (ZWO EFW N) or sim:N (simulated, N slots).", "SPEC"});
+    args.addOption({"list-wheels", "List the connected filter wheels, then quit."});
     args.addOption({"serve", "Share the camera with other SlopCaps on the network (remote viewing)."});
     args.addOption({"listen", "Share on this address only (implies --serve), e.g. 127.0.0.1.", "ADDRESS"});
     args.addOption({"connect", "Watch another SlopCap's camera: HOST[:PORT], or auto for the first one found on the network.", "HOST"});
@@ -114,6 +118,10 @@ int main(int argc, char** argv) {
     args.process(app);
     if (args.isSet("list-mounts")) {
         std::fputs(slopcap::mounts::mountSpecHelp().c_str(), stdout);
+        return 0;
+    }
+    if (args.isSet("list-wheels")) {
+        for (const auto& l : slopcap::listWheels()) std::printf("%s\n", l.c_str());
         return 0;
     }
     if (args.isSet("settings")) {
@@ -158,6 +166,7 @@ int main(int argc, char** argv) {
         w.startFocuser(args.value("focuser"), args.isSet("sweep"), args.value("sweep-range").toInt(), args.value("sweep-step").toInt(),
                        args.value("sweep-frames").toInt());
     if (args.isSet("mount")) w.openMount(args.value("mount"));
+    if (args.isSet("wheel")) w.openWheel(args.value("wheel"));
     if (args.isSet("quit-after")) {
         QTimer::singleShot(static_cast<int>(args.value("quit-after").toDouble() * 1000), &app, [&] {
             if (args.isSet("screenshot")) w.grab().save(args.value("screenshot"));
