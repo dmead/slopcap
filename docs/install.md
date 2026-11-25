@@ -5,9 +5,9 @@ doesn't need one to record: without it the preview stays blank and says why, and
 
 ## Windows
 
-SlopCap for Windows (64-bit Windows 10 or 11) comes as `slopcap-windows-x64.zip`, and the program in it is a single
-file, `slopcap.exe`. There is no installer and nothing else to install: Qt and the camera drivers (ZWO, QHY, Player
-One, ToupTek, MallinCam) are built into it.
+SlopCap for Windows (64-bit Windows 10 or 11, on a processor with AVX2: Intel Core since 2013, AMD since 2015) comes as
+`slopcap-windows-x64.zip`, and the program in it is a single file, `slopcap.exe`. There is no installer and nothing else
+to install: Qt and the camera drivers (ZWO, QHY, Player One, ToupTek, MallinCam) are built into it.
 
 1. Unzip it anywhere, for example to `C:\Users\<you>\slopcap\`.
 2. Double-click `slopcap.exe`. The first time, Windows may say it protected your PC from an unknown app (SlopCap isn't
@@ -31,9 +31,10 @@ port or the network (see [the mount](user-guide.md#8-the-mount-optional) in the 
 
 ## Linux (Ubuntu)
 
-**From the zip:** `slopcap-linux-x64.zip` runs as it is, with Qt and the camera drivers inside, on Ubuntu 26.04 or
-newer (or another Linux with glibc 2.43 or newer). Unzip it and run `slopcap-linux-x64/slopcap`. The INDI packages below
-still bring the cameras' USB permission rules and QHY's firmware (the zip's `udev/` folder has the rules alone).
+**From the zip:** `slopcap-linux-x64.zip` runs as it is, with Qt and the camera drivers inside, on Ubuntu 26.04 or newer
+(or another Linux with glibc 2.43 or newer), on a processor with AVX2 like the Windows build. Unzip it and run
+`slopcap-linux-x64/slopcap`. The INDI packages below still bring the cameras' USB permission rules and QHY's firmware
+(the zip's `udev/` folder has the rules alone).
 
 **From source** (see [Building and testing](developing.md) for the details):
 

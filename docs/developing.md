@@ -201,12 +201,15 @@ image instead of building it, and an environment that changed is pushed when it'
 on the host, so `build/<preset>/` and compile errors read the same from either side.
 
 **Windows.** `windows-static` builds in its own image (`docker/Dockerfile.mingw`: Fedora's MinGW-w64 GCC and a
-statically built Qt 6). With `SLOPCAP_WIN_SDK_DLL_DIR`, the camera SDK DLLs found there are embedded in the exe; on
-first use they're written to `%LOCALAPPDATA%\SlopCap\SlopCap\sdk\<hash>\` and loaded from there (a DLL placed next to
-the exe wins, to try a newer SDK). The SDKs are delay-loaded, so without them SlopCap still starts and the camera menu
-says which is missing. Settings live in the registry (`HKCU\Software\SlopCap\SlopCap`). The preview needs OpenGL 3.3;
-without it (Windows' own OpenGL 1.1, some Remote Desktop sessions) capture still works and the preview says why it's
-blank. The focuser is INDI-only for now; the mount has SlopCap's own drivers as well (no ASCOM yet).
+statically built Qt 6), for AVX2 (`-march=x86-64-v3`) like `linux-release`. MinGW's GCC only keeps the stack 16-byte
+aligned on Windows, so a spilled 32-byte AVX register written with an aligned move can crash at random (GCC bug 54412);
+`-Wa,-muse-unaligned-vector-move` has the assembler make those moves unaligned. With `SLOPCAP_WIN_SDK_DLL_DIR`, the
+camera SDK DLLs found there are embedded in the exe; on first use they're written to
+`%LOCALAPPDATA%\SlopCap\SlopCap\sdk\<hash>\` and loaded from there (a DLL placed next to the exe wins, to try a newer
+SDK). The SDKs are delay-loaded, so without them SlopCap still starts and the camera menu says which is missing.
+Settings live in the registry (`HKCU\Software\SlopCap\SlopCap`). The preview needs OpenGL 3.3; without it (Windows' own
+OpenGL 1.1, some Remote Desktop sessions) capture still works and the preview says why it's blank. The focuser is
+INDI-only for now; the mount has SlopCap's own drivers as well (no ASCOM yet).
 
 **macOS.** `tools/macos-sdks.sh` takes the ZWO (1.41), QHY (26.7.21), Player One (3.10.1), ToupTek and MallinCam
 (60.32226) SDKs from INDI's indi-3rdparty repository, the same source as the Linux packages, every file hash-checked;

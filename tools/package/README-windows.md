@@ -16,7 +16,7 @@ choose a `.ser` file: it plays as if it were a camera.
 
 ## What it needs
 
-- 64-bit Windows 10 or 11.
+- 64-bit Windows 10 or 11, on a processor with AVX2: Intel Core since 2013 (Haswell), AMD since 2015; older Atom, Celeron and Pentium chips lack it.
 - A graphics card that can do OpenGL 3.3 for the live preview (any computer from the last ten years). Without it the
   preview stays blank and says why; recording still works.
 

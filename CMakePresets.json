@@ -95,6 +95,7 @@
       "toolchainFile": "${sourceDir}/tools/camprobe/mingw-w64.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_FLAGS": "-O3 -march=x86-64-v3 -Wa,-muse-unaligned-vector-move",
         "SLOPCAP_BUILD_TESTS": "OFF",
         "CMAKE_PREFIX_PATH": "/opt/qt6-mingw-static",
         "QT_HOST_PATH": "/usr",

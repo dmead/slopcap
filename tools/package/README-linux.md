@@ -22,6 +22,7 @@ To try it without a camera, replay a recording as one: `slopcap --camera sim-loo
 ## What it needs
 
 - A 64-bit PC Linux as new as **Ubuntu 26.04** (glibc 2.43 or newer). Older systems refuse to start it.
+- A processor with AVX2: Intel Core since 2013 (Haswell), AMD since 2015; older Atom, Celeron and Pentium chips lack it.
 - A desktop session (X11 or Wayland).
 - A graphics card that can do OpenGL 3.3 for the live preview. Without it the preview stays blank and says why;
   recording still works.
