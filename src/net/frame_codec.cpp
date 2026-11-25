@@ -41,12 +41,50 @@ QJsonObject baseHeader(const FrameInfo& info, bool planes) {
 // zigzagged (small magnitudes → small numbers). 16-bit residuals go as two blocks, all low bytes then all high bytes
 // (the high bytes are mostly zero). Bits that are zero in every sample (a 12- or 14-bit ADC's padding) are shifted out
 // first. The residual bytes are deflated in up to 8 chunks at once.
+//
+// A row's samples sit in a buffer from index 1; index 0 holds the sample above the row's first, so the first sample
+// predicts from above like the others predict from their neighbours (a = b gives b, whatever c is). Before a plane's
+// first row the row above is zeros, so that row predicts from the left (b = c = 0 gives a) and its first sample is 0.
+// The encoder knows every sample, so its predictions don't depend on each other and the loop vectorizes; the decoder
+// needs each sample before the next.
 
-int predict(int a, int b, int c) {
-    const int lo = std::min(a, b), hi = std::max(a, b);
-    if (c >= hi) return lo;
-    if (c <= lo) return hi;
-    return a + b - c;
+/// JPEG-LS's median edge detector without branches: c at or above both neighbours gives the smaller, at or below both
+/// the larger, else a + b - c, which is a + b - c clamped to [min(a, b), max(a, b)]. Min and max become conditional
+/// moves or vector instructions; LLVM kept the three-way branch, which mispredicts on noisy pixels.
+int predict(int a, int b, int c) { return std::max(std::min(a, b), std::min(std::max(a, b), a + b - c)); }
+
+/// One row of a plane: its samples (every `step`th from `src`, padding shifted out) into cur[1..pw], then their
+/// zigzagged residuals into lo (and hi: the high bytes of 16-bit ones).
+template <bool Wide>
+void residualRow(const std::byte* src, int step, int pw, int shift, const int* prev, int* cur, uint8_t* lo, uint8_t* hi) {
+    cur[0] = prev[1];
+    for (int x = 0; x < pw; ++x) {
+        const std::byte* s = src + static_cast<std::size_t>(x) * static_cast<std::size_t>(step) * (Wide ? 2 : 1);
+        cur[x + 1] = (Wide ? load16(s) : std::to_integer<int>(*s)) >> shift;
+    }
+    for (int x = 1; x <= pw; ++x) {
+        const int d = cur[x] - predict(cur[x - 1], prev[x], prev[x - 1]);
+        if constexpr (Wide) {
+            const auto r = static_cast<int16_t>(d);
+            const auto z = static_cast<uint16_t>((static_cast<uint16_t>(r) << 1) ^ static_cast<uint16_t>(r >> 15));
+            lo[x - 1] = static_cast<uint8_t>(z & 0xff);
+            hi[x - 1] = static_cast<uint8_t>(z >> 8);
+        } else {
+            const auto r = static_cast<int8_t>(d);
+            lo[x - 1] = static_cast<uint8_t>((static_cast<uint8_t>(r) << 1) ^ static_cast<uint8_t>(r >> 7));
+        }
+    }
+}
+
+/// The decoder's side of residualRow: the samples back into cur[1..pw].
+template <bool Wide>
+void reconstructRow(const uint8_t* lo, const uint8_t* hi, int pw, const int* prev, int* cur) {
+    cur[0] = prev[1];
+    for (int x = 1; x <= pw; ++x) {
+        const unsigned z = Wide ? lo[x - 1] | (static_cast<unsigned>(hi[x - 1]) << 8) : lo[x - 1];
+        const int r = static_cast<int>(z >> 1) ^ -static_cast<int>(z & 1);
+        cur[x] = (predict(cur[x - 1], prev[x], prev[x - 1]) + r) & (Wide ? 0xffff : 0xff);
+    }
 }
 
 constexpr std::size_t kChunkTarget = 1 << 20;   ///< bytes of residuals per deflate chunk (at least)
@@ -59,10 +97,6 @@ EncodedFrame encodeLossless(std::span<const std::byte> pixels, const FrameInfo& 
     const int step = planes ? 2 : 1, sites = planes ? 2 : 1;
     const int pw = w / step, ph = h / step;
     const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
-    auto at = [&](int x, int y) -> int {
-        const std::byte* p = pixels.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)) * bps;
-        return wide ? load16(p) : std::to_integer<int>(*p);
-    };
 
     unsigned used = 0;   // bits set in any sample
     if (wide)
@@ -73,30 +107,18 @@ EncodedFrame encodeLossless(std::span<const std::byte> pixels, const FrameInfo& 
     auto* lo = reinterpret_cast<uint8_t*>(residuals.data());
     uint8_t* hi = wide ? lo + n : nullptr;
     std::size_t k = 0;
-    std::vector<int> prev(static_cast<std::size_t>(pw)), cur(static_cast<std::size_t>(pw));
+    std::vector<int> prev(static_cast<std::size_t>(pw) + 2), cur(static_cast<std::size_t>(pw) + 2);   // + 2: a 0-wide row still reads prev[1]
     for (int dy = 0; dy < sites; ++dy)
-        for (int dx = 0; dx < sites; ++dx)
+        for (int dx = 0; dx < sites; ++dx) {
+            std::fill(prev.begin(), prev.end(), 0);
             for (int y = 0; y < ph; ++y) {
-                for (int x = 0; x < pw; ++x) {
-                    const int v = at(x * step + dx, y * step + dy) >> shift;
-                    cur[static_cast<std::size_t>(x)] = v;
-                    int p;
-                    if (y == 0) p = x ? cur[static_cast<std::size_t>(x - 1)] : 0;
-                    else if (x == 0) p = prev[0];
-                    else p = predict(cur[static_cast<std::size_t>(x - 1)], prev[static_cast<std::size_t>(x)], prev[static_cast<std::size_t>(x - 1)]);
-                    if (wide) {
-                        const auto r = static_cast<int16_t>(v - p);
-                        const auto z = static_cast<uint16_t>((static_cast<uint16_t>(r) << 1) ^ static_cast<uint16_t>(r >> 15));
-                        lo[k] = static_cast<uint8_t>(z & 0xff);
-                        hi[k] = static_cast<uint8_t>(z >> 8);
-                    } else {
-                        const auto r = static_cast<int8_t>(v - p);
-                        lo[k] = static_cast<uint8_t>((static_cast<uint8_t>(r) << 1) ^ static_cast<uint8_t>(r >> 7));
-                    }
-                    ++k;
-                }
+                const std::byte* src = pixels.data() + (static_cast<std::size_t>(y * step + dy) * static_cast<std::size_t>(w) + static_cast<std::size_t>(dx)) * bps;
+                if (wide) residualRow<true>(src, step, pw, shift, prev.data(), cur.data(), lo + k, hi + k);
+                else residualRow<false>(src, step, pw, shift, prev.data(), cur.data(), lo + k, nullptr);
+                k += static_cast<std::size_t>(pw);
                 std::swap(prev, cur);
             }
+        }
 
     // deflate in chunks, in parallel
     const std::size_t total = static_cast<std::size_t>(residuals.size());
@@ -151,39 +173,28 @@ bool decodeLossless(const QJsonObject& h, const QByteArray& data, std::span<std:
     const uint8_t* hi = wide ? lo + n : nullptr;
 
     std::size_t k = 0;
-    std::vector<int> prev(static_cast<std::size_t>(pw)), cur(static_cast<std::size_t>(pw));
+    std::vector<int> prev(static_cast<std::size_t>(pw) + 2), cur(static_cast<std::size_t>(pw) + 2);   // + 2: a 0-wide row still reads prev[1]
     for (int dy = 0; dy < sites; ++dy)
-        for (int dx = 0; dx < sites; ++dx)
+        for (int dx = 0; dx < sites; ++dx) {
+            std::fill(prev.begin(), prev.end(), 0);
             for (int y = 0; y < ph; ++y) {
-                std::byte* row = dst.data() + static_cast<std::size_t>(y * step + dy) * static_cast<std::size_t>(w) * bps;
+                if (wide) reconstructRow<true>(lo + k, hi + k, pw, prev.data(), cur.data());
+                else reconstructRow<false>(lo + k, nullptr, pw, prev.data(), cur.data());
+                k += static_cast<std::size_t>(pw);
+                std::byte* row = dst.data() + (static_cast<std::size_t>(y * step + dy) * static_cast<std::size_t>(w) + static_cast<std::size_t>(dx)) * bps;
                 for (int x = 0; x < pw; ++x) {
-                    int p;
-                    if (y == 0) p = x ? cur[static_cast<std::size_t>(x - 1)] : 0;
-                    else if (x == 0) p = prev[0];
-                    else p = predict(cur[static_cast<std::size_t>(x - 1)], prev[static_cast<std::size_t>(x)], prev[static_cast<std::size_t>(x - 1)]);
-                    int v;
+                    const std::size_t col = static_cast<std::size_t>(x) * static_cast<std::size_t>(step);
                     if (wide) {
-                        const unsigned z = lo[k] | (static_cast<unsigned>(hi[k]) << 8);
-                        const int r = static_cast<int>(z >> 1) ^ -static_cast<int>(z & 1);
-                        v = (p + r) & 0xffff;
-                    } else {
-                        const unsigned z = lo[k];
-                        const int r = static_cast<int>(z >> 1) ^ -static_cast<int>(z & 1);
-                        v = (p + r) & 0xff;
-                    }
-                    ++k;
-                    cur[static_cast<std::size_t>(x)] = v;
-                    const std::size_t col = static_cast<std::size_t>(x * step + dx);
-                    if (wide) {
-                        const unsigned s = static_cast<unsigned>(v) << shift;
+                        const unsigned s = static_cast<unsigned>(cur[static_cast<std::size_t>(x) + 1]) << shift;
                         row[2 * col] = static_cast<std::byte>(s & 0xff);
                         row[2 * col + 1] = static_cast<std::byte>((s >> 8) & 0xff);
                     } else {
-                        row[col] = static_cast<std::byte>(v);
+                        row[col] = static_cast<std::byte>(cur[static_cast<std::size_t>(x) + 1]);
                     }
                 }
                 std::swap(prev, cur);
             }
+        }
     return true;
 }
 

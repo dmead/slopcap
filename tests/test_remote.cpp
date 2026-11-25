@@ -192,6 +192,89 @@ TEST_CASE("lossless: every frame comes back exactly") {
         const auto hd = losslessRoundTrip(px, w, h, 16, Bayer::GRBG);
         CHECK(hd["chunks"].toArray().size() > 1);
     }
+    SECTION("one pixel, one row, one column, one Bayer cell") {
+        std::uniform_int_distribution<unsigned> any(0, 65535);
+        for (const auto& [w, h] : std::vector<std::pair<int, int>>{{1, 1}, {1, 9}, {9, 1}, {2, 2}, {2, 6}, {6, 2}}) {
+            INFO(w << "x" << h);
+            std::vector<std::byte> px(static_cast<std::size_t>(w * h * 2)), px8(static_cast<std::size_t>(w * h));
+            for (std::size_t i = 0; i < px8.size(); ++i) {
+                put16(px, i, any(rng));
+                px8[i] = static_cast<std::byte>(any(rng) & 0xff);
+            }
+            losslessRoundTrip(px, w, h, 16, Bayer::RGGB);
+            losslessRoundTrip(px8, w, h, 8, Bayer::BGGR);
+        }
+    }
+}
+
+TEST_CASE("lossless: the residuals are JPEG-LS's median predictor, as SlopCap 0.1.3 and older decode them") {
+    // The predictor written out case by case, as the specification gives it, over each CFA site's plane in turn.
+    auto reference = [](const std::vector<std::byte>& px, int w, int h, int bits, bool planes) {
+        const bool wide = bits > 8;
+        const int step = planes ? 2 : 1, pw = w / step, ph = h / step;
+        auto at = [&](int x, int y) {
+            const std::size_t i = static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x);
+            return wide ? std::to_integer<int>(px[2 * i]) | std::to_integer<int>(px[2 * i + 1]) << 8 : std::to_integer<int>(px[i]);
+        };
+        const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
+        QByteArray out(static_cast<qsizetype>(n * (wide ? 2 : 1)), '\0');
+        std::size_t k = 0;
+        for (int dy = 0; dy < step; ++dy)
+            for (int dx = 0; dx < step; ++dx)
+                for (int y = 0; y < ph; ++y)
+                    for (int x = 0; x < pw; ++x) {
+                        auto s = [&](int sx, int sy) { return at(sx * step + dx, sy * step + dy); };
+                        int p;
+                        if (y == 0) p = x ? s(x - 1, 0) : 0;
+                        else if (x == 0) p = s(0, y - 1);
+                        else {
+                            const int a = s(x - 1, y), b = s(x, y - 1), c = s(x - 1, y - 1);
+                            if (c >= std::max(a, b)) p = std::min(a, b);
+                            else if (c <= std::min(a, b)) p = std::max(a, b);
+                            else p = a + b - c;
+                        }
+                        const int r = s(x, y) - p;   // zigzag of the residual wrapped to the sample's width
+                        if (wide) {
+                            const auto z = static_cast<uint16_t>(static_cast<int16_t>(r) * 2 ^ (static_cast<int16_t>(r) < 0 ? 0xffff : 0));
+                            out[static_cast<qsizetype>(k)] = static_cast<char>(z & 0xff);
+                            out[static_cast<qsizetype>(n + k)] = static_cast<char>(z >> 8);
+                        } else {
+                            const auto z = static_cast<uint8_t>(static_cast<int8_t>(r) * 2 ^ (static_cast<int8_t>(r) < 0 ? 0xff : 0));
+                            out[static_cast<qsizetype>(k)] = static_cast<char>(z);
+                        }
+                        ++k;
+                    }
+        return out;
+    };
+    auto residuals = [](const net::EncodedFrame& e) {
+        QByteArray all;
+        qsizetype pos = 0;
+        for (const auto& v : e.header["chunks"].toArray()) {
+            const auto len = static_cast<qsizetype>(v.toDouble());
+            all += qUncompress(reinterpret_cast<const uchar*>(e.data.constData()) + pos, len);
+            pos += len;
+        }
+        return all;
+    };
+    struct Case {
+        int w, h, bits;
+        Bayer bayer;
+    };
+    std::mt19937 rng(11);
+    std::uniform_int_distribution<unsigned> any(0, 65535);
+    for (const auto& [w, h, bits, bayer] : std::vector<Case>{{64, 48, 8, Bayer::RGGB}, {63, 47, 8, Bayer::None}, {64, 48, 16, Bayer::GBRG},
+                                                             {65, 33, 16, Bayer::None}, {1, 5, 16, Bayer::None}}) {
+        INFO(w << "x" << h << " " << bits << "-bit");
+        std::vector<std::byte> px(static_cast<std::size_t>(w * h * (bits > 8 ? 2 : 1)));
+        for (std::size_t i = 0; i < static_cast<std::size_t>(w * h); ++i) {   // full range (0xffff: no padding bits to shift out)
+            const unsigned v = i % 13 == 0 ? 0u : i % 13 == 1 ? 0xffffu : any(rng);
+            if (bits > 8) put16(px, i, v);
+            else px[i] = static_cast<std::byte>(v & 0xff);
+        }
+        const auto e = net::encodeFrame(px, frameInfo(w, h, bits), bayer, {net::kLossless, 1});
+        REQUIRE(e.header["shift"].toInt() == 0);
+        CHECK(residuals(e) == reference(px, w, h, bits, e.header["layout"].toString() == "planes"));
+    }
 }
 
 TEST_CASE("messages survive being split anywhere") {
